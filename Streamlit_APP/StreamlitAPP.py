@@ -72,22 +72,44 @@ pages = [
 ]
 
 with st.sidebar:
-    st.markdown("### ❤️🦅 لوحة التحكم")
+
+    st.markdown("""
+    <style>
+    div.stButton > button {
+        width: 100%;
+        text-align: right;
+        border-radius: 10px;
+        height: 45px;
+    }
+
+    .active-btn {
+        background-color: #ff4b4b !important;
+        color: white !important;
+        border: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     for page_name, icon in pages:
+
+        is_active = st.session_state.page == page_name
+
+        if is_active:
+            st.markdown(
+                f"""
+                <style>
+                div[data-testid="stButton"] button[kind="secondary"] {{
+                    background-color:#ff4b4b;
+                    color:white;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+
         if st.button(f"{icon} {page_name}", use_container_width=True):
             st.session_state.page = page_name
             st.rerun()
-
-    # sub menu فقط للاهمال
-    if st.session_state.page == "الاهمال":
-        st.markdown("---")
-        st.markdown("### خيارات الإهمال")
-
-        for sub in ["اهمال", "متابعة اهمال"]:
-            if st.button(sub, use_container_width=True):
-                st.session_state.sub_page = sub
-                st.rerun()
 
 
 # ======================
