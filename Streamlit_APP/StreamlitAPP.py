@@ -39,8 +39,8 @@ def predict_text(text):
 # PAGE CONFIG
 # ======================
 st.set_page_config(
-    page_title="Saeed Mohamed Dashboard",
-    page_icon="📊",
+    page_title="Saeed Mohamed",
+    page_icon="❤️🦅",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -72,7 +72,7 @@ pages = [
 ]
 
 with st.sidebar:
-    st.markdown("### 📊 لوحة التحكم")
+    st.markdown("### ❤️🦅 لوحة التحكم")
 
     for page_name, icon in pages:
         if st.button(f"{icon} {page_name}", use_container_width=True):
