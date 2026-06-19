@@ -125,7 +125,7 @@ if page == "الوعود القائمة":
         df = pd.read_excel(promises_file)
         portfolio = pd.read_excel(portfolio_file)
 
-        df = df.drop_duplicates(subset=["رقم الهوية"])
+        df = df.drop_duplicates(subset=["الهوية"])
 
         df["مبلغ المديونية"] = pd.to_numeric(df["مبلغ المديونية"], errors="coerce")
         df["السدادات الموثقة"] = pd.to_numeric(df["السدادات الموثقة"], errors="coerce")
@@ -133,7 +133,7 @@ if page == "الوعود القائمة":
         df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.replace("^S", "", regex=True)
         df["رقم المديونية"] = df["رقم المديونية"].astype(str).str.replace("^S", "", regex=True)
 
-        df = df[df["الحالة الرئيسية"] == "واعد بالسداد"]
+        df = df[df["الحالة الرئيسية"] == "واعد بالسداد "]
         df = df[df["الفرع"] == "Madinah"]
 
         today = pd.Timestamp.today().normalize()
