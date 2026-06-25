@@ -103,69 +103,217 @@ if page == "الوعود القائمة":
 
     st.subheader("📊 الوعود القائمة")
 
-    col1, col2 = st.columns(2)
+    promise_type = st.radio(
+        "اختر التقرير",
+        ["تابي المدينة", "تابي القانوني02"],
+        horizontal=True
+    )
 
-    with col1:
+    if promise_type == "تابي المدينة":
+
         promises_file = st.file_uploader(
-            "رفع الوعود القائمة",
+            "اضغط لرفع الوعود القائمة",
             type=["xlsx", "xls"]
         )
 
-    with col2:
         portfolio_file = st.file_uploader(
-            "رفع المحفظة",
+            "اضغط لرفع المحفظة",
             type=["xlsx", "xls"]
         )
 
-    if promises_file and portfolio_file:
+        if promises_file and portfolio_file:
+            import time
 
-        progress_bar = st.progress(0)
-        status = st.empty()
+start_time = time.time()
 
-        df = pd.read_excel(promises_file)
-        portfolio = pd.read_excel(portfolio_file)
+progress_bar = st.progress(0)
+status = st.empty()
 
-        df = df.drop_duplicates(subset=["الهوية"])
+df = pd.read_excel(promises_file)
+portfolio = pd.read_excel(portfolio_file)
 
-        df["مبلغ المديونية"] = pd.to_numeric(df["مبلغ المديونية"], errors="coerce")
-        df["السدادات الموثقة"] = pd.to_numeric(df["السدادات الموثقة"], errors="coerce")
+steps = 10
+current = 0
 
-        df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.replace("^S", "", regex=True)
-        df["رقم المديونية"] = df["رقم المديونية"].astype(str).str.replace("^S", "", regex=True)
+def update_progress():
+    global current
+    current += 1
 
-        df = df[df["الحالة الرئيسية"] == "واعد بالسداد "]
-        df = df[df["الفرع"] == "Madinah"]
+    progress = current / steps
 
-        today = pd.Timestamp.today().normalize()
+    elapsed = time.time() - start_time
 
-        df["تاريخ وعد السداد"] = pd.to_datetime(df["تاريخ وعد السداد"], errors="coerce")
-        df = df[df["تاريخ وعد السداد"].dt.normalize() == today]
+    if progress > 0:
+        remaining = elapsed * (1 - progress) / progress
+    else:
+        remaining = 0
 
-        df["آخر متابعة على العميل"] = pd.to_datetime(df["آخر متابعة على العميل"], errors="coerce")
-        df = df[df["آخر متابعة على العميل"].dt.normalize() != today]
+    progress_bar.progress(progress)
 
-        portfolio["رقم الحساب"] = portfolio["رقم الحساب"].astype(str).str.replace("^S", "", regex=True)
+    status.text(
+        f"{int(progress*100)}% | متبقي تقريباً {int(remaining)} ثانية"
+    )
 
-        mapping = portfolio[["رقم الهوية", "رقم الحساب"]].drop_duplicates()
+df["رقم الحساب"] = (
+    df["رقم الحساب"]
+    .astype(str)
+    .str.replace("^S", "", regex=True)
+)
 
-        df = df.merge(mapping, on="رقم الهوية", how="left", suffixes=("", "_portfolio"))
-        df = df[df["رقم الحساب_portfolio"].notna()]
-        df["رقم الحساب"] = df["رقم الحساب_portfolio"]
-        df.drop(columns=["رقم الحساب_portfolio"], inplace=True)
+df["رقم المديونية"] = (
+    df["رقم المديونية"]
+    .astype(str)
+    .str.replace("^S", "", regex=True)
+)
 
-        df = df[df["السدادات الموثقة"] == 0]
+update_progress()
 
-        progress_bar.progress(1.0)
-        status.text("100%")
+df["مبلغ المديونية"] = pd.to_numeric(
+    df["مبلغ المديونية"],
+    errors="coerce"
+)
 
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
+df["السدادات الموثقة"] = pd.to_numeric(
+    df["السدادات الموثقة"],
+    errors="coerce"
+)
 
-        output.seek(0)
+update_progress()
 
-        st.success("تم الانتهاء")
-        st.download_button("تحميل الملف", output, file_name="output.xlsx")
+
+
+df = df[df["السدادات الموثقة"] == 0]
+
+update_progress()
+
+
+df = df[df["الفرع"] == "Madinah"]
+
+update_progress()
+
+
+df["الحالة الرئيسية"] = (
+    df["الحالة الرئيسية"]
+    .astype(str)
+    .str.strip()
+)
+
+df = df[
+    df["الحالة الرئيسية"] == "واعد بالسداد"
+]
+
+update_progress()
+
+
+
+today = pd.Timestamp.today().normalize()
+
+df["تاريخ وعد السداد"] = pd.to_datetime(
+    df["تاريخ وعد السداد"],
+    errors="coerce"
+)
+
+df = df[
+    df["تاريخ وعد السداد"].dt.normalize() == today
+]
+
+update_progress()
+
+
+
+df["آخر متابعة على العميل"] = pd.to_datetime(
+    df["آخر متابعة على العميل"],
+    errors="coerce"
+)
+
+df = df[
+    df["آخر متابعة على العميل"].dt.normalize() != today
+]
+
+update_progress()
+
+
+
+
+portfolio["رقم الحساب"] = (
+    portfolio["رقم الحساب"]
+    .astype(str)
+    .str.replace("^S", "", regex=True)
+)
+
+mapping = (
+    portfolio[
+        ["رقم الهوية", "رقم الحساب"]
+    ]
+    .drop_duplicates()
+)
+
+df = df.merge(
+    mapping,
+    left_on="الهوية",
+    right_on="رقم الهوية",
+    how="left",
+    suffixes=("", "_portfolio")
+)
+
+update_progress()
+
+
+
+
+
+df = df[
+    df["رقم الحساب_portfolio"].notna()
+]
+
+update_progress()
+
+
+
+df["رقم الحساب"] = df["رقم الحساب_portfolio"]
+
+df.drop(
+    columns=[
+        "رقم الحساب_portfolio",
+        "رقم الهوية"
+    ],
+    inplace=True
+)
+
+update_progress()
+
+
+
+output = BytesIO()
+
+with pd.ExcelWriter(
+    output,
+    engine="openpyxl"
+) as writer:
+
+    df.to_excel(
+        writer,
+        index=False
+    )
+
+output.seek(0)
+
+progress_bar.progress(1.0)
+
+status.text("100% | تم الانتهاء")
+
+st.success(
+    f"تم الانتهاء - عدد السجلات النهائية: {len(df)}"
+)
+
+st.download_button(
+    "تحميل الملف النهائي",
+    output,
+    file_name="تابي_المدينة.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+
 
 
 # ======================
