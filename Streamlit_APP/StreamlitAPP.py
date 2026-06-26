@@ -217,8 +217,8 @@ elif page == "النشاط":
 
         df = pd.read_excel(uploaded_file)
 
-        if "Feedback" not in df.columns:
-            st.error("لا يوجد عمود Feedback")
+        if "الملاحظات" not in df.columns:
+            st.error("لا يوجد عمود الملاحظات")
         else:
 
             progress_bar = st.progress(0)
@@ -227,7 +227,7 @@ elif page == "النشاط":
             predictions = []
             total = len(df)
 
-            for i, text in enumerate(df["Feedback"]):
+            for i, text in enumerate(df["الملاحظات"]):
 
                 predictions.append(predict_text(text))
 
@@ -235,7 +235,7 @@ elif page == "النشاط":
                 progress_bar.progress(progress)
                 status.text(f"{int(progress*100)}% ({i+1}/{total})")
 
-            df["Label"] = predictions
+            df["المكالمات الناجحة"] = predictions
 
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
