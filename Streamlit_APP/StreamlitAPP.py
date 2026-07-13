@@ -104,7 +104,7 @@ if page == "الوعود القائمة":
     import pandas as pd
     from io import BytesIO
 
-    st.subheader("📊 الوعود القائمة")
+    st.subheader("📊 الوعود القائمة / الوعود المكسورة")
 
     portfolio_file = st.file_uploader(
         "رفع ملف المحفظة",
@@ -116,130 +116,163 @@ if page == "الوعود القائمة":
         progress_bar = st.progress(0)
         status = st.empty()
 
-        # =========================
+        # ==========================================
         # قراءة الملف
-        # =========================
+        # ==========================================
         df = pd.read_excel(portfolio_file)
 
-        st.write("عدد الصفوف بعد القراءة:", len(df))
-        st.write("أسماء الأعمدة:")
-        st.write(df.columns.tolist())
-
-        progress_bar.progress(10)
-
-        # =========================
-        # حذف أول صف
-        # =========================
+        # حذف أول صف بعد الـ Header
         df = df.iloc[1:].reset_index(drop=True)
 
-        st.write("بعد حذف أول صف:", len(df))
+        # تنظيف النصوص
+        text_cols = [
+            "Sales Team",
+            "Final State",
+            "حالة المعالجة - التمويل"
+        ]
 
-        progress_bar.progress(20)
+        for col in text_cols:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
 
-        # =========================
-        # حذف Sara || Op
-        # =========================
-        df["Sales Team"] = df["Sales Team"].astype(str).str.strip()
-
-        df = df[df["Sales Team"] != "Sara || Op"]
-
-        st.write("بعد Sales Team:", len(df))
-
-        progress_bar.progress(35)
-
-        # =========================
-        # تاريخ اليوم
-        # =========================
-        today = pd.Timestamp.today().normalize()
-
-        # =========================
-        # Follow up Due Date
-        # =========================
+        # تحويل التواريخ
         df["Follow up Due Date"] = pd.to_datetime(
             df["Follow up Due Date"],
             errors="coerce"
         ).dt.normalize()
 
-        st.write("قيم Follow up Due Date:")
-        st.write(df["Follow up Due Date"].head(10))
-
-        df = df[df["Follow up Due Date"] == today]
-
-        st.write("بعد Follow up Due Date:", len(df))
-
-        progress_bar.progress(55)
-
-        # =========================
-        # Follow up Last Date
-        # =========================
         df["Follow up Last Date"] = pd.to_datetime(
             df["Follow up Last Date"],
             errors="coerce"
         ).dt.normalize()
 
-        df = df[df["Follow up Last Date"].notna()]
-        df = df[df["Follow up Last Date"] != today]
+        today = pd.Timestamp.today().normalize()
 
-        st.write("بعد Follow up Last Date:", len(df))
+        progress_bar.progress(20)
 
-        progress_bar.progress(75)
+        # ==========================================
+        # فلتر مشترك
+        # ==========================================
+        base = df.copy()
 
-        # =========================
+        # حذف Sara || Op
+        base = base[
+            base["Sales Team"] != "Sara || Op"
+        ]
+
         # Final State
-        # =========================
-        df["Final State"] = df["Final State"].astype(str).str.strip()
-
-        st.write("القيم الموجودة في Final State:")
-        st.write(df["Final State"].unique())
-
-        df = df[
-            df["Final State"] == "واعد بالسداد  II تم التواصل مع العميل"
+        base = base[
+            base["Final State"].str.contains(
+                "واعد بالسداد",
+                na=False
+            )
         ]
 
-        st.write("بعد Final State:", len(df))
-
-        progress_bar.progress(90)
-
-        # =========================
         # حالة المعالجة
-        # =========================
-        df["حالة المعالجة - التمويل"] = (
-            df["حالة المعالجة - التمويل"]
-            .astype(str)
-            .str.strip()
-        )
-
-        st.write("القيم الموجودة في حالة المعالجة:")
-        st.write(df["حالة المعالجة - التمويل"].unique())
-
-        df = df[
-            df["حالة المعالجة - التمويل"] == "غير معالج"
+        base = base[
+            base["حالة المعالجة - التمويل"] == "غير معالج"
         ]
 
-        st.write("بعد حالة المعالجة:", len(df))
+        progress_bar.progress(40)
+
+        # ==========================================
+        # الوعود القائمة
+        # ==========================================
+        current = base.copy()
+
+        current = current[
+            current["Follow up Due Date"] == today
+        ]
+
+        current = current[
+            current["Follow up Last Date"].notna()
+        ]
+
+        current = current[
+            current["Follow up Last Date"] != today
+        ]
+
+        progress_bar.progress(70)
+
+        # ==========================================
+        # الوعود المكسورة
+        # ==========================================
+        broken = base.copy()
+
+        # حذف النهاردة والمستقبل
+        broken = broken[
+            broken["Follow up Due Date"] < today
+        ]
+
+        broken = broken[
+            broken["Follow up Last Date"].notna()
+        ]
+
+        # عدد أيام ترحيل الوعد
+        broken["عدد ايام ترحيل الوعد"] = (
+            broken["Follow up Last Date"]
+            - broken["Follow up Due Date"]
+        ).dt.days
+
+        # الاحتفاظ بالقيم السالبة فقط
+        broken = broken[
+            broken["عدد ايام ترحيل الوعد"] < 0
+        ]
 
         progress_bar.progress(100)
         status.text("100%")
 
-        # =========================
-        # تصدير الملف
-        # =========================
-        output = BytesIO()
+        # ==========================================
+        # ملف الوعود القائمة
+        # ==========================================
+        output_current = BytesIO()
 
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
+        with pd.ExcelWriter(
+            output_current,
+            engine="openpyxl"
+        ) as writer:
+            current.to_excel(
+                writer,
+                index=False
+            )
 
-        output.seek(0)
+        output_current.seek(0)
 
-        st.success("تم تجهيز الملف")
+        # ==========================================
+        # ملف الوعود المكسورة
+        # ==========================================
+        output_broken = BytesIO()
 
-        st.download_button(
-            "📥 تحميل الملف",
-            output,
-            file_name="Portfolio_Filtered.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        with pd.ExcelWriter(
+            output_broken,
+            engine="openpyxl"
+        ) as writer:
+            broken.to_excel(
+                writer,
+                index=False
+            )
 
+        output_broken.seek(0)
+
+        st.success("تم تجهيز الملفات بنجاح")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.download_button(
+                "📥 تحميل الوعود القائمة",
+                data=output_current,
+                file_name="الوعود_القائمة.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col2:
+            st.download_button(
+                "📥 تحميل الوعود المكسورة",
+                data=output_broken,
+                file_name="الوعود_المكسورة.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 # ======================
 # PAGE 2 - الوعود المكسورة
 # ======================
