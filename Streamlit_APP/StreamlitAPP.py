@@ -103,70 +103,83 @@ if page == "الوعود القائمة":
 
     st.subheader("📊 الوعود القائمة")
 
-    col1, col2 = st.columns(2)
+    portfolio_file = st.file_uploader(
+        "رفع ملف المحفظة",
+        type=["xlsx", "xls"]
+    )
 
-    with col1:
-        promises_file = st.file_uploader(
-            "رفع الوعود القائمة",
-            type=["xlsx", "xls"]
-        )
-
-    with col2:
-        portfolio_file = st.file_uploader(
-            "رفع المحفظة",
-            type=["xlsx", "xls"]
-        )
-
-    if promises_file and portfolio_file:
+    if portfolio_file:
 
         progress_bar = st.progress(0)
         status = st.empty()
 
-        df = pd.read_excel(promises_file)
-        portfolio = pd.read_excel(portfolio_file)
+        # قراءة الملف
+        df = pd.read_excel(portfolio_file)
+        progress_bar.progress(10)
 
-        df = df.drop_duplicates(subset=["الهوية"])
+        # حذف أول Row بعد الـ Header
+        df = df.iloc[1:].reset_index(drop=True)
+        progress_bar.progress(20)
 
-        df["مبلغ المديونية"] = pd.to_numeric(df["مبلغ المديونية"], errors="coerce")
-        df["السدادات الموثقة"] = pd.to_numeric(df["السدادات الموثقة"], errors="coerce")
+        # حذف Sara || Op
+        df = df[df["Sales Team"] != "Sara || Op"]
+        progress_bar.progress(35)
 
-        df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.replace("^S", "", regex=True)
-        df["رقم المديونية"] = df["رقم المديونية"].astype(str).str.replace("^S", "", regex=True)
-
-        df = df[df["الحالة الرئيسية"] == "واعد بالسداد "]
-        df = df[df["الفرع"] == "Madinah"]
-
+        # تاريخ اليوم
         today = pd.Timestamp.today().normalize()
 
-        df["تاريخ وعد السداد"] = pd.to_datetime(df["تاريخ وعد السداد"], errors="coerce")
-        df = df[df["تاريخ وعد السداد"].dt.normalize() == today]
+        # Follow up Due Date = اليوم
+        df["Follow up Due Date"] = pd.to_datetime(
+            df["Follow up Due Date"],
+            errors="coerce"
+        )
 
-        df["آخر متابعة على العميل"] = pd.to_datetime(df["آخر متابعة على العميل"], errors="coerce")
-        df = df[df["آخر متابعة على العميل"].dt.normalize() != today]
+        df = df[
+            df["Follow up Due Date"].dt.normalize() == today
+        ]
+        progress_bar.progress(55)
 
-        portfolio["رقم الحساب"] = portfolio["رقم الحساب"].astype(str).str.replace("^S", "", regex=True)
+        # Follow up Last Date
+        df["Follow up Last Date"] = pd.to_datetime(
+            df["Follow up Last Date"],
+            errors="coerce"
+        )
 
-        mapping = portfolio[["رقم الهوية", "رقم الحساب"]].drop_duplicates()
+        df = df[df["Follow up Last Date"].notna()]
+        df = df[
+            df["Follow up Last Date"].dt.normalize() != today
+        ]
+        progress_bar.progress(75)
 
-        df = df.merge(mapping, on="رقم الهوية", how="left", suffixes=("", "_portfolio"))
-        df = df[df["رقم الحساب_portfolio"].notna()]
-        df["رقم الحساب"] = df["رقم الحساب_portfolio"]
-        df.drop(columns=["رقم الحساب_portfolio"], inplace=True)
+        # Final State
+        df = df[
+            df["Final State"] == "واعد بالسداد II تم التواصل مع العميل"
+        ]
+        progress_bar.progress(90)
 
-        df = df[df["السدادات الموثقة"] == 0]
-
-        progress_bar.progress(1.0)
+        # حالة المعالجة - التمويل
+        df = df[
+            df["حالة المعالجة - التمويل"] == "غير معالج"
+        ]
+        progress_bar.progress(100)
         status.text("100%")
 
+        # إخراج الملف
         output = BytesIO()
+
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False)
 
         output.seek(0)
 
-        st.success("تم الانتهاء")
-        st.download_button("تحميل الملف", output, file_name="output.xlsx")
+        st.success("تم تجهيز الملف بنجاح")
 
+        st.download_button(
+            "📥 تحميل الملف",
+            output,
+            file_name="Portfolio_Filtered.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ======================
 # PAGE 2 - الوعود المكسورة
