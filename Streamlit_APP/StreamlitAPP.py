@@ -101,6 +101,9 @@ page = st.session_state.page
 # ======================
 if page == "الوعود القائمة":
 
+    import pandas as pd
+    from io import BytesIO
+
     st.subheader("📊 الوعود القائمة")
 
     portfolio_file = st.file_uploader(
@@ -113,58 +116,114 @@ if page == "الوعود القائمة":
         progress_bar = st.progress(0)
         status = st.empty()
 
+        # =========================
         # قراءة الملف
+        # =========================
         df = pd.read_excel(portfolio_file)
+
+        st.write("عدد الصفوف بعد القراءة:", len(df))
+        st.write("أسماء الأعمدة:")
+        st.write(df.columns.tolist())
+
         progress_bar.progress(10)
 
-        # حذف أول صف بعد أسماء الأعمدة
+        # =========================
+        # حذف أول صف
+        # =========================
         df = df.iloc[1:].reset_index(drop=True)
+
+        st.write("بعد حذف أول صف:", len(df))
+
         progress_bar.progress(20)
 
-        # حذف Sales Team = Sara || Op
+        # =========================
+        # حذف Sara || Op
+        # =========================
+        df["Sales Team"] = df["Sales Team"].astype(str).str.strip()
+
         df = df[df["Sales Team"] != "Sara || Op"]
+
+        st.write("بعد Sales Team:", len(df))
+
         progress_bar.progress(35)
 
+        # =========================
         # تاريخ اليوم
+        # =========================
         today = pd.Timestamp.today().normalize()
 
-        # Follow up Due Date = تاريخ اليوم
-        df["Follow up Due Date"] = (
-            pd.to_datetime(df["Follow up Due Date"], errors="coerce")
-            .dt.normalize()
-        )
+        # =========================
+        # Follow up Due Date
+        # =========================
+        df["Follow up Due Date"] = pd.to_datetime(
+            df["Follow up Due Date"],
+            errors="coerce"
+        ).dt.normalize()
+
+        st.write("قيم Follow up Due Date:")
+        st.write(df["Follow up Due Date"].head(10))
 
         df = df[df["Follow up Due Date"] == today]
+
+        st.write("بعد Follow up Due Date:", len(df))
+
         progress_bar.progress(55)
 
+        # =========================
         # Follow up Last Date
-        df["Follow up Last Date"] = (
-            pd.to_datetime(df["Follow up Last Date"], errors="coerce")
-            .dt.normalize()
-        )
+        # =========================
+        df["Follow up Last Date"] = pd.to_datetime(
+            df["Follow up Last Date"],
+            errors="coerce"
+        ).dt.normalize()
 
-        # حذف الـ Null
         df = df[df["Follow up Last Date"].notna()]
-
-        # حذف تاريخ اليوم
         df = df[df["Follow up Last Date"] != today]
+
+        st.write("بعد Follow up Last Date:", len(df))
+
         progress_bar.progress(75)
 
+        # =========================
         # Final State
+        # =========================
+        df["Final State"] = df["Final State"].astype(str).str.strip()
+
+        st.write("القيم الموجودة في Final State:")
+        st.write(df["Final State"].unique())
+
         df = df[
             df["Final State"] == "واعد بالسداد II تم التواصل مع العميل"
         ]
+
+        st.write("بعد Final State:", len(df))
+
         progress_bar.progress(90)
 
-        # حالة المعالجة - التمويل
+        # =========================
+        # حالة المعالجة
+        # =========================
+        df["حالة المعالجة - التمويل"] = (
+            df["حالة المعالجة - التمويل"]
+            .astype(str)
+            .str.strip()
+        )
+
+        st.write("القيم الموجودة في حالة المعالجة:")
+        st.write(df["حالة المعالجة - التمويل"].unique())
+
         df = df[
             df["حالة المعالجة - التمويل"] == "غير معالج"
         ]
-        progress_bar.progress(100)
 
+        st.write("بعد حالة المعالجة:", len(df))
+
+        progress_bar.progress(100)
         status.text("100%")
 
-        # إخراج الملف
+        # =========================
+        # تصدير الملف
+        # =========================
         output = BytesIO()
 
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -172,13 +231,13 @@ if page == "الوعود القائمة":
 
         output.seek(0)
 
-        st.success("تم تجهيز الملف بنجاح")
+        st.success("تم تجهيز الملف")
 
         st.download_button(
             "📥 تحميل الملف",
-            data=output,
+            output,
             file_name="Portfolio_Filtered.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
 # ======================
