@@ -193,7 +193,7 @@ if page == "الوعود القائمة":
         st.write(df["Final State"].unique())
 
         df = df[
-            df["Final State"] == "واعد بالسداد II تم التواصل مع العميل"
+            df["Final State"] == "واعد بالسداد  II تم التواصل مع العميل"
         ]
 
         st.write("بعد Final State:", len(df))
