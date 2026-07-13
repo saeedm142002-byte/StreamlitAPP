@@ -208,11 +208,26 @@ if page == "الوعود القائمة":
             broken["Follow up Last Date"].notna()
         ]
 
-        # عدد أيام ترحيل الوعد
-        broken["عدد ايام ترحيل الوعد"] = (
+        # حساب عدد أيام ترحيل الوعد
+        days_diff = (
             broken["Follow up Last Date"]
             - broken["Follow up Due Date"]
         ).dt.days
+        
+        # مكان عمود Follow up Last Date
+        insert_position = broken.columns.get_loc("Follow up Last Date") + 1
+        
+        # إضافة العمود بعده مباشرة
+        broken.insert(
+            insert_position,
+            "عدد ايام ترحيل الوعد",
+            days_diff
+        )
+        
+        # الاحتفاظ بالقيم السالبة فقط
+        broken = broken[
+            broken["عدد ايام ترحيل الوعد"] < 0
+        ]
 
         # الاحتفاظ بالقيم السالبة فقط
         broken = broken[
