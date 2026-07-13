@@ -117,38 +117,37 @@ if page == "الوعود القائمة":
         df = pd.read_excel(portfolio_file)
         progress_bar.progress(10)
 
-        # حذف أول Row بعد الـ Header
+        # حذف أول صف بعد أسماء الأعمدة
         df = df.iloc[1:].reset_index(drop=True)
         progress_bar.progress(20)
 
-        # حذف Sara || Op
+        # حذف Sales Team = Sara || Op
         df = df[df["Sales Team"] != "Sara || Op"]
         progress_bar.progress(35)
 
         # تاريخ اليوم
         today = pd.Timestamp.today().normalize()
 
-        # Follow up Due Date = اليوم
-        df["Follow up Due Date"] = pd.to_datetime(
-            df["Follow up Due Date"],
-            errors="coerce"
+        # Follow up Due Date = تاريخ اليوم
+        df["Follow up Due Date"] = (
+            pd.to_datetime(df["Follow up Due Date"], errors="coerce")
+            .dt.normalize()
         )
 
-        df = df[
-            df["Follow up Due Date"].dt.normalize() == today
-        ]
+        df = df[df["Follow up Due Date"] == today]
         progress_bar.progress(55)
 
         # Follow up Last Date
-        df["Follow up Last Date"] = pd.to_datetime(
-            df["Follow up Last Date"],
-            errors="coerce"
+        df["Follow up Last Date"] = (
+            pd.to_datetime(df["Follow up Last Date"], errors="coerce")
+            .dt.normalize()
         )
 
+        # حذف الـ Null
         df = df[df["Follow up Last Date"].notna()]
-        df = df[
-            df["Follow up Last Date"].dt.normalize() != today
-        ]
+
+        # حذف تاريخ اليوم
+        df = df[df["Follow up Last Date"] != today]
         progress_bar.progress(75)
 
         # Final State
@@ -162,6 +161,7 @@ if page == "الوعود القائمة":
             df["حالة المعالجة - التمويل"] == "غير معالج"
         ]
         progress_bar.progress(100)
+
         status.text("100%")
 
         # إخراج الملف
@@ -176,9 +176,9 @@ if page == "الوعود القائمة":
 
         st.download_button(
             "📥 تحميل الملف",
-            output,
+            data=output,
             file_name="Portfolio_Filtered.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
 # ======================
