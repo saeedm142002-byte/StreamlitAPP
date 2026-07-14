@@ -494,19 +494,19 @@ if operation == "1️⃣ توزيع محفظة محصل مستقيل":
     )
     """
 
-    if run_distribution:
+if run_distribution:
 
-        if len(departed_collectors) == 0:
-            st.warning("اختر محصل واحد على الأقل.")
-            st.stop()
+    if len(departed_collectors) == 0:
+        st.warning("اختر محصل واحد على الأقل.")
+        st.stop()
 
-        departed_df = base[
-            base["Collector"].isin(departed_collectors)
-        ].copy()
+    departed_df = base[
+        base["Collector"].isin(departed_collectors)
+    ].copy()
 
-        remaining_df = base[
-            ~base["Collector"].isin(departed_collectors)
-        ].copy()
+    remaining_df = base[
+        ~base["Collector"].isin(departed_collectors)
+    ].copy()
 
         # من هنا يبدأ باقي كود التوزيع
         # من هنا يبدأ باقي كود التوزيعمن هنا يبدأ باقي كود التوزيع
