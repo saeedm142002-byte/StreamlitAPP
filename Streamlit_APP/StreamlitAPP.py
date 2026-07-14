@@ -559,6 +559,7 @@ elif page == "التوزيع":
                 # ============================================
         # تجميع العملاء المراد توزيعهم
         # ============================================
+        customers = []
 
        
 
@@ -577,7 +578,6 @@ elif page == "التوزيع":
             )
 
         customers_df = pd.DataFrame(customers)
-        customers = []
 
         customers_df = pd.DataFrame(customers)
     
