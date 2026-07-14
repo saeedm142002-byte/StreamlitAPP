@@ -367,7 +367,7 @@ elif page == "النشاط":
 elif page == "التوزيع":
 
     st.subheader("📦 توزيع المحافظ")
-    uploaded_file = st.file_uploader(
+    df = st.file_uploader(
     "ارفع ملف Excel",
     type=["xlsx"]
 )
