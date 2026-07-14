@@ -367,19 +367,17 @@ elif page == "النشاط":
 elif page == "التوزيع":
 
     st.subheader("📦 توزيع المحافظ")
-    df = st.file_uploader(
-    "ارفع ملف Excel",
-    type=["xlsx"]
-)
-
-    if df is None:
+    uploaded_file = st.file_uploader(
+        "ارفع ملف Excel",
+        type=["xlsx"]
+    )
+    
+    if uploaded_file is None:
         st.warning("برجاء رفع الملف أولاً.")
         st.stop()
-
-    # =========================
-    # تجهيز البيانات
-    # =========================
-
+    
+    df = pd.read_excel(uploaded_file)
+    
     base = df.copy()
 
     # حذف فريق Sara || Op
