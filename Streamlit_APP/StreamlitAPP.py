@@ -486,29 +486,29 @@ elif page == "التوزيع":
 
     if btn_resign:
 
-    departed_collectors = st.multiselect(
-        "اختر المحصلين المستقيلين",
-        collectors
-    )
-    
-    run_distribution = st.button(
-        "🚀 تنفيذ التوزيع",
-        use_container_width=True,
-        type="primary"
-    )
-    
-    if run_distribution:
-    
-        if len(departed_collectors) == 0:
-    
-            st.warning("برجاء اختيار محصل واحد على الأقل.")
-            st.stop()
-    
-        st.success(
-            f"عدد المحصلين المختارين: {len(departed_collectors)}"
+        departed_collectors = st.multiselect(
+            "اختر المحصلين المستقيلين",
+            collectors
         )
-    
-        st.write(departed_collectors)
+        
+        run_distribution = st.button(
+            "🚀 تنفيذ التوزيع",
+            use_container_width=True,
+            type="primary"
+        )
+        
+        if run_distribution:
+        
+            if len(departed_collectors) == 0:
+        
+                st.warning("برجاء اختيار محصل واحد على الأقل.")
+                st.stop()
+        
+            st.success(
+                f"عدد المحصلين المختارين: {len(departed_collectors)}"
+            )
+        
+            st.write(departed_collectors)
     
         # ============================================
         # من هنا يبدأ كود التوزيع
