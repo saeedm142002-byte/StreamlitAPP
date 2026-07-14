@@ -63,7 +63,7 @@ pages = [
     ("الوعود المكسورة", "🚨"),
     ("الاهمال", "⚠️"),
     ("التغطية", "🌐"),
-    ("الانتاجية", "📈"),
+    ("التوزيع", "📈"),
     ("النشاط", "⚡"),
     ("اخطاء الحالات", "❌"),
     ("الاوتودايلر", "📞"),
@@ -364,6 +364,621 @@ elif page == "النشاط":
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
 # ======================
+elif page == "التوزيع":
+
+    st.subheader("📦 توزيع المحافظ")
+
+    if uploaded_file is None:
+        st.warning("برجاء رفع الملف أولاً.")
+        st.stop()
+
+    # =========================
+    # تجهيز البيانات
+    # =========================
+
+    base = df.copy()
+
+    # حذف فريق Sara || Op
+    base = base[
+        base["Sales Team"] != "Sara || Op"
+    ]
+
+    # غير معالج فقط
+    base = base[
+        base["حالة المعالجة - التمويل"] == "غير معالج"
+    ]
+
+    if base.empty:
+        st.warning("لا توجد بيانات بعد الفلترة.")
+        st.stop()
+
+    # =========================
+    # أسماء المحصلين
+    # =========================
+
+    collectors = sorted(
+        base["Collector"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    st.markdown("### المحصلين الحاليين")
+
+    st.dataframe(
+        pd.DataFrame(
+            {
+                "Collector": collectors
+            }
+        ),
+        use_container_width=True
+    )
+
+    # =========================
+    # إحصائيات كل محصل
+    # =========================
+
+    collector_stats = (
+        base
+        .groupby("Collector")
+        .agg(
+            Accounts=(
+                "Account Number",
+                "nunique"
+            ),
+            Customers=(
+                "Debitor",
+                "nunique"
+            ),
+            Debt=(
+                "Net Amount",
+                "sum"
+            )
+        )
+        .reset_index()
+    )
+
+    collector_stats["Debt"] = (
+        collector_stats["Debt"]
+        .round(2)
+    )
+
+    st.markdown("## إحصائيات المحافظ الحالية")
+
+    st.dataframe(
+        collector_stats,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # =========================
+    # الأزرار
+    # =========================
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        btn_resign = st.button(
+            "1️⃣ توزيع محفظة محصل مستقيل",
+            use_container_width=True
+        )
+
+    with col2:
+
+        btn_new = st.button(
+            "2️⃣ إسناد محفظة لموظف جديد",
+            use_container_width=True
+        )
+
+    with col3:
+
+        btn_transfer = st.button(
+            "3️⃣ إسناد محفظة من موظف مستقيل لموظف جديد",
+            use_container_width=True
+        )
+
+    # =========================
+    # اختيار المستقيلين
+    # =========================
+
+    if btn_resign:
+
+        departed_collectors = st.multiselect(
+            "اختر المحصلين المستقيلين",
+            collectors
+        )
+
+        if len(departed_collectors) == 0:
+
+            st.info("اختر محصل واحد على الأقل.")
+
+            st.stop()
+
+        st.success(
+            f"عدد المحصلين المختارين : {len(departed_collectors)}"
+        )
+
+        st.write(departed_collectors)
+
+        # =========================
+        # المحافظ
+        # =========================
+
+        departed_df = base[
+            base["Collector"]
+            .isin(departed_collectors)
+        ].copy()
+
+        remaining_df = base[
+            ~base["Collector"]
+            .isin(departed_collectors)
+        ].copy()
+
+        st.markdown("## بيانات المحفظة")
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            st.metric(
+                "عدد صفوف المستقيلين",
+                len(departed_df)
+            )
+
+        with c2:
+
+            st.metric(
+                "عدد صفوف المحصلين الباقيين",
+                len(remaining_df)
+            )
+                # ============================================
+        # تجميع العملاء المراد توزيعهم
+        # ============================================
+
+        customers = []
+
+        for debitor, grp in departed_df.groupby("Debitor"):
+
+            customers.append(
+                {
+                    "Debitor": debitor,
+
+                    "Debt": grp["Net Amount"].sum(),
+
+                    "Accounts": grp["Account Number"].nunique(),
+
+                    "Rows": grp.index.tolist()
+                }
+            )
+
+        customers_df = pd.DataFrame(customers)
+
+        # ترتيب من أكبر مديونية لأصغر
+        customers_df = customers_df.sort_values(
+            by="Debt",
+            ascending=False
+        ).reset_index(drop=True)
+
+        st.markdown("### العملاء المطلوب توزيعهم")
+
+        st.dataframe(
+            customers_df[
+                [
+                    "Debitor",
+                    "Accounts",
+                    "Debt"
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ============================================
+        # إحصائيات المحصلين المتبقين
+        # ============================================
+
+        remaining_stats = (
+            remaining_df
+            .groupby("Collector")
+            .agg(
+                Accounts=(
+                    "Account Number",
+                    "nunique"
+                ),
+                Customers=(
+                    "Debitor",
+                    "nunique"
+                ),
+                Debt=(
+                    "Net Amount",
+                    "sum"
+                )
+            )
+            .reset_index()
+        )
+
+        remaining_stats["Debt"] = (
+            remaining_stats["Debt"]
+            .round(2)
+        )
+
+        st.markdown("### المحافظ قبل التوزيع")
+
+        st.dataframe(
+            remaining_stats,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ============================================
+        # إنشاء قاموس الإحصائيات
+        # ============================================
+
+        stats = {}
+
+        for _, row in remaining_stats.iterrows():
+
+            stats[row["Collector"]] = {
+
+                "Debt": float(row["Debt"]),
+
+                "Customers": int(row["Customers"]),
+
+                "Accounts": int(row["Accounts"])
+
+            }
+
+        # ============================================
+        # إجماليات بعد التوزيع
+        # ============================================
+
+        total_debt = (
+            remaining_df["Net Amount"].sum()
+            +
+            departed_df["Net Amount"].sum()
+        )
+
+        total_customers = (
+            remaining_df["Debitor"].nunique()
+            +
+            departed_df["Debitor"].nunique()
+        )
+
+        total_accounts = (
+            remaining_df["Account Number"].nunique()
+            +
+            departed_df["Account Number"].nunique()
+        )
+
+        collectors_count = len(stats)
+
+        target_debt = total_debt / collectors_count
+
+        target_customers = (
+            total_customers / collectors_count
+        )
+
+        target_accounts = (
+            total_accounts / collectors_count
+        )
+
+        st.markdown("### الهدف لكل محصل")
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+
+            st.metric(
+                "Target Debt",
+                f"{target_debt:,.0f}"
+            )
+
+        with c2:
+
+            st.metric(
+                "Target Customers",
+                round(target_customers, 1)
+            )
+
+        with c3:
+
+            st.metric(
+                "Target Accounts",
+                round(target_accounts, 1)
+            )
+
+                # ============================================
+        # توزيع العملاء
+        # ============================================
+
+        assignments = {}
+
+        progress = st.progress(0)
+
+        total_customers_to_assign = len(customers_df)
+
+        for i, customer in customers_df.iterrows():
+
+            customer_name = customer["Debitor"]
+
+            customer_debt = float(customer["Debt"])
+
+            customer_accounts = int(customer["Accounts"])
+
+            best_collector = None
+
+            best_score = None
+
+            # ============================================
+            # اختيار أفضل محصل
+            # ============================================
+
+            for collector in stats.keys():
+
+                current = stats[collector]
+
+                new_debt = current["Debt"] + customer_debt
+
+                new_customers = current["Customers"] + 1
+
+                new_accounts = current["Accounts"] + customer_accounts
+
+                debt_diff = abs(
+                    new_debt - target_debt
+                )
+
+                customer_diff = abs(
+                    new_customers - target_customers
+                )
+
+                account_diff = abs(
+                    new_accounts - target_accounts
+                )
+
+                score = (
+
+                    debt_diff
+
+                    +
+
+                    (customer_diff * 5000)
+
+                    +
+
+                    (account_diff * 3000)
+
+                )
+
+                if (
+
+                    best_score is None
+
+                    or
+
+                    score < best_score
+
+                ):
+
+                    best_score = score
+
+                    best_collector = collector
+
+            # ============================================
+            # حفظ التوزيع
+            # ============================================
+
+            assignments[
+                customer_name
+            ] = best_collector
+
+                        # ============================================
+            # تحديث إحصائيات المحصل المختار
+            # ============================================
+
+            stats[best_collector]["Debt"] += customer_debt
+
+            stats[best_collector]["Customers"] += 1
+
+            stats[best_collector]["Accounts"] += customer_accounts
+
+            # تحديث شريط التقدم
+            progress.progress(
+                int(
+                    ((i + 1) / total_customers_to_assign) * 100
+                )
+            )
+
+        # ============================================
+        # انتهى التوزيع
+        # ============================================
+
+        st.success("تم الانتهاء من توزيع العملاء.")
+
+        # ============================================
+        # إنشاء عمود New Collector
+        # ============================================
+
+        result = base.copy()
+
+        result["New Collector"] = result["Collector"]
+
+        mask = result["Collector"].isin(
+            departed_collectors
+        )
+
+        result.loc[
+            mask,
+            "New Collector"
+        ] = result.loc[
+            mask,
+            "Debitor"
+        ].map(assignments)
+
+        # ============================================
+        # عرض أول النتائج
+        # ============================================
+
+        st.markdown("### أول 20 صف بعد التوزيع")
+
+        st.dataframe(
+            result[
+                [
+                    "Collector",
+                    "New Collector",
+                    "Debitor",
+                    "Account Number",
+                    "Net Amount"
+                ]
+            ].head(20),
+            use_container_width=True,
+            hide_index=True
+        )
+                # ============================================
+        # إحصائيات بعد التوزيع
+        # ============================================
+
+        after_stats = (
+            result
+            .groupby("New Collector")
+            .agg(
+                Accounts=(
+                    "Account Number",
+                    "nunique"
+                ),
+                Customers=(
+                    "Debitor",
+                    "nunique"
+                ),
+                Debt=(
+                    "Net Amount",
+                    "sum"
+                )
+            )
+            .reset_index()
+        )
+
+        after_stats["Debt"] = (
+            after_stats["Debt"]
+            .round(2)
+        )
+
+        st.markdown("## المحافظ بعد التوزيع")
+
+        st.dataframe(
+            after_stats,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ============================================
+        # التحقق من عدم تقسيم العميل
+        # ============================================
+
+        validation = (
+            result
+            .groupby("Debitor")["New Collector"]
+            .nunique()
+            .reset_index(name="Collectors")
+        )
+
+        split_customers = validation[
+            validation["Collectors"] > 1
+        ]
+
+        if len(split_customers) == 0:
+
+            st.success(
+                "✅ لم يتم تقسيم أي عميل بين أكثر من محصل."
+            )
+
+        else:
+
+            st.error(
+                f"❌ يوجد {len(split_customers)} عميل تم تقسيمهم."
+            )
+
+            st.dataframe(split_customers)
+
+        # ============================================
+        # مقارنة قبل وبعد
+        # ============================================
+
+        before_compare = remaining_stats.copy()
+
+        before_compare = before_compare.rename(
+            columns={
+                "Collector": "New Collector",
+                "Debt": "Debt Before",
+                "Customers": "Customers Before",
+                "Accounts": "Accounts Before"
+            }
+        )
+
+        compare = before_compare.merge(
+            after_stats.rename(
+                columns={
+                    "Debt": "Debt After",
+                    "Customers": "Customers After",
+                    "Accounts": "Accounts After"
+                }
+            ),
+            on="New Collector",
+            how="outer"
+        ).fillna(0)
+
+        st.markdown("## مقارنة قبل / بعد")
+
+        st.dataframe(
+            compare,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # ============================================
+        # تنزيل الملف
+        # ============================================
+
+        output = io.BytesIO()
+
+        with pd.ExcelWriter(
+            output,
+            engine="openpyxl"
+        ) as writer:
+
+            result.to_excel(
+                writer,
+                index=False,
+                sheet_name="Distribution"
+            )
+
+            after_stats.to_excel(
+                writer,
+                index=False,
+                sheet_name="Summary"
+            )
+
+            compare.to_excel(
+                writer,
+                index=False,
+                sheet_name="Comparison"
+            )
+
+        output.seek(0)
+
+        st.download_button(
+            label="📥 تحميل ملف التوزيع",
+            data=output,
+            file_name="Collector_Distribution.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        
+
+
+
+
+
 elif page == "اخطاء الحالات":
     st.subheader("❌ اخطاء الحالات")
 
