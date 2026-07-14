@@ -532,6 +532,10 @@ elif page == "التوزيع":
             base["Collector"]
             .isin(departed_collectors)
         ].copy()
+        st.write("عدد صفوف departed_df:", len(departed_df))
+        st.write("المحصلين المختارين:", departed_collectors)
+        st.write("أول 5 صفوف:")
+        st.dataframe(departed_df.head())
 
         remaining_df = base[
             ~base["Collector"]
@@ -577,7 +581,6 @@ elif page == "التوزيع":
                 }
             )
 
-        customers_df = pd.DataFrame(customers)
 
         customers_df = pd.DataFrame(customers)
     
