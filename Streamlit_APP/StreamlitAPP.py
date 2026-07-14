@@ -518,7 +518,7 @@ if operation == "1️⃣ توزيع محفظة محصل مستقيل":
 
         departed_collectors = st.multiselect(
             "اختر المحصلين المستقيلين",
-            collectors
+            collectors ,
             key="departed_collectors"
         )
         
