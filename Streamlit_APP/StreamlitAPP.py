@@ -372,7 +372,7 @@ elif page == "التوزيع":
     type=["xlsx"]
 )
 
-    if uploaded_file is None:
+    if df is None:
         st.warning("برجاء رفع الملف أولاً.")
         st.stop()
 
