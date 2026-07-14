@@ -555,13 +555,7 @@ elif page == "التوزيع":
                 "عدد صفوف المحصلين الباقيين",
                 len(remaining_df)
             )
-        customers = []
 
-        customers_df = pd.DataFrame(customers)
-    
-        st.write("عدد العملاء:", len(customers_df))
-        st.write(customers_df.columns.tolist())
-        st.dataframe(customers_df.head())
                 # ============================================
         # تجميع العملاء المراد توزيعهم
         # ============================================
@@ -583,6 +577,13 @@ elif page == "التوزيع":
             )
 
         customers_df = pd.DataFrame(customers)
+        customers = []
+
+        customers_df = pd.DataFrame(customers)
+    
+        st.write("عدد العملاء:", len(customers_df))
+        st.write(customers_df.columns.tolist())
+        st.dataframe(customers_df.head())
 
         # ترتيب من أكبر مديونية لأصغر
         customers_df = customers_df.sort_values(
