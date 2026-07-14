@@ -514,7 +514,7 @@ if operation == "1️⃣ توزيع محفظة محصل مستقيل":
     # اختيار المستقيلين
     # =========================
 
-    if btn_resign:
+    if operation:
 
         departed_collectors = st.multiselect(
             "اختر المحصلين المستقيلين",
