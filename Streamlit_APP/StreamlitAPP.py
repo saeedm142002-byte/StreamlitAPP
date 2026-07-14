@@ -519,6 +519,7 @@ if operation == "1️⃣ توزيع محفظة محصل مستقيل":
         departed_collectors = st.multiselect(
             "اختر المحصلين المستقيلين",
             collectors
+            key="departed_collectors"
         )
         
         run_distribution = st.button(
