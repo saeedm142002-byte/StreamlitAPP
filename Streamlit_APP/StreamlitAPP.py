@@ -555,6 +555,12 @@ elif page == "التوزيع":
                 "عدد صفوف المحصلين الباقيين",
                 len(remaining_df)
             )
+
+         customers_df = pd.DataFrame(customers)
+    
+        st.write("عدد العملاء:", len(customers_df))
+        st.write(customers_df.columns.tolist())
+        st.dataframe(customers_df.head())
                 # ============================================
         # تجميع العملاء المراد توزيعهم
         # ============================================
