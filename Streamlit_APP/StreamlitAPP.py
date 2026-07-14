@@ -210,7 +210,7 @@ if page == "الوعود القائمة":
 
         # حساب عدد أيام ترحيل الوعد
         days_diff = (
-            broken["Follow up Last Date"]
+            today
             - broken["Follow up Due Date"]
         ).dt.days
         
