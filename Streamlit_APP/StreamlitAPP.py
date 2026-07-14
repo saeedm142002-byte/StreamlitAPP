@@ -465,82 +465,61 @@ elif page == "التوزيع":
     # توزيع محفظة محصل مستقيل
     # ==================================================
 
-    st.markdown("## نوع العملية")
-    
-    operation = st.radio(
-        "اختر العملية",
-        [
-            "1️⃣ توزيع محفظة محصل مستقيل",
-            "2️⃣ إسناد محفظة لموظف جديد",
-            "3️⃣ إسناد محفظة من موظف مستقيل لموظف جديد"
-        ],
-        key="distribution_operation"
-    )
+st.markdown("## نوع العملية")
 
-    # ==================================================
-    # توزيع محفظة محصل مستقيل
-    # ==================================================
-"""
+operation = st.radio(
+    "اختر العملية",
+    [
+        "1️⃣ توزيع محفظة محصل مستقيل",
+        "2️⃣ إسناد محفظة لموظف جديد",
+        "3️⃣ إسناد محفظة من موظف مستقيل لموظف جديد"
+    ],
+    key="distribution_operation"
+)
+
+# ==================================================
+# توزيع محفظة محصل مستقيل
+# ==================================================
+
 if operation == "1️⃣ توزيع محفظة محصل مستقيل":
 
     departed_collectors = st.multiselect(
         "اختر المحصلين المستقيلين",
-        collectors
+        collectors,
+        key="departed_collectors"
     )
 
     run_distribution = st.button(
         "🚀 تنفيذ التوزيع",
-        type="primary"
+        type="primary",
+        width="stretch"
     )
-    """
 
-if run_distribution:
+    if run_distribution:
 
-    if len(departed_collectors) == 0:
-        st.warning("اختر محصل واحد على الأقل.")
-        st.stop()
+        if len(departed_collectors) == 0:
+            st.warning("برجاء اختيار محصل واحد على الأقل.")
+            st.stop()
 
-    departed_df = base[
-        base["Collector"].isin(departed_collectors)
-    ].copy()
-
-    remaining_df = base[
-        ~base["Collector"].isin(departed_collectors)
-    ].copy()
-
-        # من هنا يبدأ باقي كود التوزيع
-        # من هنا يبدأ باقي كود التوزيعمن هنا يبدأ باقي كود التوزيع
-
-    # =========================
-    # اختيار المستقيلين
-    # =========================
-
-    if operation:
-
-        departed_collectors = st.multiselect(
-            "اختر المحصلين المستقيلين",
-            collectors ,
-            key="departed_collectors"
+        st.success(
+            f"عدد المحصلين المختارين: {len(departed_collectors)}"
         )
-        
-        run_distribution = st.button(
-            "🚀 تنفيذ التوزيع",
-            use_container_width=True,
-            type="primary"
-        )
-        
-        if run_distribution:
-        
-            if len(departed_collectors) == 0:
-        
-                st.warning("برجاء اختيار محصل واحد على الأقل.")
-                st.stop()
-        
-            st.success(
-                f"عدد المحصلين المختارين: {len(departed_collectors)}"
-            )
-        
-            st.write(departed_collectors)
+
+        st.write(departed_collectors)
+
+        # =========================
+        # المحافظ
+        # =========================
+
+        departed_df = base[
+            base["Collector"].isin(departed_collectors)
+        ].copy()
+
+        remaining_df = base[
+            ~base["Collector"].isin(departed_collectors)
+        ].copy()
+
+        # من هنا يبدأ باقي كود التوزيع...
     
         # ============================================
         # من هنا يبدأ كود التوزيع
