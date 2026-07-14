@@ -558,9 +558,9 @@ elif page == "التوزيع":
 
          customers_df = pd.DataFrame(customers)
     
-        st.write("عدد العملاء:", len(customers_df))
-        st.write(customers_df.columns.tolist())
-        st.dataframe(customers_df.head())
+         st.write("عدد العملاء:", len(customers_df))
+         st.write(customers_df.columns.tolist())
+         st.dataframe(customers_df.head())
                 # ============================================
         # تجميع العملاء المراد توزيعهم
         # ============================================
