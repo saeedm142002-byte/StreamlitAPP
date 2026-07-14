@@ -367,6 +367,10 @@ elif page == "النشاط":
 elif page == "التوزيع":
 
     st.subheader("📦 توزيع المحافظ")
+    uploaded_file = st.file_uploader(
+    "ارفع ملف Excel",
+    type=["xlsx"]
+)
 
     if uploaded_file is None:
         st.warning("برجاء رفع الملف أولاً.")
