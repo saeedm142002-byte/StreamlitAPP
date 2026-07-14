@@ -555,6 +555,7 @@ elif page == "التوزيع":
                 "عدد صفوف المحصلين الباقيين",
                 len(remaining_df)
             )
+        customers = []
 
         customers_df = pd.DataFrame(customers)
     
@@ -565,7 +566,7 @@ elif page == "التوزيع":
         # تجميع العملاء المراد توزيعهم
         # ============================================
 
-        customers = []
+       
 
         for debitor, grp in departed_df.groupby("Debitor"):
 
