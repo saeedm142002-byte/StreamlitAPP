@@ -909,37 +909,37 @@ if operation == "1️⃣ توزيع محفظة محصل مستقيل":
                 int(((i + 1) / total_customers_to_assign) * 100)
             )
         
-                # ============================================
-                # إنشاء عمود New Collector
-                # ============================================
+            # ============================================
+            # إنشاء عمود New Collector
+            # ============================================
         
-                result = base.copy()
+            result = base.copy()
         
-                result["New Collector"] = result["Collector"]
+            result["New Collector"] = result["Collector"]
         
-                mask = result["Collector"].isin(
-                    departed_collectors
+            mask = result["Collector"].isin(
+            departed_collectors
                 )
         
-                result.loc[
-                    mask,
-                    "New Collector"
-                ] = result.loc[
-                    mask,
+            result.loc[
+                mask,
+                "New Collector"
+            ] = result.loc[
+                mask,
                     "Debitor"
-                ].map(assignments)
+            ].map(assignments)
 
                                 # ============================================
                 # ملخص التوزيع
                 # ============================================
                 
-                distribution_summary = []
+            distribution_summary = []
                 
-                for collector, s in stats.items():
+            for collector, s in stats.items():
                 
-                    distribution_summary.append({
+                distribution_summary.append({
                 
-                        "Collector": collector,
+                    "Collector": collector,
                 
                         "Customers Added": s["AddedCustomers"],
                 
