@@ -300,7 +300,126 @@ elif page == "الاهمال":
     st.subheader("⚠️ الاهمال")
 
     if sub == "اهمال":
-        st.write("تقارير الإهمال")
+
+        uploaded_file = st.file_uploader(
+            "رفع ملف المحفظة",
+            type=["xlsx", "xls"]
+        )
+
+        if uploaded_file:
+
+            import pandas as pd
+            from io import BytesIO
+
+            df = pd.read_excel(uploaded_file)
+
+            # حذف أول صف إذا كان التقرير يحتوي على صف إضافي
+            df = df.iloc[1:].reset_index(drop=True)
+
+            # تنظيف النصوص
+            text_cols = [
+                "Sales Team",
+                "Sub State",
+                "حالة المعالجة - التمويل"
+            ]
+
+            for col in text_cols:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
+
+            # تحويل التواريخ
+            df["Follow up Last Date"] = pd.to_datetime(
+                df["Follow up Last Date"],
+                errors="coerce"
+            ).dt.normalize()
+
+            today = pd.Timestamp.today().normalize()
+
+            # ============================
+            # Sales Team
+            # ============================
+            df = df[
+                df["Sales Team"] != "Sara || Op"
+            ]
+
+            # ============================
+            # Payment
+            # سيب السالب والصفر فقط
+            # ============================
+            df["Payment"] = pd.to_numeric(
+                df["Payment"],
+                errors="coerce"
+            ).fillna(0)
+
+            df = df[
+                df["Payment"] <= 0
+            ]
+
+            # ============================
+            # Follow up Last Date
+            # عدد الأيام من آخر متابعة
+            # ============================
+            df["عدد أيام الإهمال"] = (
+                today - df["Follow up Last Date"]
+            ).dt.days
+
+            df = df[
+                df["عدد أيام الإهمال"] >= 3
+            ]
+
+            # ============================
+            # Sub State
+            # ============================
+            allowed_states = [
+                "وعد بسداد مبلغ المعالجة",
+                "رافض السداد*",
+                "مسجون",
+                "مماطل",
+                "تم سداد جزء وليس مبلغ المعالجة",
+                "لا يجيب",
+                "وعد بسداد تسوية",
+                "وعد بسداد جزء من المتأخرات",
+                "وعد بسداد قسط",
+                "وعد بسداد كامل المتأخرات",
+                "وعد بسداد كامل المديونية",
+                "يرغب بجدولة المديونية"
+            ]
+
+            df = df[
+                df["Sub State"].isin(allowed_states)
+            ]
+
+            # ============================
+            # حالة المعالجة
+            # ============================
+            df = df[
+                df["حالة المعالجة - التمويل"] == "لم يتم المعالجة "
+            ]
+
+            # ============================
+            # تحميل الملف
+            # ============================
+            output = BytesIO()
+
+            with pd.ExcelWriter(
+                output,
+                engine="openpyxl"
+            ) as writer:
+                df.to_excel(
+                    writer,
+                    index=False
+                )
+
+            output.seek(0)
+
+            st.success(f"تم استخراج {len(df)} حساب")
+
+            st.download_button(
+                "📥 تحميل تقرير الإهمال",
+                data=output,
+                file_name="الاهمال.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
     else:
         st.write("متابعة الإهمال")
