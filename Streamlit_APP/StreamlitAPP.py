@@ -370,6 +370,20 @@ elif page == "الاهمال":
                 today - df["Follow up Last Date"]
             ).dt.days
 
+            # حذف العمود لو موجود
+            if "فرق عدد ايام من اخر متابعة" in df.columns:
+                df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
+            
+            # مكان العمود بعد Follow up Last Date
+            insert_position = df.columns.get_loc("Follow up Last Date") + 1
+            
+            # إضافة العمود
+            df.insert(
+                insert_position,
+                "فرق عدد ايام من اخر متابعة",
+                (today - df["Follow up Last Date"]).dt.days
+            )
+
             df = df[
                 df["عدد أيام الإهمال"] >= 3
             ]
