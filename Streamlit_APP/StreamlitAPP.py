@@ -244,8 +244,12 @@ if page == "الوعود القائمة":
                 writer,
                 index=False
             )
+        st.success(f"تم استخراج وعود قائمة {len(output_current)} حساب")
 
+        
         output_current.seek(0)
+
+         
 
         # ==========================================
         # ملف الوعود المكسورة
@@ -260,6 +264,8 @@ if page == "الوعود القائمة":
                 writer,
                 index=False
             )
+
+        st.success(f"تم استخراج وعود مكسورة {len(output_broken)} حساب")
 
         output_broken.seek(0)
 
