@@ -346,10 +346,17 @@ elif page == "الاهمال":
             # Payment
             # سيب السالب والصفر فقط
             # ============================
+            df["Payment"] = (
+                df["Payment"]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.strip()
+            )
+            
             df["Payment"] = pd.to_numeric(
                 df["Payment"],
                 errors="coerce"
-            ).fillna(0)
+            )
 
             df = df[
                 df["Payment"] <= 0
