@@ -49,7 +49,7 @@ st.set_page_config(
 # SESSION STATE
 # ======================
 if "page" not in st.session_state:
-    st.session_state.page = "الوعود القائمة"
+    st.session_state.page = "الوعود القائمة و المكسورة"
 
 if "sub_page" not in st.session_state:
     st.session_state.sub_page = "اهمال"
@@ -96,7 +96,7 @@ page = st.session_state.page
 # ======================
 # PAGE 1 - الوعود القائمة
 # ======================
-if page == "الوعود القائمة":
+if page == "الوعود القائمة و المكسورة":
 
     import pandas as pd
     from io import BytesIO
