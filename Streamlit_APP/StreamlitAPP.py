@@ -206,21 +206,32 @@ if page == "الوعود القائمة و المكسورة":
             broken["Follow up Last Date"].notna()
         ]
         
-        # حذف العمود لو موجود
-        if "عدد ايام ترحيل الوعد" in broken.columns:
-            broken.drop(columns=["عدد ايام ترحيل الوعد"], inplace=True)
+        # حساب الفرق بين آخر متابعة وموعد الوعد
+        broken["فرق الايام"] = (
+            broken["Follow up Last Date"] - broken["Follow up Due Date"]
+        ).dt.days
+        
+        # الاحتفاظ فقط بالقيم السالبة
+        broken = broken[
+            broken["فرق الايام"] < 0
+        ]
+        
+        # حذف الأعمدة لو موجودة
+        for col in ["عدد ايام ترحيل الوعد", "فرق الايام"]:
+            if col in broken.columns:
+                broken.drop(columns=[col], inplace=True)
         
         # مكان العمود بعد Follow up Last Date
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
         
-        # إضافة العمود بعد Follow up Last Date مباشرة
+        # إضافة عدد أيام ترحيل الوعد
         broken.insert(
             insert_position,
             "عدد ايام ترحيل الوعد",
             (today - broken["Follow up Due Date"]).dt.days
         )
         
-        # الاحتفاظ فقط بالوعود المكسورة (المتأخرة)
+        # الاحتفاظ فقط بالوعود المكسورة
         broken = broken[
             broken["عدد ايام ترحيل الوعد"] > 0
         ]
