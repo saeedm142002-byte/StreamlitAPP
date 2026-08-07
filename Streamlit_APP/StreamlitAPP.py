@@ -29,14 +29,20 @@ def predict_text(text):
         return_tensors="pt",
         truncation=True,
         padding=True,
-        max_length=256
+        max_length=512
     )
 
     with torch.no_grad():
         outputs = model(**inputs)
 
-    pred = torch.argmax(outputs.logits, dim=1).item()
-    return pred
+    probs = F.softmax(outputs.logits, dim=1)
+
+    pred = torch.argmax(probs, dim=1).item()
+    confidence = probs[0][pred].item()
+
+    label = model.config.id2label[pred]
+
+    return label, round(confidence * 100, 2)
 
 
 # ======================
@@ -497,17 +503,26 @@ elif page == "النشاط":
             status = st.empty()
 
             predictions = []
+            probabilities = []
+
             total = len(df)
 
             for i, text in enumerate(df["Notes"]):
 
-                predictions.append(predict_text(text))
+                label, prob = predict_text(text)
+
+                predictions.append(label)
+                probabilities.append(prob)
 
                 progress = (i + 1) / total
                 progress_bar.progress(progress)
                 status.text(f"{int(progress*100)}% ({i+1}/{total})")
 
-            df["التصنيف"] = predictions
+            # إدراج الأعمدة بعد Notes مباشرة
+            notes_index = df.columns.get_loc("Notes")
+
+            df.insert(notes_index + 1, "التصنيف", predictions)
+            df.insert(notes_index + 2, "Probability (%)", probabilities)
 
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -516,7 +531,12 @@ elif page == "النشاط":
             output.seek(0)
 
             st.success("تم الانتهاء")
-            st.download_button("تحميل الملف", output, file_name="activity.xlsx")
+
+            st.download_button(
+                "تحميل الملف",
+                output,
+                file_name="activity.xlsx"
+            )
 
 
 # ======================
