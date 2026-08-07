@@ -25,6 +25,8 @@ def load_model():
 tokenizer, model = load_model()
 
 
+import torch
+
 def predict_text(text):
     inputs = tokenizer(
         str(text),
@@ -37,14 +39,12 @@ def predict_text(text):
     with torch.no_grad():
         outputs = model(**inputs)
 
-    probs = F.softmax(outputs.logits, dim=1)
+    probs = torch.softmax(outputs.logits, dim=1)
 
-    pred = torch.argmax(probs, dim=1).item()
-    confidence = probs[0][pred].item()
+    pred = torch.argmax(probs, dim=1).item()   # 0 أو 1
+    confidence = probs[0][pred].item() * 100
 
-    label = model.config.id2label[pred]
-
-    return label, round(confidence * 100, 2)
+    return pred, round(confidence, 2)
 
 
 # ======================
