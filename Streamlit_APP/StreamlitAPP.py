@@ -7,12 +7,16 @@ from io import BytesIO
 # ======================
 # MODEL
 # ======================
-repo_id = "Saeed1233/saeedmohamed_AraBERT"
+from pathlib import Path
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import streamlit as st
+
+MODEL_PATH = Path(__file__).parent / "arabert_model"
 
 @st.cache_resource
 def load_model():
-    tokenizer = AutoTokenizer.from_pretrained(repo_id)
-    model = AutoModelForSequenceClassification.from_pretrained(repo_id)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
     model.eval()
     return tokenizer, model
 
