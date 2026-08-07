@@ -3,6 +3,8 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from io import BytesIO
+import torch
+import torch.nn.functional as F
 
 # ======================
 # MODEL
