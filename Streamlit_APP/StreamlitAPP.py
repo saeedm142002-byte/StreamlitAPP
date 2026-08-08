@@ -143,7 +143,7 @@ if page == "الوعود القائمة و المكسورة":
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
-        """
+        
         # تحويل التواريخ
         df["Follow up Due Date"] = pd.to_datetime(
             df["Follow up Due Date"],
@@ -154,7 +154,7 @@ if page == "الوعود القائمة و المكسورة":
             df["Follow up Last Date"],
             errors="coerce"
         ).dt.normalize()
-        """
+       
 
         today = pd.Timestamp.today().normalize()
 
@@ -167,10 +167,8 @@ if page == "الوعود القائمة و المكسورة":
 
         # حذف Sara || Op
         base = base[
-            base["Sales Team"].str.contains( "Sara || Op"
-                                            ,
-                na=False
-                                           )
+            base["Sales Team"] != "Sara || Op"   
+                                           
         ]
 
         # Final State
@@ -445,8 +443,10 @@ elif page == "الاهمال":
             # حالة المعالجة
             # ============================
             df = df[
-                df["حالة المعالجة - التمويل"] == "لم يتم المعالجة"
+                (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
+                (df["حالة المعالجة - التمويل"].isna())
             ]
+ 
 
             # ============================
             # تحميل الملف
