@@ -143,7 +143,7 @@ if page == "الوعود القائمة و المكسورة":
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
-
+        """
         # تحويل التواريخ
         df["Follow up Due Date"] = pd.to_datetime(
             df["Follow up Due Date"],
@@ -154,6 +154,7 @@ if page == "الوعود القائمة و المكسورة":
             df["Follow up Last Date"],
             errors="coerce"
         ).dt.normalize()
+        """
 
         today = pd.Timestamp.today().normalize()
 
@@ -166,7 +167,10 @@ if page == "الوعود القائمة و المكسورة":
 
         # حذف Sara || Op
         base = base[
-            base["Sales Team"] != "Sara || Op"
+            base["Sales Team"].str.contains( "Sara || Op"
+                                            ,
+                na=False
+                                           )
         ]
 
         # Final State
@@ -179,7 +183,8 @@ if page == "الوعود القائمة و المكسورة":
 
         # حالة المعالجة
         base = base[
-            base["حالة المعالجة - التمويل"] == "لم يتم المعالجة"
+            (base["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
+            (base["حالة المعالجة - التمويل"].isna())
         ]
 
         progress_bar.progress(40)
