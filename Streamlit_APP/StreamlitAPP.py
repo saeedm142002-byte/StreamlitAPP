@@ -731,181 +731,181 @@ elif page == "النشاط":
                 axis=1
             )
 
-# =========================
-# إزالة الـ Duplicates
-# =========================
-
-duplicate_columns = [
-    "Collector",
-    "ID Number",
-    "Notes"
-]
-
-missing_duplicate_columns = [
-    col for col in duplicate_columns
-    if col not in df.columns
-]
-
-if missing_duplicate_columns:
-
-    st.error(
-        f"الأعمدة التالية غير موجودة لإزالة التكرار: "
-        f"{', '.join(missing_duplicate_columns)}"
-    )
-
-    st.stop()
-
-# إزالة الصفوف المتكررة
-df = df.drop_duplicates(
-    subset=duplicate_columns,
-    keep="first"
-).reset_index(drop=True)
-
-
-# =========================
-# إجمالي الوقت المهدر لكل محصل
-# =========================
-
-collector_summary = (
-    df.groupby("Collector", as_index=False)["وقت مهدر"]
-    .sum()
-    .sort_values(
-        "وقت مهدر",
-        ascending=False
-    )
-    .reset_index(drop=True)
-)
-
-
-# =========================
-# إنشاء ملف Excel
-# =========================
-
-output = BytesIO()
-
-with pd.ExcelWriter(
-    output,
-    engine="openpyxl"
-) as writer:
-
-    df.to_excel(
-        writer,
-        index=False,
-        sheet_name="النشاط"
-    )
-
-    collector_summary.to_excel(
-        writer,
-        index=False,
-        sheet_name="إجمالي الوقت المهدر"
-    )
-
-    # =========================
-    # تنسيق Excel
-    # =========================
-
-    workbook = writer.book
-
-    # لون أزرق غامق للـ Headers
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="073259"
-    )
-
-    header_font = Font(
-        color="FFFFFF",
-        bold=True
-    )
-
-    # Border
-    thin_border = Border(
-        left=Side(style="thin", color="000000"),
-        right=Side(style="thin", color="000000"),
-        top=Side(style="thin", color="000000"),
-        bottom=Side(style="thin", color="000000")
-    )
-
-    # =========================
-    # تنسيق كل Sheet
-    # =========================
-
-    for ws in workbook.worksheets:
-
-        # كل الخلايا
-        for row in ws.iter_rows():
-
-            for cell in row:
-
-                # All Borders
-                cell.border = thin_border
-
-                # النص في المنتصف
-                cell.alignment = Alignment(
-                    horizontal="center",
-                    vertical="center"
+            # =========================
+            # إزالة الـ Duplicates
+            # =========================
+            
+            duplicate_columns = [
+                "Collector",
+                "ID Number",
+                "Notes"
+            ]
+            
+            missing_duplicate_columns = [
+                col for col in duplicate_columns
+                if col not in df.columns
+            ]
+            
+            if missing_duplicate_columns:
+            
+                st.error(
+                    f"الأعمدة التالية غير موجودة لإزالة التكرار: "
+                    f"{', '.join(missing_duplicate_columns)}"
                 )
-
-        # =========================
-        # Header
-        # =========================
-
-        for cell in ws[1]:
-
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center"
+            
+                st.stop()
+            
+            # إزالة الصفوف المتكررة
+            df = df.drop_duplicates(
+                subset=duplicate_columns,
+                keep="first"
+            ).reset_index(drop=True)
+            
+            
+            # =========================
+            # إجمالي الوقت المهدر لكل محصل
+            # =========================
+            
+            collector_summary = (
+                df.groupby("Collector", as_index=False)["وقت مهدر"]
+                .sum()
+                .sort_values(
+                    "وقت مهدر",
+                    ascending=False
+                )
+                .reset_index(drop=True)
             )
-            cell.border = thin_border
-
-        # =========================
-        # عرض الأعمدة على قد المحتوى
-        # =========================
-
-        for column_cells in ws.columns:
-
-            max_length = 0
-            column_letter = column_cells[0].column_letter
-
-            for cell in column_cells:
-
-                if cell.value is not None:
-
-                    cell_length = len(
-                        str(cell.value)
-                    )
-
-                    if cell_length > max_length:
-                        max_length = cell_length
-
-            # إضافة مساحة بسيطة
-            adjusted_width = max_length + 3
-
-            # حد أقصى عشان عمود طويل جدًا
-            adjusted_width = min(
-                adjusted_width,
-                50
+            
+            
+            # =========================
+            # إنشاء ملف Excel
+            # =========================
+            
+            output = BytesIO()
+            
+            with pd.ExcelWriter(
+                output,
+                engine="openpyxl"
+            ) as writer:
+            
+                df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="النشاط"
+                )
+            
+                collector_summary.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="إجمالي الوقت المهدر"
+                )
+            
+                # =========================
+                # تنسيق Excel
+                # =========================
+            
+                workbook = writer.book
+            
+                # لون أزرق غامق للـ Headers
+                header_fill = PatternFill(
+                    fill_type="solid",
+                    fgColor="073259"
+                )
+            
+                header_font = Font(
+                    color="FFFFFF",
+                    bold=True
+                )
+            
+                # Border
+                thin_border = Border(
+                    left=Side(style="thin", color="000000"),
+                    right=Side(style="thin", color="000000"),
+                    top=Side(style="thin", color="000000"),
+                    bottom=Side(style="thin", color="000000")
+                )
+            
+                # =========================
+                # تنسيق كل Sheet
+                # =========================
+            
+                for ws in workbook.worksheets:
+            
+                    # كل الخلايا
+                    for row in ws.iter_rows():
+            
+                        for cell in row:
+            
+                            # All Borders
+                            cell.border = thin_border
+            
+                            # النص في المنتصف
+                            cell.alignment = Alignment(
+                                horizontal="center",
+                                vertical="center"
+                            )
+            
+                    # =========================
+                    # Header
+                    # =========================
+            
+                    for cell in ws[1]:
+            
+                        cell.fill = header_fill
+                        cell.font = header_font
+                        cell.alignment = Alignment(
+                            horizontal="center",
+                            vertical="center"
+                        )
+                        cell.border = thin_border
+            
+                    # =========================
+                    # عرض الأعمدة على قد المحتوى
+                    # =========================
+            
+                    for column_cells in ws.columns:
+            
+                        max_length = 0
+                        column_letter = column_cells[0].column_letter
+            
+                        for cell in column_cells:
+            
+                            if cell.value is not None:
+            
+                                cell_length = len(
+                                    str(cell.value)
+                                )
+            
+                                if cell_length > max_length:
+                                    max_length = cell_length
+            
+                        # إضافة مساحة بسيطة
+                        adjusted_width = max_length + 3
+            
+                        # حد أقصى عشان عمود طويل جدًا
+                        adjusted_width = min(
+                            adjusted_width,
+                            50
+                        )
+            
+                        ws.column_dimensions[
+                            column_letter
+                        ].width = adjusted_width
+            
+                    # ارتفاع الـ Header
+                    ws.row_dimensions[1].height = 25
+            
+            
+            output.seek(0)
+            
+            st.success("تم الانتهاء")
+            
+            st.download_button(
+                "تحميل الملف",
+                output,
+                file_name="activity.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
-            ws.column_dimensions[
-                column_letter
-            ].width = adjusted_width
-
-        # ارتفاع الـ Header
-        ws.row_dimensions[1].height = 25
-
-
-output.seek(0)
-
-st.success("تم الانتهاء")
-
-st.download_button(
-    "تحميل الملف",
-    output,
-    file_name="activity.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
 
 
 # ======================
