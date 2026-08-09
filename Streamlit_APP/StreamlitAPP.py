@@ -500,10 +500,70 @@ elif page == "النشاط":
 
     if uploaded_file:
 
+        # =========================
+        # إعدادات البريك
+        # =========================
+
+        st.markdown("### 🕐 إعدادات البريك")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            break_start = st.time_input(
+                "البريك يبدأ الساعة",
+                value=time(12, 0)
+            )
+
+        with col2:
+            break_duration = st.number_input(
+                "مدة البريك بالدقائق",
+                min_value=1,
+                value=30,
+                step=5
+            )
+
+        # حساب نهاية البريك
+        break_start_minutes = (
+            break_start.hour * 60 +
+            break_start.minute
+        )
+
+        break_end_minutes = (
+            break_start_minutes +
+            int(break_duration)
+        )
+
+        st.info(
+            f"البريك من {break_start.strftime('%H:%M')} "
+            f"إلى "
+            f"{(datetime.combine(date.today(), break_start) + timedelta(minutes=break_duration)).strftime('%H:%M')}"
+        )
+
+        # =========================
+        # قراءة الملف
+        # =========================
+
         df = pd.read_excel(uploaded_file)
 
-        if "Notes" not in df.columns:
-            st.error("لا يوجد عمود Notes")
+        # الأعمدة المطلوبة
+        required_columns = [
+            "Notes",
+            "Created on",
+            "Collector"
+        ]
+
+        missing_columns = [
+            col for col in required_columns
+            if col not in df.columns
+        ]
+
+        if missing_columns:
+
+            st.error(
+                f"الأعمدة التالية غير موجودة في الملف: "
+                f"{', '.join(missing_columns)}"
+            )
+
         else:
 
             progress_bar = st.progress(0)
@@ -514,6 +574,10 @@ elif page == "النشاط":
 
             total = len(df)
 
+            # =========================
+            # Prediction
+            # =========================
+
             for i, text in enumerate(df["Notes"]):
 
                 label, prob = predict_text(text)
@@ -522,18 +586,184 @@ elif page == "النشاط":
                 probabilities.append(prob)
 
                 progress = (i + 1) / total
-                progress_bar.progress(progress)
-                status.text(f"{int(progress*100)}% ({i+1}/{total})")
 
-            # إدراج الأعمدة بعد Notes مباشرة
+                progress_bar.progress(progress)
+
+                status.text(
+                    f"{int(progress * 100)}% "
+                    f"({i + 1}/{total})"
+                )
+
+            # =========================
+            # إضافة التصنيف والاحتمالية
+            # =========================
+
             notes_index = df.columns.get_loc("Notes")
 
-            df.insert(notes_index + 1, "التصنيف", predictions)
-            df.insert(notes_index + 2, "Probability (%)", probabilities)
+            df.insert(
+                notes_index + 1,
+                "التصنيف",
+                predictions
+            )
+
+            df.insert(
+                notes_index + 2,
+                "Probability (%)",
+                probabilities
+            )
+
+            # =========================
+            # حساب الوقت المهدر
+            # =========================
+
+            df["Created on"] = pd.to_datetime(
+                df["Created on"],
+                errors="coerce"
+            )
+
+            def calculate_wasted_time(row):
+
+                call_time = row["Created on"]
+                classification = row["التصنيف"]
+
+                # لو الوقت غير موجود
+                if pd.isna(call_time):
+                    return 0
+
+                # تحويل وقت المكالمة إلى دقائق من بداية اليوم
+                call_minutes = (
+                    call_time.hour * 60 +
+                    call_time.minute
+                )
+
+                # =========================
+                # داخل البريك
+                # =========================
+
+                if (
+                    break_start_minutes
+                    <= call_minutes
+                    < break_end_minutes
+                ):
+                    return 0
+
+                # =========================
+                # خارج البريك
+                # =========================
+
+                # فرق الوقت بين المكالمات
+                # سيتم حسابه لاحقاً
+                return 0
+
+            # =========================
+            # فرق الوقت بين المكالمات
+            # لكل محصل
+            # =========================
+
+            df = df.sort_values(
+                ["Collector", "Created on"]
+            ).reset_index(drop=True)
+
+            df["فرق التوقيت"] = (
+                df.groupby("Collector")["Created on"]
+                .diff()
+                .dt.total_seconds()
+                .div(60)
+            )
+
+            # =========================
+            # حساب الوقت المهدر
+            # =========================
+
+            def calculate_wasted(row):
+
+                call_time = row["Created on"]
+                classification = row["التصنيف"]
+                time_diff = row["فرق التوقيت"]
+
+                # أول مكالمة للمحصل
+                if pd.isna(time_diff):
+                    return 0
+
+                # لو فرق الوقت بالسالب لأي سبب
+                if time_diff < 0:
+                    return 0
+
+                # وقت المكالمة بالدقائق
+                call_minutes = (
+                    call_time.hour * 60 +
+                    call_time.minute
+                )
+
+                # =========================
+                # داخل البريك
+                # =========================
+
+                if (
+                    break_start_minutes
+                    <= call_minutes
+                    < break_end_minutes
+                ):
+                    return 0
+
+                # =========================
+                # خارج البريك
+                # =========================
+
+                if str(classification) == "1":
+                    wasted = time_diff - 20
+
+                elif str(classification) == "0":
+                    wasted = time_diff - 5
+
+                else:
+                    wasted = 0
+
+                # لا نسمح بقيمة سالبة
+                return max(wasted, 0)
+
+            df["وقت مهدر"] = df.apply(
+                calculate_wasted,
+                axis=1
+            )
+
+            # =========================
+            # إجمالي الوقت المهدر لكل محصل
+            # =========================
+
+            collector_summary = (
+                df.groupby("Collector", as_index=False)["وقت مهدر"]
+                .sum()
+                .sort_values(
+                    "وقت مهدر",
+                    ascending=False
+                )
+            )
+
+            # =========================
+            # تجهيز ملف Excel
+            # =========================
 
             output = BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, index=False)
+
+            with pd.ExcelWriter(
+                output,
+                engine="openpyxl"
+            ) as writer:
+
+                # الشيت الأساسي
+                df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="النشاط"
+                )
+
+                # شيت إجمالي الوقت المهدر
+                collector_summary.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="إجمالي الوقت المهدر"
+                )
 
             output.seek(0)
 
@@ -542,7 +772,8 @@ elif page == "النشاط":
             st.download_button(
                 "تحميل الملف",
                 output,
-                file_name="activity.xlsx"
+                file_name="activity.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
 
