@@ -747,15 +747,12 @@ elif page == "النشاط":
             ]
             
             if missing_duplicate_columns:
-            
                 st.error(
-                    f"الأعمدة التالية غير موجودة لإزالة التكرار: "
+                    f"الأعمدة التالية غير موجودة: "
                     f"{', '.join(missing_duplicate_columns)}"
                 )
-            
                 st.stop()
             
-            # إزالة الصفوف المتكررة
             df = df.drop_duplicates(
                 subset=duplicate_columns,
                 keep="first"
@@ -763,8 +760,107 @@ elif page == "النشاط":
             
             
             # =========================
-            # إجمالي الوقت المهدر لكل محصل
+            # تحويل Created on إلى datetime
             # =========================
+            
+            df["Created on"] = pd.to_datetime(
+                df["Created on"],
+                errors="coerce"
+            )
+            
+            
+            # =========================
+            # ترتيب حسب المحصل والوقت
+            # =========================
+            
+            df = df.sort_values(
+                ["Collector", "Created on"]
+            ).reset_index(drop=True)
+            
+            
+            # =========================
+            # فرق التوقيت
+            # =========================
+            
+            df["فرق التوقيت"] = (
+                df.groupby("Collector")["Created on"]
+                .diff()
+                .dt.total_seconds()
+                .div(60)
+            )
+            
+            
+            # =========================
+            # حساب الوقت المهدر
+            # =========================
+            
+            def calculate_wasted(row):
+            
+                call_time = row["Created on"]
+                classification = row["التصنيف"]
+                time_diff = row["فرق التوقيت"]
+            
+                if pd.isna(time_diff) or pd.isna(call_time):
+                    return 0
+            
+                if time_diff < 0:
+                    return 0
+            
+                call_minutes = (
+                    call_time.hour * 60 +
+                    call_time.minute
+                )
+            
+                # داخل البريك
+                if (
+                    break_start_minutes
+                    <= call_minutes
+                    < break_end_minutes
+                ):
+                    return 0
+            
+                # خارج البريك
+                if str(classification) == "1":
+                    wasted = time_diff - 20
+            
+                elif str(classification) == "0":
+                    wasted = time_diff - 5
+            
+                else:
+                    wasted = 0
+            
+                return max(wasted, 0)
+            
+            
+            df["وقت مهدر"] = df.apply(
+                calculate_wasted,
+                axis=1
+            )
+            
+            
+            # =====================================================
+            # ترتيب الأعمدة
+            # Probability -> فرق التوقيت -> وقت مهدر
+            # =====================================================
+            
+            cols = list(df.columns)
+            
+            prob_index = cols.index("Probability (%)")
+            
+            for col in ["فرق التوقيت", "وقت مهدر"]:
+                cols.remove(col)
+            
+            prob_index = cols.index("Probability (%)")
+            
+            cols.insert(prob_index + 1, "فرق التوقيت")
+            cols.insert(prob_index + 2, "وقت مهدر")
+            
+            df = df[cols]
+            
+            
+            # =====================================================
+            # 1 - إجمالي الوقت المهدر لكل محصل
+            # =====================================================
             
             collector_summary = (
                 df.groupby("Collector", as_index=False)["وقت مهدر"]
@@ -777,9 +873,168 @@ elif page == "النشاط":
             )
             
             
-            # =========================
-            # إنشاء ملف Excel
-            # =========================
+            # =====================================================
+            # 2 - المكالمات أعلى من 30 دقيقة
+            # =====================================================
+            
+            calls_over_30 = df[
+                df["فرق التوقيت"] > 30
+            ].copy()
+            
+            calls_over_30 = calls_over_30.sort_values(
+                "فرق التوقيت",
+                ascending=False
+            )
+            
+            
+            # =====================================================
+            # 3 - المكالمات أقل من دقيقة
+            # =====================================================
+            
+            calls_under_1 = df[
+                df["فرق التوقيت"] < 1
+            ].copy()
+            
+            calls_under_1 = calls_under_1.sort_values(
+                "فرق التوقيت",
+                ascending=True
+            )
+            
+            
+            # =====================================================
+            # 4 - أول إفادة لكل محصل
+            # =====================================================
+            
+            first_activity = (
+                df.dropna(subset=["Created on"])
+                .sort_values(["Collector", "Created on"])
+                .groupby("Collector", as_index=False)
+                .first()
+            )
+            
+            first_activity = first_activity[
+                [
+                    "Collector",
+                    "Created on",
+                    "التصنيف",
+                    "Probability (%)"
+                ]
+            ].rename(
+                columns={
+                    "Created on": "وقت أول إفادة"
+                }
+            )
+            
+            
+            # =====================================================
+            # 5 - آخر إفادة لكل محصل
+            # =====================================================
+            
+            last_activity = (
+                df.dropna(subset=["Created on"])
+                .sort_values(["Collector", "Created on"])
+                .groupby("Collector", as_index=False)
+                .last()
+            )
+            
+            last_activity = last_activity[
+                [
+                    "Collector",
+                    "Created on",
+                    "التصنيف",
+                    "Probability (%)"
+                ]
+            ].rename(
+                columns={
+                    "Created on": "وقت آخر إفادة"
+                }
+            )
+            
+            
+            # =====================================================
+            # 6 - أول إفادة بعد البريك
+            # =====================================================
+            
+            after_break = df[
+                df["Created on"].notna()
+            ].copy()
+            
+            after_break["وقت بالدقائق"] = (
+                after_break["Created on"].dt.hour * 60
+                + after_break["Created on"].dt.minute
+            )
+            
+            after_break = after_break[
+                after_break["وقت بالدقائق"] >= break_end_minutes
+            ]
+            
+            first_after_break = (
+                after_break
+                .sort_values(["Collector", "Created on"])
+                .groupby("Collector", as_index=False)
+                .first()
+            )
+            
+            first_after_break = first_after_break[
+                [
+                    "Collector",
+                    "Created on",
+                    "التصنيف",
+                    "Probability (%)"
+                ]
+            ].rename(
+                columns={
+                    "Created on": "وقت أول إفادة بعد البريك"
+                }
+            )
+            
+            
+            # =====================================================
+            # تحويل التصنيف إلى حالة نجاح
+            # =====================================================
+            
+            def success_status(value):
+            
+                if str(value) == "1":
+                    return "ناجحة"
+            
+                elif str(value) == "0":
+                    return "غير ناجحة"
+            
+                return value
+            
+            
+            first_after_break["حالة النجاح"] = (
+                first_after_break["التصنيف"]
+                .apply(success_status)
+            )
+            
+            
+            # =====================================================
+            # 7 - Final State
+            # =====================================================
+            
+            if "Final State" not in df.columns:
+            
+                st.error("لا يوجد عمود Final State في الملف")
+                st.stop()
+            
+            final_state_summary = (
+                df["Final State"]
+                .fillna("Blank")
+                .value_counts()
+                .reset_index()
+            )
+            
+            final_state_summary.columns = [
+                "Final State",
+                "عدد الحالات"
+            ]
+            
+            
+            # =====================================================
+            # Excel
+            # =====================================================
             
             output = BytesIO()
             
@@ -800,13 +1055,49 @@ elif page == "النشاط":
                     sheet_name="إجمالي الوقت المهدر"
                 )
             
-                # =========================
-                # تنسيق Excel
-                # =========================
+                calls_over_30.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="مكالمات +30 دقيقة"
+                )
+            
+                calls_under_1.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="مكالمات أقل من دقيقة"
+                )
+            
+                first_activity.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="أول إفادة"
+                )
+            
+                last_activity.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="آخر إفادة"
+                )
+            
+                first_after_break.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="أول إفادة بعد البريك"
+                )
+            
+                final_state_summary.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="Final State"
+                )
+            
+            
+                # =================================================
+                # تنسيق كل الشيتات
+                # =================================================
             
                 workbook = writer.book
             
-                # لون أزرق غامق للـ Headers
                 header_fill = PatternFill(
                     fill_type="solid",
                     fgColor="073259"
@@ -817,17 +1108,17 @@ elif page == "النشاط":
                     bold=True
                 )
             
-                # Border
-                thin_border = Border(
-                    left=Side(style="thin", color="000000"),
-                    right=Side(style="thin", color="000000"),
-                    top=Side(style="thin", color="000000"),
-                    bottom=Side(style="thin", color="000000")
+                thin_side = Side(
+                    style="thin",
+                    color="000000"
                 )
             
-                # =========================
-                # تنسيق كل Sheet
-                # =========================
+                thin_border = Border(
+                    left=thin_side,
+                    right=thin_side,
+                    top=thin_side,
+                    bottom=thin_side
+                )
             
                 for ws in workbook.worksheets:
             
@@ -836,63 +1127,52 @@ elif page == "النشاط":
             
                         for cell in row:
             
-                            # All Borders
                             cell.border = thin_border
             
-                            # النص في المنتصف
                             cell.alignment = Alignment(
                                 horizontal="center",
                                 vertical="center"
                             )
             
-                    # =========================
                     # Header
-                    # =========================
-            
                     for cell in ws[1]:
             
                         cell.fill = header_fill
+            
                         cell.font = header_font
+            
+                        cell.border = thin_border
+            
                         cell.alignment = Alignment(
                             horizontal="center",
                             vertical="center"
                         )
-                        cell.border = thin_border
             
-                    # =========================
-                    # عرض الأعمدة على قد المحتوى
-                    # =========================
-            
+                    # عرض الأعمدة حسب المحتوى
                     for column_cells in ws.columns:
             
                         max_length = 0
-                        column_letter = column_cells[0].column_letter
+            
+                        column_letter = (
+                            column_cells[0].column_letter
+                        )
             
                         for cell in column_cells:
             
                             if cell.value is not None:
             
-                                cell_length = len(
-                                    str(cell.value)
+                                max_length = max(
+                                    max_length,
+                                    len(str(cell.value))
                                 )
-            
-                                if cell_length > max_length:
-                                    max_length = cell_length
-            
-                        # إضافة مساحة بسيطة
-                        adjusted_width = max_length + 3
-            
-                        # حد أقصى عشان عمود طويل جدًا
-                        adjusted_width = min(
-                            adjusted_width,
-                            50
-                        )
             
                         ws.column_dimensions[
                             column_letter
-                        ].width = adjusted_width
+                        ].width = min(
+                            max_length + 3,
+                            50
+                        )
             
-                    # ارتفاع الـ Header
                     ws.row_dimensions[1].height = 25
             
             
