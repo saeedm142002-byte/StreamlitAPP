@@ -548,6 +548,8 @@ elif page == "النشاط":
         # =========================
 
         df = pd.read_excel(uploaded_file)
+        # حذف أول صف من الملف
+        df = df.iloc[1:].reset_index(drop=True)
 
         # الأعمدة المطلوبة
         required_columns = [
