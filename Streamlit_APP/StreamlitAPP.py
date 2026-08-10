@@ -6,9 +6,6 @@ from io import BytesIO
 import torch
 import torch.nn.functional as F
 from datetime import datetime, date, time, timedelta
-import tempfile
-import os
-import shutil
 
 
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -863,7 +860,7 @@ elif page == "النشاط":
             df = df[cols]
             
             
-=====================================================
+            # =====================================================
             # 1 - إجمالي الوقت المهدر لكل محصل
             # =====================================================
             
