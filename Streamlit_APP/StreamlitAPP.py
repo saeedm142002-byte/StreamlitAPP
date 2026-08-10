@@ -863,7 +863,7 @@ elif page == "النشاط":
             df = df[cols]
             
             
-            # =====================================================
+=====================================================
             # 1 - إجمالي الوقت المهدر لكل محصل
             # =====================================================
             
@@ -1036,310 +1036,17 @@ elif page == "النشاط":
                 "عدد الحالات"
             ]
             
-                        
-            # =====================================================
-            # Excel - Pivot Tables
-            # =====================================================
-            
-            from io import BytesIO
-            import pandas as pd
-            from openpyxl import load_workbook
-            from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
-            from openpyxl.utils import get_column_letter
-            
             
             # =====================================================
-            # Helper Function
-            # =====================================================
-            
-            def make_pivot(
-                data,
-                index,
-                values=None,
-                aggfunc="sum",
-                columns=None,
-                fill_value=0
-            ):
-            
-                pivot = pd.pivot_table(
-                    data=data,
-                    index=index,
-                    values=values,
-                    columns=columns,
-                    aggfunc=aggfunc,
-                    fill_value=fill_value,
-                    dropna=False
-                )
-            
-                # تحويل Index إلى Columns
-                pivot = pivot.reset_index()
-            
-                # إزالة اسم الـ index لو موجود
-                pivot.columns.name = None
-            
-                return pivot
-            
-            
-            # =====================================================
-            # 1 - إجمالي الوقت المهدر لكل محصل
-            # =====================================================
-            
-            pivot_wasted = make_pivot(
-                data=df,
-                index=["Collector"],
-                values="وقت مهدر",
-                aggfunc="sum"
-            )
-            
-            pivot_wasted = pivot_wasted.sort_values(
-                "وقت مهدر",
-                ascending=False
-            ).reset_index(drop=True)
-            
-            
-            # =====================================================
-            # 2 - المكالمات أعلى من 30 دقيقة
-            # =====================================================
-            
-            over_30_source = df[
-                df["فرق التوقيت"] > 30
-            ].copy()
-            
-            if len(over_30_source) > 0:
-            
-                pivot_over_30 = make_pivot(
-                    data=over_30_source,
-                    index=[
-                        "Collector",
-                        "Created on",
-                        "ID Number",
-                        "Notes"
-                    ],
-                    values="فرق التوقيت",
-                    aggfunc="max"
-                )
-            
-                pivot_over_30 = pivot_over_30.sort_values(
-                    "فرق التوقيت",
-                    ascending=False
-                ).reset_index(drop=True)
-            
-            else:
-            
-                pivot_over_30 = pd.DataFrame(
-                    columns=[
-                        "Collector",
-                        "Created on",
-                        "ID Number",
-                        "Notes",
-                        "فرق التوقيت"
-                    ]
-                )
-            
-            
-            # =====================================================
-            # 3 - المكالمات أقل من دقيقة
-            # =====================================================
-            
-            under_1_source = df[
-                df["فرق التوقيت"] < 1
-            ].copy()
-            
-            if len(under_1_source) > 0:
-            
-                pivot_under_1 = make_pivot(
-                    data=under_1_source,
-                    index=[
-                        "Collector",
-                        "Created on",
-                        "ID Number",
-                        "Notes"
-                    ],
-                    values="فرق التوقيت",
-                    aggfunc="min"
-                )
-            
-                pivot_under_1 = pivot_under_1.sort_values(
-                    "فرق التوقيت",
-                    ascending=True
-                ).reset_index(drop=True)
-            
-            else:
-            
-                pivot_under_1 = pd.DataFrame(
-                    columns=[
-                        "Collector",
-                        "Created on",
-                        "ID Number",
-                        "Notes",
-                        "فرق التوقيت"
-                    ]
-                )
-            
-            
-            # =====================================================
-            # 4 - أول إفادة لكل محصل
-            # =====================================================
-            
-            pivot_first = make_pivot(
-                data=df.dropna(
-                    subset=["Created on"]
-                ),
-                index=["Collector"],
-                values="Created on",
-                aggfunc="min"
-            )
-            
-            pivot_first = pivot_first.rename(
-                columns={
-                    "Created on": "وقت أول إفادة"
-                }
-            )
-            
-            
-            # =====================================================
-            # 5 - آخر إفادة لكل محصل
-            # =====================================================
-            
-            pivot_last = make_pivot(
-                data=df.dropna(
-                    subset=["Created on"]
-                ),
-                index=["Collector"],
-                values="Created on",
-                aggfunc="max"
-            )
-            
-            pivot_last = pivot_last.rename(
-                columns={
-                    "Created on": "وقت آخر إفادة"
-                }
-            )
-            
-            
-            # =====================================================
-            # 6 - أول إفادة بعد البريك
-            # =====================================================
-            
-            after_break_source = df[
-                df["Created on"].notna()
-            ].copy()
-            
-            
-            after_break_source["وقت بالدقائق"] = (
-                after_break_source["Created on"].dt.hour * 60
-                + after_break_source["Created on"].dt.minute
-            )
-            
-            
-            after_break_source = after_break_source[
-                after_break_source["وقت بالدقائق"] >= break_end_minutes
-            ].copy()
-            
-            
-            if len(after_break_source) > 0:
-            
-                # أول وقت بعد البريك
-                pivot_after_break = make_pivot(
-                    data=after_break_source,
-                    index=["Collector"],
-                    values="Created on",
-                    aggfunc="min"
-                )
-            
-                pivot_after_break = pivot_after_break.rename(
-                    columns={
-                        "Created on": "وقت أول إفادة بعد البريك"
-                    }
-                )
-            
-            
-                # حالة النجاح لأول إفادة بعد البريك
-                first_after_break_success = (
-                    after_break_source
-                    .sort_values(
-                        ["Collector", "Created on"]
-                    )
-                    .groupby(
-                        "Collector",
-                        as_index=False
-                    )
-                    .first()
-                )
-            
-            
-                first_after_break_success[
-                    "حالة النجاح"
-                ] = first_after_break_success[
-                    "التصنيف"
-                ].apply(success_status)
-            
-            
-                first_after_break_success = (
-                    first_after_break_success[
-                        [
-                            "Collector",
-                            "حالة النجاح"
-                        ]
-                    ]
-                )
-            
-            
-                pivot_after_break = pivot_after_break.merge(
-                    first_after_break_success,
-                    on="Collector",
-                    how="left"
-                )
-            
-            else:
-            
-                pivot_after_break = pd.DataFrame(
-                    columns=[
-                        "Collector",
-                        "وقت أول إفادة بعد البريك",
-                        "حالة النجاح"
-                    ]
-                )
-            
-            
-            # =====================================================
-            # 7 - Final State
-            # =====================================================
-            
-            pivot_final_state = make_pivot(
-                data=df.assign(
-                    **{
-                        "Final State": df[
-                            "Final State"
-                        ].fillna("Blank")
-                    }
-                ),
-                index=["Final State"],
-                values="Final State",
-                aggfunc="count"
-            )
-            
-            pivot_final_state = pivot_final_state.rename(
-                columns={
-                    "Final State": "عدد الحالات"
-                })
-            
-            
-            # =====================================================
-            # Excel File
+            # Excel
             # =====================================================
             
             output = BytesIO()
-            
             
             with pd.ExcelWriter(
                 output,
                 engine="openpyxl"
             ) as writer:
-            
-                # =============================================
-                # البيانات الأصلية
-                # =============================================
             
                 df.to_excel(
                     writer,
@@ -1347,151 +1054,97 @@ elif page == "النشاط":
                     sheet_name="النشاط"
                 )
             
-            
-                # =============================================
-                # Pivot 1
-                # =============================================
-            
-                pivot_wasted.to_excel(
+                collector_summary.to_excel(
                     writer,
                     index=False,
                     sheet_name="إجمالي الوقت المهدر"
                 )
             
-            
-                # =============================================
-                # Pivot 2
-                # =============================================
-            
-                pivot_over_30.to_excel(
+                calls_over_30.to_excel(
                     writer,
                     index=False,
                     sheet_name="مكالمات +30 دقيقة"
                 )
             
-            
-                # =============================================
-                # Pivot 3
-                # =============================================
-            
-                pivot_under_1.to_excel(
+                calls_under_1.to_excel(
                     writer,
                     index=False,
                     sheet_name="مكالمات أقل من دقيقة"
                 )
             
-            
-                # =============================================
-                # Pivot 4
-                # =============================================
-            
-                pivot_first.to_excel(
+                first_activity.to_excel(
                     writer,
                     index=False,
                     sheet_name="أول إفادة"
                 )
             
-            
-                # =============================================
-                # Pivot 5
-                # =============================================
-            
-                pivot_last.to_excel(
+                last_activity.to_excel(
                     writer,
                     index=False,
                     sheet_name="آخر إفادة"
                 )
             
-            
-                # =============================================
-                # Pivot 6
-                # =============================================
-            
-                pivot_after_break.to_excel(
+                first_after_break.to_excel(
                     writer,
                     index=False,
                     sheet_name="أول إفادة بعد البريك"
                 )
             
-            
-                # =============================================
-                # Pivot 7
-                # =============================================
-            
-                pivot_final_state.to_excel(
+                final_state_summary.to_excel(
                     writer,
                     index=False,
                     sheet_name="Final State"
                 )
             
             
-            # =====================================================
-            # Excel Formatting
-            # =====================================================
+                # =================================================
+                # تنسيق كل الشيتات
+                # =================================================
             
-            output.seek(0)
+                workbook = writer.book
             
-            workbook = load_workbook(output)
+                header_fill = PatternFill(
+                    fill_type="solid",
+                    fgColor="073259"
+                )
             
+                header_font = Font(
+                    color="FFFFFF",
+                    bold=True
+                )
             
-            # =====================================================
-            # Styles
-            # =====================================================
+                thin_side = Side(
+                    style="thin",
+                    color="000000"
+                )
             
-            header_fill = PatternFill(
-                fill_type="solid",
-                fgColor="073259"
-            )
+                thin_border = Border(
+                    left=thin_side,
+                    right=thin_side,
+                    top=thin_side,
+                    bottom=thin_side
+                )
             
-            header_font = Font(
-                color="FFFFFF",
-                bold=True
-            )
+                for ws in workbook.worksheets:
             
-            thin_side = Side(
-                style="thin",
-                color="000000"
-            )
+                    # كل الخلايا
+                    for row in ws.iter_rows():
             
-            thin_border = Border(
-                left=thin_side,
-                right=thin_side,
-                top=thin_side,
-                bottom=thin_side
-            )
+                        for cell in row:
             
+                            cell.border = thin_border
             
-            # =====================================================
-            # Format All Sheets
-            # =====================================================
+                            cell.alignment = Alignment(
+                                horizontal="center",
+                                vertical="center"
+                            )
             
-            for ws in workbook.worksheets:
+                    # Header
+                    for cell in ws[1]:
             
-                # =============================================
-                # Header
-                # =============================================
+                        cell.fill = header_fill
             
-                for cell in ws[1]:
-            
-                    cell.fill = header_fill
-            
-                    cell.font = header_font
-            
-                    cell.border = thin_border
-            
-                    cell.alignment = Alignment(
-                        horizontal="center",
-                        vertical="center"
-                    )
-            
-            
-                # =============================================
-                # All Cells
-                # =============================================
-            
-                for row in ws.iter_rows():
-            
-                    for cell in row:
+                        cell.font = header_font
             
                         cell.border = thin_border
             
@@ -1500,132 +1153,45 @@ elif page == "النشاط":
                             vertical="center"
                         )
             
+                    # عرض الأعمدة حسب المحتوى
+                    for column_cells in ws.columns:
             
-                # =============================================
-                # Column Width
-                # =============================================
+                        max_length = 0
             
-                for column_cells in ws.columns:
-            
-                    max_length = 0
-            
-                    column_letter = (
-                        get_column_letter(
-                            column_cells[0].column
+                        column_letter = (
+                            column_cells[0].column_letter
                         )
-                    )
             
-                    for cell in column_cells:
+                        for cell in column_cells:
             
-                        if cell.value is not None:
+                            if cell.value is not None:
             
-                            max_length = max(
-                                max_length,
-                                len(str(cell.value))
-                            )
+                                max_length = max(
+                                    max_length,
+                                    len(str(cell.value))
+                                )
             
+                        ws.column_dimensions[
+                            column_letter
+                        ].width = min(
+                            max_length + 3,
+                            50
+                        )
             
-                    ws.column_dimensions[
-                        column_letter
-                    ].width = min(
-                        max_length + 3,
-                        50
-                    )
-            
-            
-                # =============================================
-                # Header Height
-                # =============================================
-            
-                ws.row_dimensions[1].height = 25
+                    ws.row_dimensions[1].height = 25
             
             
-            # =====================================================
-            # Number Formatting
-            # =====================================================
+            output.seek(0)
             
-            for sheet_name in [
-                "إجمالي الوقت المهدر",
-                "مكالمات +30 دقيقة",
-                "مكالمات أقل من دقيقة"
-            ]:
-            
-                ws = workbook[sheet_name]
-            
-                for row in ws.iter_rows():
-            
-                    for cell in row:
-            
-                        if isinstance(
-                            cell.value,
-                            (int, float)
-                        ):
-            
-                            cell.number_format = "0.00"
-            
-            
-            # =====================================================
-            # Date Formatting
-            # =====================================================
-            
-            for sheet_name in [
-                "أول إفادة",
-                "آخر إفادة",
-                "أول إفادة بعد البريك"
-            ]:
-            
-                ws = workbook[sheet_name]
-            
-                for row in ws.iter_rows():
-            
-                    for cell in row:
-            
-                        if cell.column > 1:
-            
-                            cell.number_format = (
-                                "dd/mm/yyyy hh:mm:ss"
-                            )
-            
-            
-            # =====================================================
-            # Freeze Header
-            # =====================================================
-            
-            for ws in workbook.worksheets:
-            
-                ws.freeze_panes = "A2"
-            
-            
-            # =====================================================
-            # Save Final File
-            # =====================================================
-            
-            final_output = BytesIO()
-            
-            workbook.save(
-                final_output
-            )
-            
-            final_output.seek(0)
-            
-            
-            # =====================================================
-            # Download
-            # =====================================================
-            
-            st.success(
-                "تم إنشاء ملف Excel بنجاح ✅"
-            )
+            st.success("تم الانتهاء")
             
             st.download_button(
                 "تحميل الملف",
-                final_output,
+                output,
                 file_name="activity.xlsx",
-                mime=(
-                    "application/vnd.openxmlformats-officedocument."
-                    "spreadsheetml.sheet"
-                )
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
