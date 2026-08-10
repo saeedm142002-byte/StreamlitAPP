@@ -6,6 +6,10 @@ from io import BytesIO
 import torch
 import torch.nn.functional as F
 from datetime import datetime, date, time, timedelta
+import win32com.client as win32
+import tempfile
+import os
+import shutil
 
 
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -1034,161 +1038,617 @@ elif page == "النشاط":
             ]
             
             
-            # =====================================================
-            # Excel
+                      # =====================================================
+            # Excel - إنشاء Pivot Tables حقيقية
             # =====================================================
             
-            output = BytesIO()
+            # حفظ ملف النشاط أولاً في ملف مؤقت
+            temp_input = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".xlsx"
+            )
+            
+            temp_input.close()
+            
+            input_path = temp_input.name
+            
+            
+            # =====================================================
+            # إنشاء ملف Excel الأساسي
+            # =====================================================
             
             with pd.ExcelWriter(
-                output,
+                input_path,
                 engine="openpyxl"
             ) as writer:
             
+                # البيانات الأصلية
                 df.to_excel(
                     writer,
                     index=False,
                     sheet_name="النشاط"
                 )
             
-                collector_summary.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="إجمالي الوقت المهدر"
+            
+            # =====================================================
+            # فتح Excel عن طريق Windows
+            # =====================================================
+            
+            excel = win32.DispatchEx("Excel.Application")
+            
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            
+            wb = None
+            
+            try:
+            
+                wb = excel.Workbooks.Open(
+                    os.path.abspath(input_path)
                 )
             
-                calls_over_30.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="مكالمات +30 دقيقة"
+                # =================================================
+                # Source Sheet
+                # =================================================
+            
+                ws_source = wb.Worksheets("النشاط")
+            
+                last_row = ws_source.Cells(
+                    ws_source.Rows.Count,
+                    1
+                ).End(-4162).Row       # xlUp
+            
+                last_col = ws_source.Cells(
+                    1,
+                    ws_source.Columns.Count
+                ).End(-4159).Column    # xlToLeft
+            
+                source_range = ws_source.Range(
+                    ws_source.Cells(1, 1),
+                    ws_source.Cells(last_row, last_col)
                 )
             
-                calls_under_1.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="مكالمات أقل من دقيقة"
+            
+                # =================================================
+                # Helper لإنشاء Pivot Sheet
+                # =================================================
+            
+                def create_pivot_sheet(
+                    sheet_name,
+                    pivot_name,
+                    row_fields=None,
+                    column_fields=None,
+                    data_fields=None,
+                    filters=None
+                ):
+            
+                    row_fields = row_fields or []
+                    column_fields = column_fields or []
+                    data_fields = data_fields or []
+                    filters = filters or []
+            
+            
+                    # ---------------------------------------------
+                    # حذف الشيت لو موجود
+                    # ---------------------------------------------
+            
+                    try:
+                        old_sheet = wb.Worksheets(sheet_name)
+                        old_sheet.Delete()
+                    except:
+                        pass
+            
+            
+                    # ---------------------------------------------
+                    # إنشاء Sheet
+                    # ---------------------------------------------
+            
+                    ws = wb.Worksheets.Add(
+                        After=wb.Worksheets(
+                            wb.Worksheets.Count
+                        )
+                    )
+            
+                    ws.Name = sheet_name
+            
+            
+                    # ---------------------------------------------
+                    # عنوان
+                    # ---------------------------------------------
+            
+                    ws.Range("A1").Value = sheet_name
+                    ws.Range("A1").Font.Bold = True
+                    ws.Range("A1").Font.Size = 16
+            
+            
+                    # ---------------------------------------------
+                    # Pivot Cache
+                    # ---------------------------------------------
+            
+                    cache = wb.PivotCaches().Create(
+                        SourceType=1,
+                        SourceData=source_range
+                    )
+            
+            
+                    # ---------------------------------------------
+                    # Pivot Table
+                    # ---------------------------------------------
+            
+                    pivot = cache.CreatePivotTable(
+                        TableDestination=ws.Range("A3"),
+                        TableName=pivot_name
+                    )
+            
+            
+                    # ---------------------------------------------
+                    # Rows
+                    # ---------------------------------------------
+            
+                    position = 1
+            
+                    for field_name in row_fields:
+            
+                        field = pivot.PivotFields(
+                            field_name
+                        )
+            
+                        field.Orientation = 1   # xlRowField
+                        field.Position = position
+            
+                        position += 1
+            
+            
+                    # ---------------------------------------------
+                    # Columns
+                    # ---------------------------------------------
+            
+                    position = 1
+            
+                    for field_name in column_fields:
+            
+                        field = pivot.PivotFields(
+                            field_name
+                        )
+            
+                        field.Orientation = 2   # xlColumnField
+                        field.Position = position
+            
+                        position += 1
+            
+            
+                    # ---------------------------------------------
+                    # Filters
+                    # ---------------------------------------------
+            
+                    position = 1
+            
+                    for field_name in filters:
+            
+                        field = pivot.PivotFields(
+                            field_name
+                        )
+            
+                        field.Orientation = 3   # xlPageField
+                        field.Position = position
+            
+                        position += 1
+            
+            
+                    # ---------------------------------------------
+                    # Values
+                    # ---------------------------------------------
+            
+                    for field_name, function, caption in data_fields:
+            
+                        field = pivot.PivotFields(
+                            field_name
+                        )
+            
+                        pivot.AddDataField(
+                            field,
+                            caption,
+                            function
+                        )
+            
+            
+                    # ---------------------------------------------
+                    # تنسيق
+                    # ---------------------------------------------
+            
+                    ws.Columns.AutoFit()
+            
+                    ws.Range("A1").Font.Bold = True
+            
+                    return pivot
+            
+            
+                # =================================================
+                # 1 - إجمالي الوقت المهدر لكل محصل
+                # =================================================
+            
+                pivot1 = create_pivot_sheet(
+                    sheet_name="إجمالي الوقت المهدر",
+                    pivot_name="Pivot_Total_Wasted_Time",
+            
+                    row_fields=[
+                        "Collector"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "وقت مهدر",
+                            -4157,  # xlSum
+                            "إجمالي الوقت المهدر"
+                        )
+                    ]
                 )
             
-                first_activity.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="أول إفادة"
+            
+                # =================================================
+                # ترتيب Pivot 1 تنازلياً
+                # =================================================
+            
+                try:
+            
+                    pivot1.PivotFields(
+                        "Collector"
+                    ).AutoSort(
+                        2,  # xlDescending
+                        "إجمالي الوقت المهدر"
+                    )
+            
+                except:
+                    pass
+            
+            
+                # =================================================
+                # 2 - المكالمات أعلى من 30 دقيقة
+                # =================================================
+            
+                pivot2 = create_pivot_sheet(
+            
+                    sheet_name="مكالمات +30 دقيقة",
+                    pivot_name="Pivot_Calls_Over_30",
+            
+                    row_fields=[
+                        "Collector",
+                        "Created on",
+                        "ID Number",
+                        "Notes"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "فرق التوقيت",
+                            -4106,  # xlMax
+                            "فرق التوقيت"
+                        )
+                    ]
                 )
             
-                last_activity.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="آخر إفادة"
+            
+                # =================================================
+                # 3 - المكالمات أقل من دقيقة
+                # =================================================
+            
+                pivot3 = create_pivot_sheet(
+            
+                    sheet_name="مكالمات أقل من دقيقة",
+                    pivot_name="Pivot_Calls_Under_1",
+            
+                    row_fields=[
+                        "Collector",
+                        "Created on",
+                        "ID Number",
+                        "Notes"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "فرق التوقيت",
+                            -4106,  # xlMax
+                            "فرق التوقيت"
+                        )
+                    ]
                 )
             
+            
+                # =================================================
+                # 4 - أول إفادة لكل محصل
+                # =================================================
+            
+                pivot4 = create_pivot_sheet(
+            
+                    sheet_name="أول إفادة",
+                    pivot_name="Pivot_First_Activity",
+            
+                    row_fields=[
+                        "Collector"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "Created on",
+                            -4139,  # xlMin
+                            "وقت أول إفادة"
+                        )
+                    ]
+                )
+            
+            
+                # =================================================
+                # 5 - آخر إفادة لكل محصل
+                # =================================================
+            
+                pivot5 = create_pivot_sheet(
+            
+                    sheet_name="آخر إفادة",
+                    pivot_name="Pivot_Last_Activity",
+            
+                    row_fields=[
+                        "Collector"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "Created on",
+                            -4106,  # xlMax
+                            "وقت آخر إفادة"
+                        )
+                    ]
+                )
+            
+            
+                # =================================================
+                # 6 - أول إفادة بعد البريك
+                # =================================================
+            
+                # هننشئ Sheet مساعد للبيانات بعد البريك
+                try:
+            
+                    ws_after_break = wb.Worksheets(
+                        "Data After Break"
+                    )
+            
+                    ws_after_break.Delete()
+            
+                except:
+                    pass
+            
+            
+                ws_after_break = wb.Worksheets.Add(
+                    After=wb.Worksheets(
+                        wb.Worksheets.Count
+                    )
+                )
+            
+                ws_after_break.Name = "Data After Break"
+            
+            
+                # نكتب بيانات أول إفادة بعد البريك
                 first_after_break.to_excel(
-                    writer,
+                    excel_writer := pd.ExcelWriter(
+                        input_path,
+                        engine="openpyxl"
+                    ),
                     index=False,
-                    sheet_name="أول إفادة بعد البريك"
+                    sheet_name="Data After Break"
                 )
             
-                final_state_summary.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="Final State"
+                excel_writer.close()
+            
+            
+                # ================================================
+                # إعادة فتح الملف بعد إضافة البيانات
+                # ================================================
+            
+                wb.Close(
+                    SaveChanges=True
+                )
+            
+                excel.Quit()
+            
+            
+                # فتحه مرة ثانية
+                excel = win32.DispatchEx(
+                    "Excel.Application"
+                )
+            
+                excel.Visible = False
+                excel.DisplayAlerts = False
+            
+                wb = excel.Workbooks.Open(
+                    os.path.abspath(input_path)
                 )
             
             
                 # =================================================
-                # تنسيق كل الشيتات
+                # مصدر أول إفادة بعد البريك
                 # =================================================
             
-                workbook = writer.book
-            
-                header_fill = PatternFill(
-                    fill_type="solid",
-                    fgColor="073259"
+                ws_break = wb.Worksheets(
+                    "Data After Break"
                 )
             
-                header_font = Font(
-                    color="FFFFFF",
-                    bold=True
+                last_row_break = ws_break.Cells(
+                    ws_break.Rows.Count,
+                    1
+                ).End(-4162).Row
+            
+                last_col_break = ws_break.Cells(
+                    1,
+                    ws_break.Columns.Count
+                ).End(-4159).Column
+            
+                source_break = ws_break.Range(
+                    ws_break.Cells(1, 1),
+                    ws_break.Cells(
+                        last_row_break,
+                        last_col_break
+                    )
                 )
             
-                thin_side = Side(
-                    style="thin",
-                    color="000000"
+            
+                # =================================================
+                # Pivot أول إفادة بعد البريك
+                # =================================================
+            
+                try:
+                    wb.Worksheets(
+                        "أول إفادة بعد البريك"
+                    ).Delete()
+                except:
+                    pass
+            
+            
+                ws6 = wb.Worksheets.Add(
+                    After=wb.Worksheets(
+                        wb.Worksheets.Count
+                    )
                 )
             
-                thin_border = Border(
-                    left=thin_side,
-                    right=thin_side,
-                    top=thin_side,
-                    bottom=thin_side
+                ws6.Name = "أول إفادة بعد البريك"
+            
+                cache6 = wb.PivotCaches().Create(
+                    SourceType=1,
+                    SourceData=source_break
                 )
             
-                for ws in workbook.worksheets:
+                pivot6 = cache6.CreatePivotTable(
+                    TableDestination=ws6.Range("A3"),
+                    TableName="Pivot_First_After_Break"
+                )
             
-                    # كل الخلايا
-                    for row in ws.iter_rows():
             
-                        for cell in row:
+                # Collector
+                collector_field = pivot6.PivotFields(
+                    "Collector"
+                )
             
-                            cell.border = thin_border
+                collector_field.Orientation = 1
+                collector_field.Position = 1
             
-                            cell.alignment = Alignment(
-                                horizontal="center",
-                                vertical="center"
-                            )
             
-                    # Header
-                    for cell in ws[1]:
+                # أول Created on
+                created_field = pivot6.PivotFields(
+                    "Created on"
+                )
             
-                        cell.fill = header_fill
+                pivot6.AddDataField(
+                    created_field,
+                    "وقت أول إفادة بعد البريك",
+                    -4139   # xlMin
+                )
             
-                        cell.font = header_font
             
-                        cell.border = thin_border
+                ws6.Range("A1").Value = (
+                    "أول إفادة بعد البريك لكل محصل"
+                )
             
-                        cell.alignment = Alignment(
-                            horizontal="center",
-                            vertical="center"
+                ws6.Range("A1").Font.Bold = True
+                ws6.Range("A1").Font.Size = 16
+            
+                ws6.Columns.AutoFit()
+            
+            
+                # =================================================
+                # 7 - Final State
+                # =================================================
+            
+                pivot7 = create_pivot_sheet(
+            
+                    sheet_name="Final State",
+                    pivot_name="Pivot_Final_State",
+            
+                    row_fields=[
+                        "Final State"
+                    ],
+            
+                    data_fields=[
+                        (
+                            "Final State",
+                            -4112,  # xlCount
+                            "عدد الحالات"
                         )
+                    ]
+                )
             
-                    # عرض الأعمدة حسب المحتوى
-                    for column_cells in ws.columns:
             
-                        max_length = 0
+                # =================================================
+                # حذف الـ Sheet المساعد
+                # =================================================
             
-                        column_letter = (
-                            column_cells[0].column_letter
+                try:
+                    wb.Worksheets(
+                        "Data After Break"
+                    ).Delete()
+                except:
+                    pass
+            
+            
+                # =================================================
+                # حفظ
+                # =================================================
+            
+                wb.Save()
+            
+            finally:
+            
+                if wb is not None:
+            
+                    try:
+                        wb.Close(
+                            SaveChanges=True
                         )
+                    except:
+                        pass
             
-                        for cell in column_cells:
-            
-                            if cell.value is not None:
-            
-                                max_length = max(
-                                    max_length,
-                                    len(str(cell.value))
-                                )
-            
-                        ws.column_dimensions[
-                            column_letter
-                        ].width = min(
-                            max_length + 3,
-                            50
-                        )
-            
-                    ws.row_dimensions[1].height = 25
+                try:
+                    excel.Quit()
+                except:
+                    pass
             
             
-            output.seek(0)
+            # =====================================================
+            # قراءة الملف النهائي
+            # =====================================================
             
-            st.success("تم الانتهاء")
+            with open(
+                input_path,
+                "rb"
+            ) as f:
+            
+                output = f.read()
+            
+            
+            # =====================================================
+            # حذف الملف المؤقت
+            # =====================================================
+            
+            try:
+                os.unlink(input_path)
+            except:
+                pass
+            
+            
+            # =====================================================
+            # Download
+            # =====================================================
+            
+            st.success(
+                "تم إنشاء ملف Excel بكل الـ Pivot Tables بنجاح ✅"
+            )
             
             st.download_button(
                 "تحميل الملف",
                 output,
                 file_name="activity.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet"
+                )
             )
-
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
