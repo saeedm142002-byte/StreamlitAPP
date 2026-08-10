@@ -6,7 +6,6 @@ from io import BytesIO
 import torch
 import torch.nn.functional as F
 from datetime import datetime, date, time, timedelta
-import win32com.client as win32
 import tempfile
 import os
 import shutil
