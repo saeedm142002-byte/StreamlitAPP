@@ -811,7 +811,7 @@ elif page == "النشاط":
             # السلايسرات (محصل / مشرف)
             # ---------------------------
 
-            possible_supervisor_cols = ["Supervisor", "المشرف", "Team Leader", "TL", "Manager", "Supervisor Name"]
+            possible_supervisor_cols = ["Sales Team", "Supervisor", "المشرف", "Team Leader", "TL", "Manager", "Supervisor Name"]
             supervisor_col = next((c for c in possible_supervisor_cols if c in data.columns), None)
 
             filter_col1, filter_col2 = st.columns(2)
@@ -1028,6 +1028,114 @@ elif page == "النشاط":
                 xaxis=dict(dtick=1)
             )
             st.plotly_chart(fig4, use_container_width=True)
+
+
+            # ============================================================
+# 1) تعديل بسيط في تعريف عمود المشرف — ضيف "Sales Team" أول
+#    القايمة عشان يتكشف هو الأول قبل أي اسم تاني:
+#
+#    possible_supervisor_cols = ["Sales Team", "Supervisor", "المشرف",
+#                                 "Team Leader", "TL", "Manager", "Supervisor Name"]
+#
+#    (بدّل السطر القديم بده في نفس مكانه جوه قسم الداشبورد)
+# ============================================================
+# 2) القسم ده يتحط في الآخر، بعد آخر chart (توزيع المكالمات عبر
+#    ساعات اليوم) وقبل ما يخلص الـ if "processed_df" in st.session_state:
+# ============================================================
+
+            # ---------------------------
+            # تحليل العملاء (Debtor / Customer Account Number)
+            # ---------------------------
+
+            st.markdown("---")
+            st.markdown("## 👥 تحليل العملاء")
+
+            debtor_col = "Debtor"
+            account_col = "Customer Account Number"
+            missing_client_cols = [c for c in [debtor_col, account_col] if c not in filtered.columns]
+
+            if missing_client_cols:
+                st.warning(
+                    f"الأعمدة دي مش موجودة في الملف المرفوع: {', '.join(missing_client_cols)} — "
+                    "قسم تحليل العملاء مش هيظهر. تأكد من اسم العمود بالظبط في الشيت لو الاسم مختلف."
+                )
+            else:
+
+                # كل موظف تابع كام عميل (Debtor) وكام رقم حساب (Customer Account Number)
+                client_coverage = (
+                    filtered.groupby("Collector")
+                    .agg(
+                        عدد_العملاء=(debtor_col, "nunique"),
+                        عدد_أرقام_الحسابات=(account_col, "nunique"),
+                        عدد_الإفادات=(debtor_col, "count"),
+                    )
+                    .reset_index()
+                    .sort_values("عدد_العملاء", ascending=False)
+                )
+
+                st.markdown("#### كل موظف تابع كام عميل وكام رقم حساب")
+                st.dataframe(client_coverage, use_container_width=True, hide_index=True)
+
+                # الموظف اللي كرر نفس العميل أكتر من 5 مرات (أكتر من 5 إفادات على نفس الـ Debtor)
+                repeat_contacts = (
+                    filtered.groupby(["Collector", debtor_col])
+                    .size()
+                    .reset_index(name="عدد الإفادات على نفس العميل")
+                )
+                repeat_contacts = repeat_contacts[repeat_contacts["عدد الإفادات على نفس العميل"] > 5]
+                repeat_contacts = repeat_contacts.sort_values(
+                    "عدد الإفادات على نفس العميل", ascending=False
+                ).reset_index(drop=True)
+
+                st.markdown("#### موظفين كرروا الاتصال بنفس العميل أكتر من 5 مرات")
+
+                if repeat_contacts.empty:
+                    st.info("مفيش أي موظف كرر الاتصال بنفس العميل أكتر من 5 مرات في البيانات الحالية.")
+                else:
+                    st.dataframe(repeat_contacts, use_container_width=True, hide_index=True)
+
+                # =========================
+                # زرار تحميل منفصل لتحليل العملاء
+                # =========================
+
+                client_output = BytesIO()
+                with pd.ExcelWriter(client_output, engine="openpyxl") as writer:
+                    client_coverage.to_excel(writer, index=False, sheet_name="تغطية العملاء لكل موظف")
+                    repeat_contacts.to_excel(writer, index=False, sheet_name="تكرار نفس العميل")
+
+                    workbook = writer.book
+                    header_fill = PatternFill(fill_type="solid", fgColor="073259")
+                    header_font = Font(color="FFFFFF", bold=True)
+                    thin_side = Side(style="thin", color="000000")
+                    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+                    for ws in workbook.worksheets:
+                        for row in ws.iter_rows():
+                            for cell in row:
+                                cell.border = thin_border
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                        for cell in ws[1]:
+                            cell.fill = header_fill
+                            cell.font = header_font
+                            cell.border = thin_border
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+                        for column_cells in ws.columns:
+                            max_length = 0
+                            column_letter = column_cells[0].column_letter
+                            for cell in column_cells:
+                                if cell.value is not None:
+                                    max_length = max(max_length, len(str(cell.value)))
+                            ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
+                        ws.row_dimensions[1].height = 25
+
+                client_output.seek(0)
+
+                st.download_button(
+                    "⬇️ تحميل تحليل العملاء",
+                    client_output.getvalue(),
+                    file_name="client_analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
