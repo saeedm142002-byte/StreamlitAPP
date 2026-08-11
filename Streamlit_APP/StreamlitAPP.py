@@ -507,6 +507,18 @@ elif page == "التغطية":
 # في ثانية لأن الداتا هتبقى جاهزة كـ Table.
 # ============================================================
 
+# ============================================================
+# محتاج تضيف الاستيراد ده فوق مع باقي الـ imports (لو مش موجود):
+#   import plotly.express as px
+# ومحتاج تضيف plotly في requirements.txt
+# ============================================================
+# ملاحظة عن الألوان: مفيش ملف ألوان رسمي متاح للعامة من البنك
+# الأهلي السعودي (SNB)، فاستخدمت باليتة أخضر غامق/ذهبي قريبة
+# من هوية البنوك السعودية بشكل عام (مش شعار أو أصول مسجلة
+# ملكية للبنك) — لو عندك الـ Brand Guidelines بتاعتهم ابعتلي
+# الأكواد بالظبط وأظبطها.
+# ============================================================
+
 elif page == "النشاط":
 
     st.subheader("⚡ النشاط")
@@ -529,7 +541,6 @@ elif page == "النشاط":
         if st.session_state.break_choice is None:
 
             st.markdown("### هل يوجد بريك؟")
-
             col1, col2 = st.columns(2)
 
             with col1:
@@ -547,32 +558,21 @@ elif page == "النشاط":
         if st.button("🔄 تغيير الاختيار (فيه بريك / مفيش)"):
             st.session_state.break_choice = None
             st.session_state.pop("processed_output", None)
+            st.session_state.pop("processed_df", None)
             st.rerun()
 
         has_break = st.session_state.break_choice == "yes"
-
         break_start_minutes = None
         break_end_minutes = None
 
         if has_break:
-
             st.markdown("### 🕐 إعدادات البريك")
-
             col1, col2 = st.columns(2)
 
             with col1:
-                break_start = st.time_input(
-                    "البريك يبدأ الساعة",
-                    value=time(12, 0)
-                )
-
+                break_start = st.time_input("البريك يبدأ الساعة", value=time(12, 0))
             with col2:
-                break_duration = st.number_input(
-                    "مدة البريك بالدقائق",
-                    min_value=1,
-                    value=30,
-                    step=5
-                )
+                break_duration = st.number_input("مدة البريك بالدقائق", min_value=1, value=30, step=5)
 
             break_start_minutes = break_start.hour * 60 + break_start.minute
             break_end_minutes = break_start_minutes + int(break_duration)
@@ -581,15 +581,13 @@ elif page == "النشاط":
                 f"البريك من {break_start.strftime('%H:%M')} إلى "
                 f"{(datetime.combine(date.today(), break_start) + timedelta(minutes=break_duration)).strftime('%H:%M')}"
             )
-
         else:
-            st.info("تم اختيار: لا يوجد بريك — هيتحسب الوقت المهدر على طول اليوم من غير استثناء.")
+            st.info("تم اختيار: لا يوجد بريك.")
 
         start_button = st.button("🚀 ابدأ التصنيف", type="primary")
 
         # =========================
-        # المعالجة تحصل مرة واحدة وتتخزن في session_state
-        # عشان زرار التحميل بعد كدة ميعملش re-run للتصنيف تاني
+        # المعالجة (مرة واحدة فقط) + تخزين النتيجة في session_state
         # =========================
 
         if start_button:
@@ -599,14 +597,12 @@ elif page == "النشاط":
 
             required_columns = ["Notes", "Created on", "Collector"]
             missing_columns = [c for c in required_columns if c not in df.columns]
-
             if missing_columns:
                 st.error(f"الأعمدة التالية غير موجودة في الملف: {', '.join(missing_columns)}")
                 st.stop()
 
             duplicate_columns = ["Collector", "ID Number", "Notes"]
             missing_duplicate_columns = [c for c in duplicate_columns if c not in df.columns]
-
             if missing_duplicate_columns:
                 st.error(f"الأعمدة التالية غير موجودة: {', '.join(missing_duplicate_columns)}")
                 st.stop()
@@ -614,10 +610,6 @@ elif page == "النشاط":
             if "Final State" not in df.columns:
                 st.error("لا يوجد عمود Final State في الملف")
                 st.stop()
-
-            # =========================
-            # Prediction
-            # =========================
 
             progress_bar = st.progress(0)
             status = st.empty()
@@ -630,7 +622,6 @@ elif page == "النشاط":
                 label, prob = predict_text(text)
                 predictions.append(label)
                 probabilities.append(prob)
-
                 progress = (i + 1) / total
                 progress_bar.progress(progress)
                 status.text(f"{int(progress * 100)}% ({i + 1}/{total})")
@@ -640,26 +631,13 @@ elif page == "النشاط":
             df.insert(notes_index + 2, "Probability (%)", probabilities)
             df["التصنيف"] = df["التصنيف"].astype(str)
 
-            # =========================
-            # تنظيف + ترتيب
-            # =========================
-
             df["Created on"] = pd.to_datetime(df["Created on"], errors="coerce")
-
             df = df.drop_duplicates(subset=duplicate_columns, keep="first").reset_index(drop=True)
-
             df = df.sort_values(["Collector", "Created on"]).reset_index(drop=True)
 
             df["فرق التوقيت"] = (
-                df.groupby("Collector")["Created on"]
-                .diff()
-                .dt.total_seconds()
-                .div(60)
+                df.groupby("Collector")["Created on"].diff().dt.total_seconds().div(60)
             )
-
-            # =========================
-            # الوقت المهدر (نسخة واحدة نظيفة)
-            # =========================
 
             def calculate_wasted(row):
                 call_time = row["Created on"]
@@ -687,7 +665,6 @@ elif page == "النشاط":
 
             df["وقت مهدر"] = df.apply(calculate_wasted, axis=1)
 
-            # ترتيب الأعمدة
             cols = list(df.columns)
             prob_index = cols.index("Probability (%)")
             for col in ["فرق التوقيت", "وقت مهدر"]:
@@ -697,102 +674,56 @@ elif page == "النشاط":
             cols.insert(prob_index + 2, "وقت مهدر")
             df = df[cols]
 
-            # =========================
-            # الملخصات
-            # =========================
-
             collector_summary = (
                 df.groupby("Collector", as_index=False)["وقت مهدر"]
-                .sum()
-                .sort_values("وقت مهدر", ascending=False)
-                .reset_index(drop=True)
+                .sum().sort_values("وقت مهدر", ascending=False).reset_index(drop=True)
             )
-
             calls_over_30 = df[df["فرق التوقيت"] > 30].sort_values("فرق التوقيت", ascending=False)
             calls_under_1 = df[df["فرق التوقيت"] < 1].sort_values("فرق التوقيت", ascending=True)
 
             first_activity = (
-                df.dropna(subset=["Created on"])
-                .sort_values(["Collector", "Created on"])
-                .groupby("Collector", as_index=False)
-                .first()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
+                df.dropna(subset=["Created on"]).sort_values(["Collector", "Created on"])
+                .groupby("Collector", as_index=False).first()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
                 .rename(columns={"Created on": "وقت أول إفادة"})
             )
-
             last_activity = (
-                df.dropna(subset=["Created on"])
-                .sort_values(["Collector", "Created on"])
-                .groupby("Collector", as_index=False)
-                .last()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
+                df.dropna(subset=["Created on"]).sort_values(["Collector", "Created on"])
+                .groupby("Collector", as_index=False).last()[["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"]]
                 .rename(columns={"Created on": "وقت آخر إفادة"})
             )
 
-            final_state_summary = (
-                df["Final State"].fillna("Blank").value_counts().reset_index()
-            )
+            final_state_summary = df["Final State"].fillna("Blank").value_counts().reset_index()
             final_state_summary.columns = ["Final State", "عدد الحالات"]
 
-            # =========================
-            # Pivot: أداء كل محصل (ناجحة / غير ناجحة / إجمالي المغطاة)
-            # =========================
-
             pivot_summary = (
-                df.groupby(["Collector", "التصنيف"])
-                .size()
-                .unstack(fill_value=0)
+                df.groupby(["Collector", "التصنيف"]).size().unstack(fill_value=0)
+                .rename(columns={"1": "مكالمات ناجحة", "0": "مكالمات غير ناجحة"})
             )
-
-            pivot_summary = pivot_summary.rename(
-                columns={"1": "مكالمات ناجحة", "0": "مكالمات غير ناجحة"}
-            )
-
             for needed_col in ["مكالمات ناجحة", "مكالمات غير ناجحة"]:
                 if needed_col not in pivot_summary.columns:
                     pivot_summary[needed_col] = 0
-
             pivot_summary = pivot_summary[["مكالمات ناجحة", "مكالمات غير ناجحة"]]
             pivot_summary["إجمالي المكالمات المغطاة"] = pivot_summary.sum(axis=1)
             pivot_summary["نسبة النجاح %"] = (
-                (pivot_summary["مكالمات ناجحة"] / pivot_summary["إجمالي المكالمات المغطاة"] * 100)
-                .round(1)
+                (pivot_summary["مكالمات ناجحة"] / pivot_summary["إجمالي المكالمات المغطاة"] * 100).round(1)
             )
-            pivot_summary = pivot_summary.reset_index().sort_values(
-                "إجمالي المكالمات المغطاة", ascending=False
-            ).reset_index(drop=True)
-
-            # =========================
-            # فقط لو فيه بريك: أول إفادة بعد البريك
-            # =========================
+            pivot_summary = pivot_summary.reset_index().sort_values("إجمالي المكالمات المغطاة", ascending=False).reset_index(drop=True)
 
             first_after_break = None
-
             if has_break:
                 after_break = df[df["Created on"].notna()].copy()
-                after_break["وقت بالدقائق"] = (
-                    after_break["Created on"].dt.hour * 60 + after_break["Created on"].dt.minute
-                )
+                after_break["وقت بالدقائق"] = after_break["Created on"].dt.hour * 60 + after_break["Created on"].dt.minute
                 after_break = after_break[after_break["وقت بالدقائق"] >= break_end_minutes]
-
                 first_after_break = (
-                    after_break
-                    .sort_values(["Collector", "Created on"])
-                    .groupby("Collector", as_index=False)
-                    .first()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
-                    .rename(columns={"Created on": "وقت أول إفادة بعد البريك"})
+                    after_break.sort_values(["Collector", "Created on"]).groupby("Collector", as_index=False).first()
+                    [["Collector", "Created on", "التصنيف", "Probability (%)"]].rename(columns={"Created on": "وقت أول إفادة بعد البريك"})
                 )
-
                 first_after_break["حالة النجاح"] = first_after_break["التصنيف"].apply(
                     lambda v: "ناجحة" if v == "1" else ("غير ناجحة" if v == "0" else v)
                 )
 
-            # =========================
-            # كتابة ملف الإكسيل
-            # =========================
-
             output = BytesIO()
-
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-
                 df.to_excel(writer, index=False, sheet_name="النشاط")
                 pivot_summary.to_excel(writer, index=False, sheet_name="Pivot - أداء المحصلين")
                 collector_summary.to_excel(writer, index=False, sheet_name="إجمالي الوقت المهدر")
@@ -800,32 +731,26 @@ elif page == "النشاط":
                 calls_under_1.to_excel(writer, index=False, sheet_name="مكالمات أقل من دقيقة")
                 first_activity.to_excel(writer, index=False, sheet_name="أول إفادة")
                 last_activity.to_excel(writer, index=False, sheet_name="آخر إفادة")
-
                 if first_after_break is not None:
                     first_after_break.to_excel(writer, index=False, sheet_name="أول إفادة بعد البريك")
-
                 final_state_summary.to_excel(writer, index=False, sheet_name="Final State")
 
                 workbook = writer.book
-
                 header_fill = PatternFill(fill_type="solid", fgColor="073259")
                 header_font = Font(color="FFFFFF", bold=True)
                 thin_side = Side(style="thin", color="000000")
                 thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
 
                 for ws in workbook.worksheets:
-
                     for row in ws.iter_rows():
                         for cell in row:
                             cell.border = thin_border
                             cell.alignment = Alignment(horizontal="center", vertical="center")
-
                     for cell in ws[1]:
                         cell.fill = header_fill
                         cell.font = header_font
                         cell.border = thin_border
                         cell.alignment = Alignment(horizontal="center", vertical="center")
-
                     for column_cells in ws.columns:
                         max_length = 0
                         column_letter = column_cells[0].column_letter
@@ -833,36 +758,23 @@ elif page == "النشاط":
                             if cell.value is not None:
                                 max_length = max(max_length, len(str(cell.value)))
                         ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
-
                     ws.row_dimensions[1].height = 25
-
-                # =========================
-                # تحويل شيت الـ Pivot لـ Excel Table حقيقي
-                # (فيه Filter + Sort جاهزين على كل عمود)
-                # =========================
 
                 pivot_ws = workbook["Pivot - أداء المحصلين"]
                 last_col_letter = pivot_ws.cell(row=1, column=pivot_ws.max_column).column_letter
                 table_range = f"A1:{last_col_letter}{pivot_ws.max_row}"
-
                 excel_table = Table(displayName="PivotAdaaAlMohaseleen", ref=table_range)
-                excel_table.tableStyleInfo = TableStyleInfo(
-                    name="TableStyleMedium2",
-                    showRowStripes=True
-                )
+                excel_table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
                 pivot_ws.add_table(excel_table)
 
             output.seek(0)
 
             st.session_state.processed_output = output.getvalue()
+            st.session_state.processed_df = df.copy()
 
             status.empty()
             progress_bar.empty()
             st.success("تم الانتهاء")
-
-        # =========================
-        # زرار التحميل — بيتحمل من الذاكرة من غير إعادة تصنيف
-        # =========================
 
         if "processed_output" in st.session_state:
             st.download_button(
@@ -871,6 +783,173 @@ elif page == "النشاط":
                 file_name="activity.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+        # ============================================================
+        # الداشبورد (4 Cards + 4 Charts) — بيظهر بعد التصنيف مباشرة
+        # ============================================================
+
+        if "processed_df" in st.session_state:
+
+            data = st.session_state.processed_df
+
+            SNB_GREEN = "#00693E"
+            SNB_GREEN_DARK = "#024930"
+            SNB_GOLD = "#C9A227"
+            SNB_RED = "#A33A3A"
+
+            st.markdown("---")
+            st.markdown("## 📊 داشبورد النشاط")
+
+            # ---------------------------
+            # السلايسرات (محصل / مشرف)
+            # ---------------------------
+
+            possible_supervisor_cols = ["Supervisor", "المشرف", "Team Leader", "TL", "Manager", "Supervisor Name"]
+            supervisor_col = next((c for c in possible_supervisor_cols if c in data.columns), None)
+
+            filter_col1, filter_col2 = st.columns(2)
+
+            with filter_col1:
+                selected_collectors = st.multiselect(
+                    "فلترة حسب المحصل",
+                    options=sorted(data["Collector"].dropna().unique().tolist()),
+                    default=[]
+                )
+
+            with filter_col2:
+                if supervisor_col:
+                    selected_supervisors = st.multiselect(
+                        "فلترة حسب المشرف",
+                        options=sorted(data[supervisor_col].dropna().unique().tolist()),
+                        default=[]
+                    )
+                else:
+                    selected_supervisors = []
+                    st.caption(
+                        "⚠️ مفيش عمود واضح للمشرف في الملف المرفوع "
+                        "(بحثت عن: Supervisor / المشرف / Team Leader). "
+                        "لو الملف فيه عمود بالاسم دة، ابعتلي اسمه بالظبط عشان أظبط الفلتر."
+                    )
+
+            filtered = data.copy()
+            if selected_collectors:
+                filtered = filtered[filtered["Collector"].isin(selected_collectors)]
+            if supervisor_col and selected_supervisors:
+                filtered = filtered[filtered[supervisor_col].isin(selected_supervisors)]
+
+            if filtered.empty:
+                st.warning("مفيش بيانات مطابقة للفلتر المختار.")
+                st.stop()
+
+            # ---------------------------
+            # الـ 4 Cards
+            # ---------------------------
+
+            total_calls = len(filtered)
+            success_rate = (filtered["التصنيف"] == "1").mean() * 100 if total_calls else 0
+            total_wasted = filtered["وقت مهدر"].sum()
+            active_collectors = filtered["Collector"].nunique()
+            avg_gap = filtered["فرق التوقيت"].dropna().mean()
+            avg_gap = 0 if pd.isna(avg_gap) else avg_gap
+
+            def render_card(col, title, value, subtitle=""):
+                with col:
+                    st.markdown(f"""
+                        <div style="
+                            background: linear-gradient(135deg, {SNB_GREEN} 0%, {SNB_GREEN_DARK} 100%);
+                            border-right: 5px solid {SNB_GOLD};
+                            border-radius: 14px;
+                            padding: 18px;
+                            color: white;
+                            text-align: center;
+                            box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+                            min-height: 120px;
+                        ">
+                            <div style="font-size:13px; opacity:0.85; margin-bottom:8px;">{title}</div>
+                            <div style="font-size:26px; font-weight:800;">{value}</div>
+                            <div style="font-size:11px; opacity:0.75; margin-top:6px;">{subtitle}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+            c1, c2, c3, c4 = st.columns(4)
+            render_card(c1, "إجمالي المكالمات", f"{total_calls:,}", f"نسبة النجاح {success_rate:.1f}%")
+            render_card(c2, "إجمالي الوقت المهدر", f"{total_wasted:,.0f} د", "بالدقائق")
+            render_card(c3, "المحصلين النشطين", f"{active_collectors}", "محصل")
+            render_card(c4, "متوسط الفرق بين المكالمات", f"{avg_gap:.1f} د", "بالدقائق")
+
+            st.markdown("")
+
+            # ---------------------------
+            # آخر نشاط لكل محصل
+            # ---------------------------
+
+            with st.expander("📋 آخر نشاط لكل محصل"):
+                last_per_collector = (
+                    filtered.dropna(subset=["Created on"])
+                    .sort_values(["Collector", "Created on"])
+                    .groupby("Collector", as_index=False)
+                    .last()
+                )
+                show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
+                st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)
+
+            st.markdown("")
+
+            # ---------------------------
+            # الـ 4 Charts
+            # ---------------------------
+
+            chart_col1, chart_col2 = st.columns(2)
+
+            with chart_col1:
+                st.markdown("#### مكالمات ناجحة / غير ناجحة لكل محصل")
+                chart1_data = filtered.groupby(["Collector", "التصنيف"]).size().reset_index(name="عدد المكالمات")
+                chart1_data["الحالة"] = chart1_data["التصنيف"].map({"1": "ناجحة", "0": "غير ناجحة"}).fillna(chart1_data["التصنيف"])
+                fig1 = px.bar(
+                    chart1_data, x="Collector", y="عدد المكالمات", color="الحالة",
+                    barmode="group",
+                    color_discrete_map={"ناجحة": SNB_GREEN, "غير ناجحة": SNB_GOLD}
+                )
+                fig1.update_layout(margin=dict(t=10, b=10), legend_title_text="")
+                st.plotly_chart(fig1, use_container_width=True)
+
+            with chart_col2:
+                st.markdown("#### توزيع Final State")
+                fs_data = filtered["Final State"].fillna("Blank").value_counts().reset_index()
+                fs_data.columns = ["Final State", "عدد"]
+                fig2 = px.pie(
+                    fs_data, names="Final State", values="عدد",
+                    color_discrete_sequence=[SNB_GREEN, SNB_GREEN_DARK, SNB_GOLD, "#8FA998", "#D9C27E", "#4C7A61"]
+                )
+                fig2.update_layout(margin=dict(t=10, b=10))
+                st.plotly_chart(fig2, use_container_width=True)
+
+            chart_col3, chart_col4 = st.columns(2)
+
+            with chart_col3:
+                st.markdown("#### الوقت المهدر لكل محصل")
+                wasted_data = (
+                    filtered.groupby("Collector", as_index=False)["وقت مهدر"]
+                    .sum().sort_values("وقت مهدر", ascending=False)
+                )
+                fig3 = px.bar(
+                    wasted_data, x="Collector", y="وقت مهدر",
+                    color_discrete_sequence=[SNB_RED]
+                )
+                fig3.update_layout(margin=dict(t=10, b=10))
+                st.plotly_chart(fig3, use_container_width=True)
+
+            with chart_col4:
+                st.markdown("#### توزيع المكالمات عبر ساعات اليوم")
+                hour_data = filtered.dropna(subset=["Created on"]).copy()
+                hour_data["الساعة"] = hour_data["Created on"].dt.hour
+                hour_counts = hour_data.groupby("الساعة").size().reset_index(name="عدد المكالمات")
+                fig4 = px.bar(
+                    hour_counts, x="الساعة", y="عدد المكالمات",
+                    color_discrete_sequence=[SNB_GREEN]
+                )
+                fig4.update_layout(margin=dict(t=10, b=10))
+                st.plotly_chart(fig4, use_container_width=True)
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
