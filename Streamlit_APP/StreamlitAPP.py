@@ -789,6 +789,12 @@ elif page == "النشاط":
         # الداشبورد (4 Cards + 4 Charts) — بيظهر بعد التصنيف مباشرة
         # ============================================================
 
+# ============================================================
+# ده بديل قسم "الداشبورد" بالكامل (من سطر SNB_GREEN = ...
+# لحد آخر سطر في الملف اللي فاتت). امسح القسم القديم وحط
+# ده مكانه، والباقي (البريك + التصنيف + تحميل الإكسيل) زي ما هو.
+# ============================================================
+
         if "processed_df" in st.session_state:
 
             data = st.session_state.processed_df
@@ -843,15 +849,43 @@ elif page == "النشاط":
                 st.stop()
 
             # ---------------------------
+            # حساب مقاييس كل محصل (مستخدمة في الـ Cards والـ Charts)
+            # ---------------------------
+
+            collector_agg = filtered.groupby("Collector").agg(
+                المكالمات_المغطاة=("Collector", "size"),
+                المكالمات_الناجحة=("التصنيف", lambda s: (s == "1").sum()),
+                الوقت_المهدر=("وقت مهدر", "sum"),
+            ).reset_index()
+
+            def normalize_0_100(s):
+                if s.max() == s.min():
+                    return pd.Series([100.0] * len(s), index=s.index)
+                return (s - s.min()) / (s.max() - s.min()) * 100
+
+            collector_agg["_covered_norm"] = normalize_0_100(collector_agg["المكالمات_المغطاة"])
+            collector_agg["_success_norm"] = normalize_0_100(collector_agg["المكالمات_الناجحة"])
+            collector_agg["_wasted_norm"] = normalize_0_100(collector_agg["الوقت_المهدر"])
+
+            # سكور الفاعلية: 35% تغطية + 35% نجاح + 30% (100 - وقت مهدر)
+            # يعني اللي بيغطي مكالمات كتير وناجح فيها وبيضيع وقت أقل بيطلع فوق
+            collector_agg["سكور الفاعلية"] = (
+                collector_agg["_covered_norm"] * 0.35
+                + collector_agg["_success_norm"] * 0.35
+                + (100 - collector_agg["_wasted_norm"]) * 0.30
+            ).round(1)
+
+            collector_agg = collector_agg.sort_values("سكور الفاعلية", ascending=False).reset_index(drop=True)
+            top_performer = collector_agg.iloc[0]
+
+            # ---------------------------
             # الـ 4 Cards
             # ---------------------------
 
-            total_calls = len(filtered)
-            success_rate = (filtered["التصنيف"] == "1").mean() * 100 if total_calls else 0
-            total_wasted = filtered["وقت مهدر"].sum()
-            active_collectors = filtered["Collector"].nunique()
-            avg_gap = filtered["فرق التوقيت"].dropna().mean()
-            avg_gap = 0 if pd.isna(avg_gap) else avg_gap
+            total_covered = len(filtered)
+            total_successful = int((filtered["التصنيف"] == "1").sum())
+            median_wasted = filtered["وقت مهدر"].median()
+            median_wasted = 0 if pd.isna(median_wasted) else median_wasted
 
             def render_card(col, title, value, subtitle=""):
                 with col:
@@ -864,25 +898,29 @@ elif page == "النشاط":
                             color: white;
                             text-align: center;
                             box-shadow: 0 4px 14px rgba(0,0,0,0.15);
-                            min-height: 120px;
+                            min-height: 130px;
                         ">
                             <div style="font-size:13px; opacity:0.85; margin-bottom:8px;">{title}</div>
-                            <div style="font-size:26px; font-weight:800;">{value}</div>
+                            <div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">{value}</div>
                             <div style="font-size:11px; opacity:0.75; margin-top:6px;">{subtitle}</div>
                         </div>
                     """, unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns(4)
-            render_card(c1, "إجمالي المكالمات", f"{total_calls:,}", f"نسبة النجاح {success_rate:.1f}%")
-            render_card(c2, "إجمالي الوقت المهدر", f"{total_wasted:,.0f} د", "بالدقائق")
-            render_card(c3, "المحصلين النشطين", f"{active_collectors}", "محصل")
-            render_card(c4, "متوسط الفرق بين المكالمات", f"{avg_gap:.1f} د", "بالدقائق")
+            render_card(c1, "عدد المكالمات المغطاة", f"{total_covered:,}")
+            render_card(c2, "عدد المكالمات الناجحة", f"{total_successful:,}",
+                        f"{(total_successful / total_covered * 100 if total_covered else 0):.1f}% من المغطاة")
+            render_card(c3, "متوسط الوقت المهدر (Median)", f"{median_wasted:.1f} د")
+            render_card(c4, "أكتر محصل فاعلية", f"{top_performer['Collector']}",
+                        f"سكور {top_performer['سكور الفاعلية']:.0f}/100")
+
+            st.caption(
+                "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
+                "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
+                "مقارنة بباقي المحصلين في نفس الفلتر الحالي."
+            )
 
             st.markdown("")
-
-            # ---------------------------
-            # آخر نشاط لكل محصل
-            # ---------------------------
 
             with st.expander("📋 آخر نشاط لكل محصل"):
                 last_per_collector = (
@@ -894,63 +932,102 @@ elif page == "النشاط":
                 show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
                 st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)
 
+            with st.expander("🏆 ترتيب المحصلين حسب سكور الفاعلية"):
+                st.dataframe(
+                    collector_agg[["Collector", "المكالمات_المغطاة", "المكالمات_الناجحة", "الوقت_المهدر", "سكور الفاعلية"]],
+                    use_container_width=True, hide_index=True
+                )
+
             st.markdown("")
 
             # ---------------------------
-            # الـ 4 Charts
+            # الـ 4 Charts — كل شارت ياخد مساحته كاملة (مش نص الشاشة)
             # ---------------------------
 
-            chart_col1, chart_col2 = st.columns(2)
+            base_font = dict(size=14)
 
-            with chart_col1:
-                st.markdown("#### مكالمات ناجحة / غير ناجحة لكل محصل")
-                chart1_data = filtered.groupby(["Collector", "التصنيف"]).size().reset_index(name="عدد المكالمات")
-                chart1_data["الحالة"] = chart1_data["التصنيف"].map({"1": "ناجحة", "0": "غير ناجحة"}).fillna(chart1_data["التصنيف"])
-                fig1 = px.bar(
-                    chart1_data, x="Collector", y="عدد المكالمات", color="الحالة",
-                    barmode="group",
-                    color_discrete_map={"ناجحة": SNB_GREEN, "غير ناجحة": SNB_GOLD}
-                )
-                fig1.update_layout(margin=dict(t=10, b=10), legend_title_text="")
-                st.plotly_chart(fig1, use_container_width=True)
+            # 1) مكالمات ناجحة/غير ناجحة لكل محصل — Bar أفقي عشان الأسماء تبقى واضحة
+            st.markdown("#### مكالمات ناجحة مقابل غير ناجحة لكل محصل")
 
-            with chart_col2:
-                st.markdown("#### توزيع Final State")
-                fs_data = filtered["Final State"].fillna("Blank").value_counts().reset_index()
-                fs_data.columns = ["Final State", "عدد"]
-                fig2 = px.pie(
-                    fs_data, names="Final State", values="عدد",
-                    color_discrete_sequence=[SNB_GREEN, SNB_GREEN_DARK, SNB_GOLD, "#8FA998", "#D9C27E", "#4C7A61"]
-                )
-                fig2.update_layout(margin=dict(t=10, b=10))
-                st.plotly_chart(fig2, use_container_width=True)
+            chart1_data = filtered.groupby(["Collector", "التصنيف"]).size().reset_index(name="عدد المكالمات")
+            chart1_data["الحالة"] = chart1_data["التصنيف"].map({"1": "ناجحة", "0": "غير ناجحة"}).fillna(chart1_data["التصنيف"])
 
-            chart_col3, chart_col4 = st.columns(2)
+            n_collectors = filtered["Collector"].nunique()
+            fig1_height = max(400, 55 * n_collectors)
 
-            with chart_col3:
-                st.markdown("#### الوقت المهدر لكل محصل")
-                wasted_data = (
-                    filtered.groupby("Collector", as_index=False)["وقت مهدر"]
-                    .sum().sort_values("وقت مهدر", ascending=False)
-                )
-                fig3 = px.bar(
-                    wasted_data, x="Collector", y="وقت مهدر",
-                    color_discrete_sequence=[SNB_RED]
-                )
-                fig3.update_layout(margin=dict(t=10, b=10))
-                st.plotly_chart(fig3, use_container_width=True)
+            fig1 = px.bar(
+                chart1_data, y="Collector", x="عدد المكالمات", color="الحالة",
+                orientation="h", barmode="stack", text="عدد المكالمات",
+                color_discrete_map={"ناجحة": SNB_GREEN, "غير ناجحة": SNB_GOLD}
+            )
+            fig1.update_traces(textposition="inside", textfont=dict(color="white", size=13))
+            fig1.update_layout(
+                height=fig1_height, font=base_font, legend_title_text="",
+                margin=dict(t=10, b=10),
+                yaxis={"categoryorder": "total ascending"}
+            )
+            st.plotly_chart(fig1, use_container_width=True)
 
-            with chart_col4:
-                st.markdown("#### توزيع المكالمات عبر ساعات اليوم")
-                hour_data = filtered.dropna(subset=["Created on"]).copy()
-                hour_data["الساعة"] = hour_data["Created on"].dt.hour
-                hour_counts = hour_data.groupby("الساعة").size().reset_index(name="عدد المكالمات")
-                fig4 = px.bar(
-                    hour_counts, x="الساعة", y="عدد المكالمات",
-                    color_discrete_sequence=[SNB_GREEN]
-                )
-                fig4.update_layout(margin=dict(t=10, b=10))
-                st.plotly_chart(fig4, use_container_width=True)
+            # 2) توزيع Final State — Column chart بدل الـ Pie
+            st.markdown("#### توزيع Final State")
+
+            fs_data = filtered["Final State"].fillna("Blank").value_counts().reset_index()
+            fs_data.columns = ["Final State", "عدد"]
+            fs_data = fs_data.sort_values("عدد", ascending=False)
+
+            if len(fs_data) > 12:
+                top_fs = fs_data.iloc[:11]
+                other_sum = fs_data.iloc[11:]["عدد"].sum()
+                fs_data = pd.concat([top_fs, pd.DataFrame({"Final State": ["أخرى"], "عدد": [other_sum]})], ignore_index=True)
+
+            fig2 = px.bar(
+                fs_data, x="Final State", y="عدد", text="عدد",
+                color_discrete_sequence=[SNB_GREEN]
+            )
+            fig2.update_traces(textposition="outside", textfont=dict(size=13))
+            fig2.update_layout(
+                height=450, font=base_font, margin=dict(t=20, b=10),
+                xaxis_tickangle=-30
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # 3) الوقت المهدر لكل محصل — Bar
+            st.markdown("#### الوقت المهدر لكل محصل")
+
+            wasted_data = (
+                filtered.groupby("Collector", as_index=False)["وقت مهدر"]
+                .sum().sort_values("وقت مهدر", ascending=False)
+            )
+            fig3_height = max(400, 45 * len(wasted_data))
+
+            fig3 = px.bar(
+                wasted_data, x="وقت مهدر", y="Collector", orientation="h",
+                text="وقت مهدر", color_discrete_sequence=[SNB_RED]
+            )
+            fig3.update_traces(texttemplate="%{text:.0f}", textposition="outside", textfont=dict(size=13))
+            fig3.update_layout(
+                height=fig3_height, font=base_font, margin=dict(t=10, b=10),
+                yaxis={"categoryorder": "total ascending"}
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+            # 4) توزيع المكالمات عبر ساعات اليوم
+            st.markdown("#### توزيع المكالمات عبر ساعات اليوم")
+
+            hour_data = filtered.dropna(subset=["Created on"]).copy()
+            hour_data["الساعة"] = hour_data["Created on"].dt.hour
+            hour_counts = hour_data.groupby("الساعة").size().reset_index(name="عدد المكالمات")
+
+            fig4 = px.bar(
+                hour_counts, x="الساعة", y="عدد المكالمات", text="عدد المكالمات",
+                color_discrete_sequence=[SNB_GREEN_DARK]
+            )
+            fig4.update_traces(textposition="outside", textfont=dict(size=13))
+            fig4.update_layout(
+                height=420, font=base_font, margin=dict(t=20, b=10),
+                xaxis=dict(dtick=1)
+            )
+            st.plotly_chart(fig4, use_container_width=True)
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
