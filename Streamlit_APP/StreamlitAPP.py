@@ -1047,6 +1047,23 @@ elif page == "النشاط":
             # تحليل العملاء (Debtor / Customer Account Number)
             # ---------------------------
 
+# ============================================================
+# 1) تعديل بسيط في تعريف عمود المشرف — ضيف "Sales Team" أول
+#    القايمة عشان يتكشف هو الأول قبل أي اسم تاني:
+#
+#    possible_supervisor_cols = ["Sales Team", "Supervisor", "المشرف",
+#                                 "Team Leader", "TL", "Manager", "Supervisor Name"]
+#
+#    (بدّل السطر القديم بده في نفس مكانه جوه قسم الداشبورد)
+# ============================================================
+# 2) القسم ده يتحط في الآخر، بعد آخر chart (توزيع المكالمات عبر
+#    ساعات اليوم) وقبل ما يخلص الـ if "processed_df" in st.session_state:
+# ============================================================
+
+            # ---------------------------
+            # تحليل العملاء (Debtor / Customer Account Number)
+            # ---------------------------
+
             st.markdown("---")
             st.markdown("## 👥 تحليل العملاء")
 
@@ -1082,15 +1099,15 @@ elif page == "النشاط":
                     .size()
                     .reset_index(name="عدد الإفادات على نفس العميل")
                 )
-                repeat_contacts = repeat_contacts[repeat_contacts["عدد الإفادات على نفس العميل"] > 5]
+                repeat_contacts = repeat_contacts[repeat_contacts["عدد الإفادات على نفس العميل"] >= 2]
                 repeat_contacts = repeat_contacts.sort_values(
                     "عدد الإفادات على نفس العميل", ascending=False
                 ).reset_index(drop=True)
 
-                st.markdown("#### موظفين كرروا الاتصال بنفس العميل أكتر من 5 مرات")
+                st.markdown("#### موظفين كلموا نفس العميل أكتر من مرة")
 
                 if repeat_contacts.empty:
-                    st.info("مفيش أي موظف كرر الاتصال بنفس العميل أكتر من 5 مرات في البيانات الحالية.")
+                    st.info("مفيش أي موظف كلم نفس العميل أكتر من مرة في البيانات الحالية.")
                 else:
                     st.dataframe(repeat_contacts, use_container_width=True, hide_index=True)
 
