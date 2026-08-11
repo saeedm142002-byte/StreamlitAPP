@@ -492,6 +492,19 @@ elif page == "التغطية":
 # ======================
 # PAGE 5 - النشاط
 # ======================
+# ============================================================
+# ملاحظة مهمة قبل الكود:
+# مفيش مكتبة بايثون (openpyxl / xlsxwriter) بتقدر تعمل
+# PivotTable حقيقي (اللي بتسحب فيه الحقول بنفسك جوه إكسيل)
+# من غير إكسيل نفسه شغال (COM) — ودة مش متاح على Streamlit Cloud
+# لأنه Linux وملوش Excel.
+# البديل العملي اللي هعمله: شيت "Pivot" منسق كـ Excel Table
+# حقيقي (فيه Filter + Sort جاهزين) وبيدي بالظبط الأرقام اللي
+# طلبتها (ناجحة / مغطاة لكل محصل). لو عايز Pivot تفاعلي 100%
+# تقدر تعمل Insert > PivotTable على الشيت دة من جوه إكسيل نفسه
+# في ثانية لأن الداتا هتبقى جاهزة كـ Table.
+# ============================================================
+
 elif page == "النشاط":
 
     st.subheader("⚡ النشاط")
@@ -505,170 +518,135 @@ elif page == "النشاط":
     if uploaded_file:
 
         # =========================
-        # إعدادات البريك
+        # الخطوة 1: هل فيه بريك؟
         # =========================
 
-        st.markdown("### 🕐 إعدادات البريك")
+        if "break_choice" not in st.session_state:
+            st.session_state.break_choice = None
 
-        col1, col2 = st.columns(2)
+        if st.session_state.break_choice is None:
 
-        with col1:
-            break_start = st.time_input(
-                "البريك يبدأ الساعة",
-                value=time(12, 0)
-            )
+            st.markdown("### هل يوجد بريك؟")
 
-        with col2:
-            break_duration = st.number_input(
-                "مدة البريك بالدقائق",
-                min_value=1,
-                value=30,
-                step=5
-            )
+            col1, col2 = st.columns(2)
 
-        # حساب نهاية البريك
-        break_start_minutes = (
-            break_start.hour * 60 +
-            break_start.minute
-        )
+            with col1:
+                if st.button("Yes", use_container_width=True):
+                    st.session_state.break_choice = "yes"
+                    st.rerun()
 
-        break_end_minutes = (
-            break_start_minutes +
-            int(break_duration)
-        )
+            with col2:
+                if st.button("No", use_container_width=True):
+                    st.session_state.break_choice = "no"
+                    st.rerun()
 
-        st.info(
-            f"البريك من {break_start.strftime('%H:%M')} "
-            f"إلى "
-            f"{(datetime.combine(date.today(), break_start) + timedelta(minutes=break_duration)).strftime('%H:%M')}"
-        )
+            st.stop()
 
-        # =========================
-        # قراءة الملف
-        # =========================
+        if st.button("🔄 تغيير الاختيار (فيه بريك / مفيش)"):
+            st.session_state.break_choice = None
+            st.session_state.pop("processed_output", None)
+            st.rerun()
 
-        df = pd.read_excel(uploaded_file)
-        # حذف أول صف من الملف
-        df = df.iloc[1:].reset_index(drop=True)
+        has_break = st.session_state.break_choice == "yes"
 
-        # الأعمدة المطلوبة
-        required_columns = [
-            "Notes",
-            "Created on",
-            "Collector"
-        ]
+        break_start_minutes = None
+        break_end_minutes = None
 
-        missing_columns = [
-            col for col in required_columns
-            if col not in df.columns
-        ]
+        if has_break:
 
-        if missing_columns:
+            st.markdown("### 🕐 إعدادات البريك")
 
-            st.error(
-                f"الأعمدة التالية غير موجودة في الملف: "
-                f"{', '.join(missing_columns)}"
+            col1, col2 = st.columns(2)
+
+            with col1:
+                break_start = st.time_input(
+                    "البريك يبدأ الساعة",
+                    value=time(12, 0)
+                )
+
+            with col2:
+                break_duration = st.number_input(
+                    "مدة البريك بالدقائق",
+                    min_value=1,
+                    value=30,
+                    step=5
+                )
+
+            break_start_minutes = break_start.hour * 60 + break_start.minute
+            break_end_minutes = break_start_minutes + int(break_duration)
+
+            st.info(
+                f"البريك من {break_start.strftime('%H:%M')} إلى "
+                f"{(datetime.combine(date.today(), break_start) + timedelta(minutes=break_duration)).strftime('%H:%M')}"
             )
 
         else:
+            st.info("تم اختيار: لا يوجد بريك — هيتحسب الوقت المهدر على طول اليوم من غير استثناء.")
+
+        start_button = st.button("🚀 ابدأ التصنيف", type="primary")
+
+        # =========================
+        # المعالجة تحصل مرة واحدة وتتخزن في session_state
+        # عشان زرار التحميل بعد كدة ميعملش re-run للتصنيف تاني
+        # =========================
+
+        if start_button:
+
+            df = pd.read_excel(uploaded_file)
+            df = df.iloc[1:].reset_index(drop=True)
+
+            required_columns = ["Notes", "Created on", "Collector"]
+            missing_columns = [c for c in required_columns if c not in df.columns]
+
+            if missing_columns:
+                st.error(f"الأعمدة التالية غير موجودة في الملف: {', '.join(missing_columns)}")
+                st.stop()
+
+            duplicate_columns = ["Collector", "ID Number", "Notes"]
+            missing_duplicate_columns = [c for c in duplicate_columns if c not in df.columns]
+
+            if missing_duplicate_columns:
+                st.error(f"الأعمدة التالية غير موجودة: {', '.join(missing_duplicate_columns)}")
+                st.stop()
+
+            if "Final State" not in df.columns:
+                st.error("لا يوجد عمود Final State في الملف")
+                st.stop()
+
+            # =========================
+            # Prediction
+            # =========================
 
             progress_bar = st.progress(0)
             status = st.empty()
 
             predictions = []
             probabilities = []
-
             total = len(df)
 
-            # =========================
-            # Prediction
-            # =========================
-
             for i, text in enumerate(df["Notes"]):
-
                 label, prob = predict_text(text)
-
                 predictions.append(label)
                 probabilities.append(prob)
 
                 progress = (i + 1) / total
-
                 progress_bar.progress(progress)
-
-                status.text(
-                    f"{int(progress * 100)}% "
-                    f"({i + 1}/{total})"
-                )
-
-            # =========================
-            # إضافة التصنيف والاحتمالية
-            # =========================
+                status.text(f"{int(progress * 100)}% ({i + 1}/{total})")
 
             notes_index = df.columns.get_loc("Notes")
-
-            df.insert(
-                notes_index + 1,
-                "التصنيف",
-                predictions
-            )
-
-            df.insert(
-                notes_index + 2,
-                "Probability (%)",
-                probabilities
-            )
+            df.insert(notes_index + 1, "التصنيف", predictions)
+            df.insert(notes_index + 2, "Probability (%)", probabilities)
+            df["التصنيف"] = df["التصنيف"].astype(str)
 
             # =========================
-            # حساب الوقت المهدر
+            # تنظيف + ترتيب
             # =========================
 
-            df["Created on"] = pd.to_datetime(
-                df["Created on"],
-                errors="coerce"
-            )
+            df["Created on"] = pd.to_datetime(df["Created on"], errors="coerce")
 
-            def calculate_wasted_time(row):
+            df = df.drop_duplicates(subset=duplicate_columns, keep="first").reset_index(drop=True)
 
-                call_time = row["Created on"]
-                classification = row["التصنيف"]
-
-                # لو الوقت غير موجود
-                if pd.isna(call_time):
-                    return 0
-
-                # تحويل وقت المكالمة إلى دقائق من بداية اليوم
-                call_minutes = (
-                    call_time.hour * 60 +
-                    call_time.minute
-                )
-
-                # =========================
-                # داخل البريك
-                # =========================
-
-                if (
-                    break_start_minutes
-                    <= call_minutes
-                    < break_end_minutes
-                ):
-                    return 0
-
-                # =========================
-                # خارج البريك
-                # =========================
-
-                # فرق الوقت بين المكالمات
-                # سيتم حسابه لاحقاً
-                return 0
-
-            # =========================
-            # فرق الوقت بين المكالمات
-            # لكل محصل
-            # =========================
-
-            df = df.sort_values(
-                ["Collector", "Created on"]
-            ).reset_index(drop=True)
+            df = df.sort_values(["Collector", "Created on"]).reset_index(drop=True)
 
             df["فرق التوقيت"] = (
                 df.groupby("Collector")["Created on"]
@@ -678,517 +656,219 @@ elif page == "النشاط":
             )
 
             # =========================
-            # حساب الوقت المهدر
+            # الوقت المهدر (نسخة واحدة نظيفة)
             # =========================
 
             def calculate_wasted(row):
-
                 call_time = row["Created on"]
                 classification = row["التصنيف"]
                 time_diff = row["فرق التوقيت"]
 
-                # أول مكالمة للمحصل
-                if pd.isna(time_diff):
-                    return 0
-
-                # لو فرق الوقت بالسالب لأي سبب
-                if time_diff < 0:
-                    return 0
-
-                # وقت المكالمة بالدقائق
-                call_minutes = (
-                    call_time.hour * 60 +
-                    call_time.minute
-                )
-
-                # =========================
-                # داخل البريك
-                # =========================
-
-                if (
-                    break_start_minutes
-                    <= call_minutes
-                    < break_end_minutes
-                ):
-                    return 0
-
-                # =========================
-                # خارج البريك
-                # =========================
-
-                if str(classification) == "1":
-                    wasted = time_diff - 20
-
-                elif str(classification) == "0":
-                    wasted = time_diff - 5
-
-                else:
-                    wasted = 0
-
-                # لا نسمح بقيمة سالبة
-                return max(wasted, 0)
-
-            df["وقت مهدر"] = df.apply(
-                calculate_wasted,
-                axis=1
-            )
-
-            # =========================
-            # إزالة الـ Duplicates
-            # =========================
-            
-            duplicate_columns = [
-                "Collector",
-                "ID Number",
-                "Notes"
-            ]
-            
-            missing_duplicate_columns = [
-                col for col in duplicate_columns
-                if col not in df.columns
-            ]
-            
-            if missing_duplicate_columns:
-                st.error(
-                    f"الأعمدة التالية غير موجودة: "
-                    f"{', '.join(missing_duplicate_columns)}"
-                )
-                st.stop()
-            
-            df = df.drop_duplicates(
-                subset=duplicate_columns,
-                keep="first"
-            ).reset_index(drop=True)
-            
-            
-            # =========================
-            # تحويل Created on إلى datetime
-            # =========================
-            
-            df["Created on"] = pd.to_datetime(
-                df["Created on"],
-                errors="coerce"
-            )
-            
-            
-            # =========================
-            # ترتيب حسب المحصل والوقت
-            # =========================
-            
-            df = df.sort_values(
-                ["Collector", "Created on"]
-            ).reset_index(drop=True)
-            
-            
-            # =========================
-            # فرق التوقيت
-            # =========================
-            
-            df["فرق التوقيت"] = (
-                df.groupby("Collector")["Created on"]
-                .diff()
-                .dt.total_seconds()
-                .div(60)
-            )
-            
-            
-            # =========================
-            # حساب الوقت المهدر
-            # =========================
-            
-            def calculate_wasted(row):
-            
-                call_time = row["Created on"]
-                classification = row["التصنيف"]
-                time_diff = row["فرق التوقيت"]
-            
                 if pd.isna(time_diff) or pd.isna(call_time):
                     return 0
-            
                 if time_diff < 0:
                     return 0
-            
-                call_minutes = (
-                    call_time.hour * 60 +
-                    call_time.minute
-                )
-            
-                # داخل البريك
-                if (
-                    break_start_minutes
-                    <= call_minutes
-                    < break_end_minutes
-                ):
-                    return 0
-            
-                # خارج البريك
-                if str(classification) == "1":
+
+                if has_break:
+                    call_minutes = call_time.hour * 60 + call_time.minute
+                    if break_start_minutes <= call_minutes < break_end_minutes:
+                        return 0
+
+                if classification == "1":
                     wasted = time_diff - 20
-            
-                elif str(classification) == "0":
+                elif classification == "0":
                     wasted = time_diff - 5
-            
                 else:
                     wasted = 0
-            
+
                 return max(wasted, 0)
-            
-            
-            df["وقت مهدر"] = df.apply(
-                calculate_wasted,
-                axis=1
-            )
-            
-            
-            # =====================================================
+
+            df["وقت مهدر"] = df.apply(calculate_wasted, axis=1)
+
             # ترتيب الأعمدة
-            # Probability -> فرق التوقيت -> وقت مهدر
-            # =====================================================
-            
             cols = list(df.columns)
-            
             prob_index = cols.index("Probability (%)")
-            
             for col in ["فرق التوقيت", "وقت مهدر"]:
                 cols.remove(col)
-            
             prob_index = cols.index("Probability (%)")
-            
             cols.insert(prob_index + 1, "فرق التوقيت")
             cols.insert(prob_index + 2, "وقت مهدر")
-            
             df = df[cols]
-            
-            
-            # =====================================================
-            # 1 - إجمالي الوقت المهدر لكل محصل
-            # =====================================================
-            
+
+            # =========================
+            # الملخصات
+            # =========================
+
             collector_summary = (
                 df.groupby("Collector", as_index=False)["وقت مهدر"]
                 .sum()
-                .sort_values(
-                    "وقت مهدر",
-                    ascending=False
-                )
+                .sort_values("وقت مهدر", ascending=False)
                 .reset_index(drop=True)
             )
-            
-            
-            # =====================================================
-            # 2 - المكالمات أعلى من 30 دقيقة
-            # =====================================================
-            
-            calls_over_30 = df[
-                df["فرق التوقيت"] > 30
-            ].copy()
-            
-            calls_over_30 = calls_over_30.sort_values(
-                "فرق التوقيت",
-                ascending=False
-            )
-            
-            
-            # =====================================================
-            # 3 - المكالمات أقل من دقيقة
-            # =====================================================
-            
-            calls_under_1 = df[
-                df["فرق التوقيت"] < 1
-            ].copy()
-            
-            calls_under_1 = calls_under_1.sort_values(
-                "فرق التوقيت",
-                ascending=True
-            )
-            
-            
-            # =====================================================
-            # 4 - أول إفادة لكل محصل
-            # =====================================================
-            
+
+            calls_over_30 = df[df["فرق التوقيت"] > 30].sort_values("فرق التوقيت", ascending=False)
+            calls_under_1 = df[df["فرق التوقيت"] < 1].sort_values("فرق التوقيت", ascending=True)
+
             first_activity = (
                 df.dropna(subset=["Created on"])
                 .sort_values(["Collector", "Created on"])
                 .groupby("Collector", as_index=False)
-                .first()
+                .first()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
+                .rename(columns={"Created on": "وقت أول إفادة"})
             )
-            
-            first_activity = first_activity[
-                [
-                    "Collector",
-                    "Created on",
-                    "التصنيف",
-                    "Probability (%)"
-                ]
-            ].rename(
-                columns={
-                    "Created on": "وقت أول إفادة"
-                }
-            )
-            
-            
-            # =====================================================
-            # 5 - آخر إفادة لكل محصل
-            # =====================================================
-            
+
             last_activity = (
                 df.dropna(subset=["Created on"])
                 .sort_values(["Collector", "Created on"])
                 .groupby("Collector", as_index=False)
-                .last()
+                .last()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
+                .rename(columns={"Created on": "وقت آخر إفادة"})
             )
-            
-            last_activity = last_activity[
-                [
-                    "Collector",
-                    "Created on",
-                    "التصنيف",
-                    "Probability (%)"
-                ]
-            ].rename(
-                columns={
-                    "Created on": "وقت آخر إفادة"
-                }
-            )
-            
-            
-            # =====================================================
-            # 6 - أول إفادة بعد البريك
-            # =====================================================
-            
-            after_break = df[
-                df["Created on"].notna()
-            ].copy()
-            
-            after_break["وقت بالدقائق"] = (
-                after_break["Created on"].dt.hour * 60
-                + after_break["Created on"].dt.minute
-            )
-            
-            after_break = after_break[
-                after_break["وقت بالدقائق"] >= break_end_minutes
-            ]
-            
-            first_after_break = (
-                after_break
-                .sort_values(["Collector", "Created on"])
-                .groupby("Collector", as_index=False)
-                .first()
-            )
-            
-            first_after_break = first_after_break[
-                [
-                    "Collector",
-                    "Created on",
-                    "التصنيف",
-                    "Probability (%)"
-                ]
-            ].rename(
-                columns={
-                    "Created on": "وقت أول إفادة بعد البريك"
-                }
-            )
-            
-            
-            # =====================================================
-            # تحويل التصنيف إلى حالة نجاح
-            # =====================================================
-            
-            def success_status(value):
-            
-                if str(value) == "1":
-                    return "ناجحة"
-            
-                elif str(value) == "0":
-                    return "غير ناجحة"
-            
-                return value
-            
-            
-            first_after_break["حالة النجاح"] = (
-                first_after_break["التصنيف"]
-                .apply(success_status)
-            )
-            
-            
-            # =====================================================
-            # 7 - Final State
-            # =====================================================
-            
-            if "Final State" not in df.columns:
-            
-                st.error("لا يوجد عمود Final State في الملف")
-                st.stop()
-            
+
             final_state_summary = (
-                df["Final State"]
-                .fillna("Blank")
-                .value_counts()
-                .reset_index()
+                df["Final State"].fillna("Blank").value_counts().reset_index()
             )
-            
-            final_state_summary.columns = [
-                "Final State",
-                "عدد الحالات"
-            ]
-            
-            
-            # =====================================================
-            # Excel
-            # =====================================================
-            
+            final_state_summary.columns = ["Final State", "عدد الحالات"]
+
+            # =========================
+            # Pivot: أداء كل محصل (ناجحة / غير ناجحة / إجمالي المغطاة)
+            # =========================
+
+            pivot_summary = (
+                df.groupby(["Collector", "التصنيف"])
+                .size()
+                .unstack(fill_value=0)
+            )
+
+            pivot_summary = pivot_summary.rename(
+                columns={"1": "مكالمات ناجحة", "0": "مكالمات غير ناجحة"}
+            )
+
+            for needed_col in ["مكالمات ناجحة", "مكالمات غير ناجحة"]:
+                if needed_col not in pivot_summary.columns:
+                    pivot_summary[needed_col] = 0
+
+            pivot_summary = pivot_summary[["مكالمات ناجحة", "مكالمات غير ناجحة"]]
+            pivot_summary["إجمالي المكالمات المغطاة"] = pivot_summary.sum(axis=1)
+            pivot_summary["نسبة النجاح %"] = (
+                (pivot_summary["مكالمات ناجحة"] / pivot_summary["إجمالي المكالمات المغطاة"] * 100)
+                .round(1)
+            )
+            pivot_summary = pivot_summary.reset_index().sort_values(
+                "إجمالي المكالمات المغطاة", ascending=False
+            ).reset_index(drop=True)
+
+            # =========================
+            # فقط لو فيه بريك: أول إفادة بعد البريك
+            # =========================
+
+            first_after_break = None
+
+            if has_break:
+                after_break = df[df["Created on"].notna()].copy()
+                after_break["وقت بالدقائق"] = (
+                    after_break["Created on"].dt.hour * 60 + after_break["Created on"].dt.minute
+                )
+                after_break = after_break[after_break["وقت بالدقائق"] >= break_end_minutes]
+
+                first_after_break = (
+                    after_break
+                    .sort_values(["Collector", "Created on"])
+                    .groupby("Collector", as_index=False)
+                    .first()[["Collector", "Created on", "التصنيف", "Probability (%)"]]
+                    .rename(columns={"Created on": "وقت أول إفادة بعد البريك"})
+                )
+
+                first_after_break["حالة النجاح"] = first_after_break["التصنيف"].apply(
+                    lambda v: "ناجحة" if v == "1" else ("غير ناجحة" if v == "0" else v)
+                )
+
+            # =========================
+            # كتابة ملف الإكسيل
+            # =========================
+
             output = BytesIO()
-            
-            with pd.ExcelWriter(
-                output,
-                engine="openpyxl"
-            ) as writer:
-            
-                df.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="النشاط"
-                )
-            
-                collector_summary.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="إجمالي الوقت المهدر"
-                )
-            
-                calls_over_30.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="مكالمات +30 دقيقة"
-                )
-            
-                calls_under_1.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="مكالمات أقل من دقيقة"
-                )
-            
-                first_activity.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="أول إفادة"
-                )
-            
-                last_activity.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="آخر إفادة"
-                )
-            
-                first_after_break.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="أول إفادة بعد البريك"
-                )
-            
-                final_state_summary.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="Final State"
-                )
-            
-            
-                # =================================================
-                # تنسيق كل الشيتات
-                # =================================================
-            
+
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+
+                df.to_excel(writer, index=False, sheet_name="النشاط")
+                pivot_summary.to_excel(writer, index=False, sheet_name="Pivot - أداء المحصلين")
+                collector_summary.to_excel(writer, index=False, sheet_name="إجمالي الوقت المهدر")
+                calls_over_30.to_excel(writer, index=False, sheet_name="مكالمات +30 دقيقة")
+                calls_under_1.to_excel(writer, index=False, sheet_name="مكالمات أقل من دقيقة")
+                first_activity.to_excel(writer, index=False, sheet_name="أول إفادة")
+                last_activity.to_excel(writer, index=False, sheet_name="آخر إفادة")
+
+                if first_after_break is not None:
+                    first_after_break.to_excel(writer, index=False, sheet_name="أول إفادة بعد البريك")
+
+                final_state_summary.to_excel(writer, index=False, sheet_name="Final State")
+
                 workbook = writer.book
-            
-                header_fill = PatternFill(
-                    fill_type="solid",
-                    fgColor="073259"
-                )
-            
-                header_font = Font(
-                    color="FFFFFF",
-                    bold=True
-                )
-            
-                thin_side = Side(
-                    style="thin",
-                    color="000000"
-                )
-            
-                thin_border = Border(
-                    left=thin_side,
-                    right=thin_side,
-                    top=thin_side,
-                    bottom=thin_side
-                )
-            
+
+                header_fill = PatternFill(fill_type="solid", fgColor="073259")
+                header_font = Font(color="FFFFFF", bold=True)
+                thin_side = Side(style="thin", color="000000")
+                thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
                 for ws in workbook.worksheets:
-            
-                    # كل الخلايا
+
                     for row in ws.iter_rows():
-            
                         for cell in row:
-            
                             cell.border = thin_border
-            
-                            cell.alignment = Alignment(
-                                horizontal="center",
-                                vertical="center"
-                            )
-            
-                    # Header
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+
                     for cell in ws[1]:
-            
                         cell.fill = header_fill
-            
                         cell.font = header_font
-            
                         cell.border = thin_border
-            
-                        cell.alignment = Alignment(
-                            horizontal="center",
-                            vertical="center"
-                        )
-            
-                    # عرض الأعمدة حسب المحتوى
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+
                     for column_cells in ws.columns:
-            
                         max_length = 0
-            
-                        column_letter = (
-                            column_cells[0].column_letter
-                        )
-            
+                        column_letter = column_cells[0].column_letter
                         for cell in column_cells:
-            
                             if cell.value is not None:
-            
-                                max_length = max(
-                                    max_length,
-                                    len(str(cell.value))
-                                )
-            
-                        ws.column_dimensions[
-                            column_letter
-                        ].width = min(
-                            max_length + 3,
-                            50
-                        )
-            
+                                max_length = max(max_length, len(str(cell.value)))
+                        ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
+
                     ws.row_dimensions[1].height = 25
-            
-            
+
+                # =========================
+                # تحويل شيت الـ Pivot لـ Excel Table حقيقي
+                # (فيه Filter + Sort جاهزين على كل عمود)
+                # =========================
+
+                pivot_ws = workbook["Pivot - أداء المحصلين"]
+                last_col_letter = pivot_ws.cell(row=1, column=pivot_ws.max_column).column_letter
+                table_range = f"A1:{last_col_letter}{pivot_ws.max_row}"
+
+                excel_table = Table(displayName="PivotAdaaAlMohaseleen", ref=table_range)
+                excel_table.tableStyleInfo = TableStyleInfo(
+                    name="TableStyleMedium2",
+                    showRowStripes=True
+                )
+                pivot_ws.add_table(excel_table)
+
             output.seek(0)
-            
+
+            st.session_state.processed_output = output.getvalue()
+
+            status.empty()
+            progress_bar.empty()
             st.success("تم الانتهاء")
-            
+
+        # =========================
+        # زرار التحميل — بيتحمل من الذاكرة من غير إعادة تصنيف
+        # =========================
+
+        if "processed_output" in st.session_state:
             st.download_button(
                 "تحميل الملف",
-                output,
+                st.session_state.processed_output,
                 file_name="activity.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
