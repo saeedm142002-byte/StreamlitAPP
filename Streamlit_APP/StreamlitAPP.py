@@ -884,9 +884,12 @@ elif page == "النشاط":
 
             total_covered = len(filtered)
             total_successful = int((filtered["التصنيف"] == "1").sum())
-            median_wasted = filtered["وقت مهدر"].median()
-            median_wasted = 0 if pd.isna(median_wasted) else median_wasted
-
+            
+            # Average وقت مهدر
+            avg_wasted = filtered["وقت مهدر"].mean()
+            avg_wasted = 0 if pd.isna(avg_wasted) else avg_wasted
+            
+            
             def render_card(col, title, value, subtitle=""):
                 with col:
                     st.markdown(f"""
@@ -900,20 +903,49 @@ elif page == "النشاط":
                             box-shadow: 0 4px 14px rgba(0,0,0,0.15);
                             min-height: 130px;
                         ">
-                            <div style="font-size:13px; opacity:0.85; margin-bottom:8px;">{title}</div>
-                            <div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">{value}</div>
-                            <div style="font-size:11px; opacity:0.75; margin-top:6px;">{subtitle}</div>
+                            <div style="font-size:13px; opacity:0.85; margin-bottom:8px;">
+                                {title}
+                            </div>
+            
+                            <div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">
+                                {value}
+                            </div>
+            
+                            <div style="font-size:11px; opacity:0.75; margin-top:6px;">
+                                {subtitle}
+                            </div>
                         </div>
                     """, unsafe_allow_html=True)
-
+            
+            
             c1, c2, c3, c4 = st.columns(4)
-            render_card(c1, "عدد المكالمات المغطاة", f"{total_covered:,}")
-            render_card(c2, "عدد المكالمات الناجحة", f"{total_successful:,}",
-                        f"{(total_successful / total_covered * 100 if total_covered else 0):.1f}% من المغطاة")
-            render_card(c3, "متوسط الوقت المهدر (Median)", f"{median_wasted:.1f} د")
-            render_card(c4, "أكتر محصل فاعلية", f"{top_performer['Collector']}",
-                        f"سكور {top_performer['سكور الفاعلية']:.0f}/100")
-
+            
+            render_card(
+                c1,
+                "عدد المكالمات المغطاة",
+                f"{total_covered:,}"
+            )
+            
+            render_card(
+                c2,
+                "عدد المكالمات الناجحة",
+                f"{total_successful:,}",
+                f"{(total_successful / total_covered * 100 if total_covered else 0):.1f}% من المغطاة"
+            )
+            
+            render_card(
+                c3,
+                "متوسط الوقت المهدر (AVG)",
+                f"{avg_wasted:.1f} د"
+            )
+            
+            render_card(
+                c4,
+                "أكتر محصل فاعلية",
+                f"{top_performer['Collector']}",
+                f"سكور {top_performer['سكور الفاعلية']:.0f}/100"
+            )
+            
             st.caption(
                 "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
                 "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
