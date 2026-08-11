@@ -9,6 +9,7 @@ from datetime import datetime, date, time, timedelta
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 import plotly.express as px
+import plotly.express as px
 
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
