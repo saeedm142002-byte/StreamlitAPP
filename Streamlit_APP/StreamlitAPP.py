@@ -536,7 +536,7 @@ if page == "الوعود القائمة و المكسورة":
             SNB_RED = "#A33A3A"
 
             # إعدادات موحدة لتكبير وتغميق الـ Data Labels وأسماء المحور السيني
-            DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="black")
+            DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="white")
             XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
 
             sup_amount_current = (
@@ -561,7 +561,8 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig1.update_traces(
                     texttemplate="<b>%{text:,.0f}</b>",
-                    textposition="outside",
+                    textposition="inside",
+                    insidetextanchor="end",
                     textfont=DATA_LABEL_FONT
                 )
                 fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
@@ -581,7 +582,8 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig2.update_traces(
                     texttemplate="<b>%{text}</b>",
-                    textposition="outside",
+                    textposition="inside",
+                    insidetextanchor="end",
                     textfont=DATA_LABEL_FONT
                 )
                 fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
@@ -600,7 +602,8 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig3.update_traces(
                     texttemplate="<b>%{text:.1f}</b>",
-                    textposition="outside",
+                    textposition="inside",
+                    insidetextanchor="end",
                     textfont=DATA_LABEL_FONT
                 )
                 fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
