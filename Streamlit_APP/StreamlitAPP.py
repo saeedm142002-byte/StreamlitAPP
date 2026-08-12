@@ -138,15 +138,13 @@ if page == "الوعود القائمة و المكسورة":
         type=["xlsx", "xls"]
     )
 
-    if portfolio_file:
+    # ============================================================
+    # الدالة المعالجة الأساسية - Cached
+    # ============================================================
+    @st.cache_data(show_spinner="جاري معالجة الملف...")
+    def process_portfolio(file_bytes, portfolio_type_):
 
-        progress_bar = st.progress(0)
-        status = st.empty()
-
-        # ==========================================
-        # قراءة الملف
-        # ==========================================
-        df = pd.read_excel(portfolio_file)
+        df = pd.read_excel(BytesIO(file_bytes))
 
         # حذف أول صف بعد الـ Header
         df = df.iloc[1:].reset_index(drop=True)
@@ -157,7 +155,8 @@ if page == "الوعود القائمة و المكسورة":
             "Salesperson",
             "Final State",
             "Sub State",
-            "حالة المعالجة - التمويل"
+            "حالة المعالجة - التمويل",
+            "ملاحظات-التمويل"
         ]
 
         for col in text_cols:
@@ -177,22 +176,18 @@ if page == "الوعود القائمة و المكسورة":
 
         today = pd.Timestamp.today().normalize()
 
-        progress_bar.progress(20)
-
         # ==========================================
         # بناء الـ base حسب المسار المختار
         # ==========================================
 
-        if portfolio_type == "NPL&Dpd60":
+        if portfolio_type_ == "NPL&Dpd60":
 
             base = df.copy()
 
-            # حذف Sara || Op
             base = base[
                 base["Sales Team"] != "Sara || Op"
             ]
 
-            # Final State
             base = base[
                 base["Final State"].str.contains(
                     "واعد بالسداد",
@@ -200,7 +195,6 @@ if page == "الوعود القائمة و المكسورة":
                 )
             ]
 
-            # حالة المعالجة
             base = base[
                 (base["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
                 (base["حالة المعالجة - التمويل"].isna())
@@ -210,7 +204,6 @@ if page == "الوعود القائمة و المكسورة":
 
             base = df.copy()
 
-            # 1) Sales Team - خد بس السطرين دول
             allowed_sales_teams = [
                 "SNB II Alsarhan II Naser",
                 "SNB II Alsarhan II Tariq"
@@ -219,7 +212,6 @@ if page == "الوعود القائمة و المكسورة":
                 base["Sales Team"].isin(allowed_sales_teams)
             ]
 
-            # 2) Salesperson - شيل دول (والبلانك كمان)
             excluded_salespersons = [
                 "Closed payments II Alaa SNB",
                 "Hold Companies II SNB2",
@@ -233,7 +225,6 @@ if page == "الوعود القائمة و المكسورة":
                 & (base["Salesperson"].str.lower() != "nan")
             ]
 
-            # 3) Sub State - تحتوي على "واعد بالسداد"
             base = base[
                 base["Sub State"].str.contains(
                     "واعد بالسداد",
@@ -241,10 +232,8 @@ if page == "الوعود القائمة و المكسورة":
                 )
             ]
 
-        progress_bar.progress(40)
-
         # ==========================================
-        # الوعود القائمة (نفس المنطق للمسارين)
+        # الوعود القائمة
         # ==========================================
         current = base.copy()
 
@@ -260,95 +249,63 @@ if page == "الوعود القائمة و المكسورة":
             current["Follow up Last Date"] != today
         ]
 
-        progress_bar.progress(70)
-
         # ==========================================
-        # الوعود المكسورة (نفس المنطق للمسارين)
+        # الوعود المكسورة
         # ==========================================
         broken = base.copy()
 
-        # حذف مواعيد النهاردة والمستقبل
         broken = broken[
             broken["Follow up Due Date"] < today
         ]
 
-        # الاحتفاظ فقط بالصفوف التي بها Follow up Last Date
         broken = broken[
             broken["Follow up Last Date"].notna()
         ]
 
-        # حساب الفرق بين آخر متابعة وموعد الوعد
         broken["فرق الايام"] = (
             broken["Follow up Last Date"] - broken["Follow up Due Date"]
         ).dt.days
 
-        # الاحتفاظ فقط بالقيم السالبة
         broken = broken[
             broken["فرق الايام"] < 0
         ]
 
-        # حذف الأعمدة لو موجودة
-        for col in ["عدد ايام ترحيل الوعد", "فرق الايام"]:
-            if col in broken.columns and col != "فرق الايام":
-                broken.drop(columns=[col], inplace=True)
+        broken = broken.drop(columns=["فرق الايام"])
 
-        if "فرق الايام" in broken.columns:
-            broken.drop(columns=["فرق الايام"], inplace=True)
-
-        # مكان العمود بعد Follow up Last Date
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
 
-        # إضافة عدد أيام ترحيل الوعد
         broken.insert(
             insert_position,
             "عدد ايام ترحيل الوعد",
             (today - broken["Follow up Due Date"]).dt.days
         )
 
-        # الاحتفاظ فقط بالوعود المكسورة
         broken = broken[
             broken["عدد ايام ترحيل الوعد"] > 0
         ]
 
-        progress_bar.progress(100)
-        status.text("100%")
+        return current.reset_index(drop=True), broken.reset_index(drop=True)
 
-        # ==========================================
-        # ملف الوعود القائمة
-        # ==========================================
-        output_current = BytesIO()
+    if portfolio_file:
 
-        with pd.ExcelWriter(
-            output_current,
-            engine="openpyxl"
-        ) as writer:
-            current.to_excel(
-                writer,
-                index=False
-            )
+        file_bytes = portfolio_file.getvalue()
+        current, broken = process_portfolio(file_bytes, portfolio_type)
+
         st.success(f"تم استخراج وعود قائمة {len(current)} حساب")
-
-        output_current.seek(0)
-
-        # ==========================================
-        # ملف الوعود المكسورة
-        # ==========================================
-        output_broken = BytesIO()
-
-        with pd.ExcelWriter(
-            output_broken,
-            engine="openpyxl"
-        ) as writer:
-            broken.to_excel(
-                writer,
-                index=False
-            )
-
         st.success(f"تم استخراج وعود مكسورة {len(broken)} حساب")
 
-        output_broken.seek(0)
+        # ==========================================
+        # ملفات التحميل (Excel)
+        # ==========================================
+        output_current = BytesIO()
+        with pd.ExcelWriter(output_current, engine="openpyxl") as writer:
+            current.to_excel(writer, index=False)
+        output_current.seek(0)
 
-        st.success("تم تجهيز الملفات بنجاح")
+        output_broken = BytesIO()
+        with pd.ExcelWriter(output_broken, engine="openpyxl") as writer:
+            broken.to_excel(writer, index=False)
+        output_broken.seek(0)
 
         col1, col2 = st.columns(2)
 
@@ -369,14 +326,19 @@ if page == "الوعود القائمة و المكسورة":
             )
 
         # ============================================================
-        # داشبورد الوعود: تقارير Pivot + سلايسرات + أصل البيانات + شارتات
+        # داشبورد الوعود
         # ============================================================
 
         st.markdown("---")
         st.markdown("## 📊 داشبورد الوعود")
 
-        required_report_cols = ["Sales Team", "Salesperson", "Net Amount", "Account Number"]
-        missing_report_cols = [c for c in required_report_cols if c not in df.columns]
+        # عمود "المشرف" في الداشبورد يختلف حسب نوع المحفظة:
+        # NPL&Dpd60 -> يقرأ من عمود "ملاحظات-التمويل"
+        # SNB       -> يقرأ من عمود "Sales Team" زي ما هو
+        supervisor_col = "ملاحظات-التمويل" if portfolio_type == "NPL&Dpd60" else "Sales Team"
+
+        required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
+        missing_report_cols = [c for c in required_report_cols if c not in current.columns]
 
         if missing_report_cols:
             st.warning(
@@ -386,11 +348,11 @@ if page == "الوعود القائمة و المكسورة":
         else:
 
             # ---------------------------
-            # سلايسرات (المشرف / الموظف) - مشتركة على القائمة والمكسورة
+            # سلايسرات (المشرف / الموظف)
             # ---------------------------
 
             all_supervisors = sorted(
-                pd.concat([current["Sales Team"], broken["Sales Team"]]).dropna().unique().tolist()
+                pd.concat([current[supervisor_col], broken[supervisor_col]]).dropna().unique().tolist()
             )
             all_salespersons = sorted(
                 pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
@@ -400,22 +362,24 @@ if page == "الوعود القائمة و المكسورة":
 
             with filter_col1:
                 selected_supervisors = st.multiselect(
-                    "فلترة حسب المشرف (Sales Team)",
+                    "فلترة حسب المشرف",
                     options=all_supervisors,
-                    default=[]
+                    default=[],
+                    key="promises_supervisor_filter"
                 )
 
             with filter_col2:
                 selected_salespersons = st.multiselect(
                     "فلترة حسب الموظف (Salesperson)",
                     options=all_salespersons,
-                    default=[]
+                    default=[],
+                    key="promises_salesperson_filter"
                 )
 
             def apply_dashboard_filters(d):
-                out = d.copy()
+                out = d
                 if selected_supervisors:
-                    out = out[out["Sales Team"].isin(selected_supervisors)]
+                    out = out[out[supervisor_col].isin(selected_supervisors)]
                 if selected_salespersons:
                     out = out[out["Salesperson"].isin(selected_salespersons)]
                 return out
@@ -424,7 +388,7 @@ if page == "الوعود القائمة و المكسورة":
             broken_f = apply_dashboard_filters(broken)
 
             # ---------------------------
-            # دالة بناء تقرير Pivot-style (مشرف -> موظف -> اجمالي مشرف -> اجمالي كلي)
+            # دالة بناء تقرير Pivot-style
             # ---------------------------
 
             def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
@@ -441,7 +405,7 @@ if page == "الوعود القائمة و المكسورة":
                 grand_count = 0
                 grand_extra = 0.0
 
-                for supervisor, sup_group in d.groupby("Sales Team", dropna=False):
+                for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
                     sup_amount = 0.0
                     sup_count = 0
                     sup_extra = 0.0
@@ -509,7 +473,8 @@ if page == "الوعود القائمة و المكسورة":
                 def highlight_rows(row):
                     is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
                     if is_total:
-                        return ["font-weight: bold; background-color: #eef2f7"] * len(row)
+                        # صفوف إجمالي المشرف / الإجمالي الكلي: نص أسود Bold
+                        return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
                     return [""] * len(row)
 
                 return d.style.apply(highlight_rows, axis=1).format(fmt)
@@ -570,16 +535,19 @@ if page == "الوعود القائمة و المكسورة":
             SNB_GOLD = "#C9A227"
             SNB_RED = "#A33A3A"
 
-            # 1) مبلغ المديونية لكل مشرف - قائمة مقابل مكسورة
+            # إعدادات موحدة لتكبير وتغميق الـ Data Labels وأسماء المحور السيني
+            DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="black")
+            XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="black")
+
             sup_amount_current = (
-                current_f.groupby("Sales Team", dropna=False)["Net Amount"].sum()
-                .reset_index().rename(columns={"Net Amount": "مبلغ المديونية"})
+                current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
+                .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
             )
             sup_amount_current["النوع"] = "قائمة"
 
             sup_amount_broken = (
-                broken_f.groupby("Sales Team", dropna=False)["Net Amount"].sum()
-                .reset_index().rename(columns={"Net Amount": "مبلغ المديونية"})
+                broken_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
+                .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
             )
             sup_amount_broken["النوع"] = "مكسورة"
 
@@ -587,15 +555,19 @@ if page == "الوعود القائمة و المكسورة":
 
             if not sup_amount_combined.empty:
                 fig1 = px.bar(
-                    sup_amount_combined, x="Sales Team", y="مبلغ المديونية", color="النوع",
+                    sup_amount_combined, x="المشرف", y="مبلغ المديونية", color="النوع",
                     barmode="group", text="مبلغ المديونية",
                     color_discrete_map={"قائمة": SNB_GREEN, "مكسورة": SNB_RED}
                 )
-                fig1.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+                fig1.update_traces(
+                    texttemplate="<b>%{text:,.0f}</b>",
+                    textposition="outside",
+                    textfont=DATA_LABEL_FONT
+                )
+                fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
                 fig1.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                 st.plotly_chart(fig1, use_container_width=True)
 
-            # 2) أعلى الموظفين بعدد الحسابات (المكسورة)
             emp_count_broken = (
                 broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
                 .reset_index(name="عدد الحسابات")
@@ -607,22 +579,31 @@ if page == "الوعود القائمة و المكسورة":
                     emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
                     color_discrete_sequence=[SNB_RED]
                 )
-                fig2.update_traces(textposition="outside")
+                fig2.update_traces(
+                    texttemplate="<b>%{text}</b>",
+                    textposition="outside",
+                    textfont=DATA_LABEL_FONT
+                )
+                fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
                 fig2.update_layout(height=420, xaxis_tickangle=-30, margin=dict(t=20, b=10))
                 st.plotly_chart(fig2, use_container_width=True)
 
-            # 3) متوسط عدد ايام ترحيل الوعد لكل مشرف
             days_by_sup = (
-                broken_f.groupby("Sales Team", dropna=False)["عدد ايام ترحيل الوعد"].mean()
-                .reset_index().rename(columns={"عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
+                broken_f.groupby(supervisor_col, dropna=False)["عدد ايام ترحيل الوعد"].mean()
+                .reset_index().rename(columns={supervisor_col: "المشرف", "عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
             )
             if not days_by_sup.empty:
                 st.markdown("#### متوسط عدد أيام ترحيل الوعد لكل مشرف")
                 fig3 = px.bar(
-                    days_by_sup, x="Sales Team", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
+                    days_by_sup, x="المشرف", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
                     color_discrete_sequence=[SNB_GOLD]
                 )
-                fig3.update_traces(texttemplate="%{text:.1f}", textposition="outside")
+                fig3.update_traces(
+                    texttemplate="<b>%{text:.1f}</b>",
+                    textposition="outside",
+                    textfont=DATA_LABEL_FONT
+                )
+                fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
                 fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                 st.plotly_chart(fig3, use_container_width=True)
 # ======================
