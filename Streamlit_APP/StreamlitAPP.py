@@ -123,6 +123,15 @@ if page == "الوعود القائمة و المكسورة":
 
     st.subheader("📊 الوعود القائمة / الوعود المكسورة")
 
+    # ==========================================
+    # اختيار المسار: NPL&Dpd60 أو SNB
+    # ==========================================
+    portfolio_type = st.radio(
+        "اختار نوع المحفظة",
+        options=["NPL&Dpd60", "SNB"],
+        horizontal=True
+    )
+
     portfolio_file = st.file_uploader(
         "رفع ملف المحفظة",
         type=["xlsx", "xls"]
@@ -144,14 +153,16 @@ if page == "الوعود القائمة و المكسورة":
         # تنظيف النصوص
         text_cols = [
             "Sales Team",
+            "Salesperson",
             "Final State",
+            "Sub State",
             "حالة المعالجة - التمويل"
         ]
 
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
-        
+
         # تحويل التواريخ
         df["Follow up Due Date"] = pd.to_datetime(
             df["Follow up Due Date"],
@@ -162,41 +173,77 @@ if page == "الوعود القائمة و المكسورة":
             df["Follow up Last Date"],
             errors="coerce"
         ).dt.normalize()
-       
 
         today = pd.Timestamp.today().normalize()
 
         progress_bar.progress(20)
 
         # ==========================================
-        # فلتر مشترك
+        # بناء الـ base حسب المسار المختار
         # ==========================================
-        base = df.copy()
 
-        # حذف Sara || Op
-        base = base[
-            base["Sales Team"] != "Sara || Op"   
-                                           
-        ]
+        if portfolio_type == "NPL&Dpd60":
 
-        # Final State
-        base = base[
-            base["Final State"].str.contains(
-                "واعد بالسداد",
-                na=False
-            )
-        ]
+            base = df.copy()
 
-        # حالة المعالجة
-        base = base[
-            (base["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
-            (base["حالة المعالجة - التمويل"].isna())
-        ]
+            # حذف Sara || Op
+            base = base[
+                base["Sales Team"] != "Sara || Op"
+            ]
+
+            # Final State
+            base = base[
+                base["Final State"].str.contains(
+                    "واعد بالسداد",
+                    na=False
+                )
+            ]
+
+            # حالة المعالجة
+            base = base[
+                (base["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
+                (base["حالة المعالجة - التمويل"].isna())
+            ]
+
+        else:  # SNB
+
+            base = df.copy()
+
+            # 1) Sales Team - خد بس السطرين دول
+            allowed_sales_teams = [
+                "SNB II Alsarhan II Naser",
+                "SNB II Alsarhan II Tariq"
+            ]
+            base = base[
+                base["Sales Team"].isin(allowed_sales_teams)
+            ]
+
+            # 2) Salesperson - شيل دول (والبلانك كمان)
+            excluded_salespersons = [
+                "Closed payments II Alaa SNB",
+                "Hold Companies II SNB2",
+                "Abdullah Alsarhan",
+                "Archive Companies II Alaa SNB"
+            ]
+            base = base[
+                (~base["Salesperson"].isin(excluded_salespersons))
+                & (base["Salesperson"].notna())
+                & (base["Salesperson"].str.strip() != "")
+                & (base["Salesperson"].str.lower() != "nan")
+            ]
+
+            # 3) Sub State - تحتوي على "واعد بالسداد"
+            base = base[
+                base["Sub State"].str.contains(
+                    "واعد بالسداد",
+                    na=False
+                )
+            ]
 
         progress_bar.progress(40)
 
         # ==========================================
-        # الوعود القائمة
+        # الوعود القائمة (نفس المنطق للمسارين)
         # ==========================================
         current = base.copy()
 
@@ -215,50 +262,50 @@ if page == "الوعود القائمة و المكسورة":
         progress_bar.progress(70)
 
         # ==========================================
-        # الوعود المكسورة
+        # الوعود المكسورة (نفس المنطق للمسارين)
         # ==========================================
         broken = base.copy()
-        
+
         # حذف مواعيد النهاردة والمستقبل
         broken = broken[
             broken["Follow up Due Date"] < today
         ]
-        
+
         # الاحتفاظ فقط بالصفوف التي بها Follow up Last Date
         broken = broken[
             broken["Follow up Last Date"].notna()
         ]
-        
+
         # حساب الفرق بين آخر متابعة وموعد الوعد
         broken["فرق الايام"] = (
             broken["Follow up Last Date"] - broken["Follow up Due Date"]
         ).dt.days
-        
+
         # الاحتفاظ فقط بالقيم السالبة
         broken = broken[
             broken["فرق الايام"] < 0
         ]
-        
+
         # حذف الأعمدة لو موجودة
         for col in ["عدد ايام ترحيل الوعد", "فرق الايام"]:
             if col in broken.columns:
                 broken.drop(columns=[col], inplace=True)
-        
+
         # مكان العمود بعد Follow up Last Date
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
-        
+
         # إضافة عدد أيام ترحيل الوعد
         broken.insert(
             insert_position,
             "عدد ايام ترحيل الوعد",
             (today - broken["Follow up Due Date"]).dt.days
         )
-        
+
         # الاحتفاظ فقط بالوعود المكسورة
         broken = broken[
             broken["عدد ايام ترحيل الوعد"] > 0
         ]
-        
+
         progress_bar.progress(100)
         status.text("100%")
 
@@ -277,10 +324,7 @@ if page == "الوعود القائمة و المكسورة":
             )
         st.success(f"تم استخراج وعود قائمة {len(current)} حساب")
 
-        
         output_current.seek(0)
-
-         
 
         # ==========================================
         # ملف الوعود المكسورة
