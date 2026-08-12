@@ -537,7 +537,7 @@ if page == "الوعود القائمة و المكسورة":
 
             # إعدادات موحدة لتكبير وتغميق الـ Data Labels وأسماء المحور السيني
             DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="black")
-            XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="black")
+            XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
 
             sup_amount_current = (
                 current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
