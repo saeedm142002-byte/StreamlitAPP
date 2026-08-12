@@ -10,6 +10,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 import plotly.express as px
 import plotly.express as px
+import textwrap
 
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
@@ -892,30 +893,16 @@ elif page == "النشاط":
             
             def render_card(col, title, value, subtitle=""):
                 with col:
-                    st.markdown(f"""
-                        <div style="
-                            background: linear-gradient(135deg, {SNB_GREEN} 0%, {SNB_GREEN_DARK} 100%);
-                            border-right: 5px solid {SNB_GOLD};
-                            border-radius: 14px;
-                            padding: 18px;
-                            color: white;
-                            text-align: center;
-                            box-shadow: 0 4px 14px rgba(0,0,0,0.15);
-                            min-height: 130px;
-                        ">
-                            <div style="font-size:13px; opacity:0.85; margin-bottom:8px;">
-                                {title}
-                            </div>
-            
-                            <div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">
-                                {value}
-                            </div>
-            
-                            <div style="font-size:11px; opacity:0.75; margin-top:6px;">
-                                {subtitle}
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div style="background: linear-gradient(135deg, {SNB_GREEN} 0%, {SNB_GREEN_DARK} 100%); '
+                        f'border-right: 5px solid {SNB_GOLD}; border-radius: 14px; padding: 18px; color: white; '
+                        f'text-align: center; box-shadow: 0 4px 14px rgba(0,0,0,0.15); min-height: 130px;">'
+                        f'<div style="font-size:13px; opacity:0.85; margin-bottom:8px;">{title}</div>'
+                        f'<div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">{value}</div>'
+                        f'<div style="font-size:11px; opacity:0.75; margin-top:6px;">{subtitle}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
             
             
             c1, c2, c3, c4 = st.columns(4)
