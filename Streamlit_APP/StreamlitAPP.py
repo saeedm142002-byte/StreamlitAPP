@@ -1439,6 +1439,14 @@ elif page == "النشاط":
             from openpyxl.worksheet.table import Table, TableStyleInfo
             from openpyxl.utils import column_index_from_string, get_column_letter
 
+# ==========================================
+            # إنشاء ملف الإكسيل مع الداشبورد الديناميكية (SNB Style)
+            # ==========================================
+            import openpyxl
+            from openpyxl.chart import BarChart, Reference
+            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+            from openpyxl.utils import column_index_from_string, get_column_letter
+
             output = BytesIO()
 
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1458,7 +1466,9 @@ elif page == "النشاط":
 
                 # 2. إنشاء شيت الداشبورد كأول شيت في الملف
                 ws_dash = workbook.create_sheet(title="Dashboard", index=0)
-                ws_dash.views.sheetView[0].showGridLines = True
+                
+                # تفعيل خطوط الشبكة بشكل آمن لمنع الـ IndexError
+                ws_dash.sheet_view.showGridLines = True
 
                 # ---------------------------
                 # إعداد الألوان والتنسيقات (SNB Theme)
@@ -1474,49 +1484,15 @@ elif page == "النشاط":
                 FONT_HEADER = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
 
                 # ---------------------------
-                # تحديد أماكن الأعمدة في شيت النشاط بشكل ديناميكي
-                # ---------------------------
-                ws_act = workbook["النشاط"]
-                max_r = ws_act.max_row
-
-                col_map = {}
-                for col in range(1, ws_act.max_column + 1):
-                    header_val = ws_act.cell(row=1, column=col).value
-                    if header_val:
-                        col_map[str(header_val).strip()] = get_column_letter(col)
-
-                collector_letter = col_map.get("Collector", "C")
-                type_letter = col_map.get("التصنيف", "D")
-                wasted_letter = col_map.get("وقت مهدر", "F")
-
-                # ---------------------------
                 # بناء الكروت الديناميكية (Dynamic Cards)
                 # ---------------------------
+                max_r = len(df) + 1  # سطر النهاية في شيت النشاط
+
                 cards_config = [
-                    {
-                        "col_start": "B",
-                        "col_end": "D",
-                        "title": "إجمالي المكالمات المغطاة",
-                        "formula": f'=COUNTA(النشاط!{collector_letter}2:{collector_letter}{max_r})'
-                    },
-                    {
-                        "col_start": "F",
-                        "col_end": "H",
-                        "title": "عدد المكالمات الناجحة",
-                        "formula": f'=COUNTIF(النشاط!{type_letter}2:{type_letter}{max_r}, "1")'
-                    },
-                    {
-                        "col_start": "J",
-                        "col_end": "L",
-                        "title": "متوسط الوقت المهدر (دقائق)",
-                        "formula": f'=AVERAGE(النشاط!{wasted_letter}2:{wasted_letter}{max_r})'
-                    },
-                    {
-                        "col_start": "N",
-                        "col_end": "P",
-                        "title": "إجمالي الوقت المهدر",
-                        "formula": f'=SUM(النشاط!{wasted_letter}2:{wasted_letter}{max_r})'
-                    }
+                    {"col_start": "B", "col_end": "D", "title": "إجمالي المكالمات المغطاة", "formula": f'=COUNTA(النشاط!C2:C{max_r})'},
+                    {"col_start": "F", "col_end": "H", "title": "عدد المكالمات الناجحة", "formula": f'=COUNTIF(النشاط!D2:D{max_r}, "1")'},
+                    {"col_start": "J", "col_end": "L", "title": "متوسط الوقت المهدر (دقائق)", "formula": f'=AVERAGE(النشاط!F2:F{max_r})'},
+                    {"col_start": "N", "col_end": "P", "title": "إجمالي الوقت المهدر", "formula": f'=SUM(النشاط!F2:F{max_r})'}
                 ]
 
                 for card in cards_config:
@@ -1525,16 +1501,19 @@ elif page == "النشاط":
                     ws_dash.merge_cells(f"{cs}2:{ce}2")
                     ws_dash.merge_cells(f"{cs}3:{ce}4")
 
+                    # العنوان
                     cell_t = ws_dash[f"{cs}2"]
                     cell_t.value = card["title"]
                     cell_t.font = FONT_TITLE
                     cell_t.alignment = Alignment(horizontal="center", vertical="center")
 
+                    # القيمة الديناميكية
                     cell_v = ws_dash[f"{cs}3"]
                     cell_v.value = card["formula"]
                     cell_v.font = FONT_VALUE
                     cell_v.alignment = Alignment(horizontal="center", vertical="center")
 
+                    # تطبيق التنسيقات
                     for r in range(2, 5):
                         for col_idx in range(column_index_from_string(cs), column_index_from_string(ce) + 1):
                             cell = ws_dash.cell(row=r, column=col_idx)
@@ -1563,8 +1542,8 @@ elif page == "النشاط":
                 unique_collectors = sorted(df["Collector"].dropna().unique().tolist())
                 for i, collector in enumerate(unique_collectors, start=9):
                     ws_dash[f"B{i}"] = collector
-                    ws_dash[f"C{i}"] = f'=COUNTIFS(النشاط!${collector_letter}$2:${collector_letter}${max_r}, B{i}, النشاط!${type_letter}$2:${type_letter}${max_r}, "1")'
-                    ws_dash[f"D{i}"] = f'=COUNTIFS(النشاط!${collector_letter}$2:${collector_letter}${max_r}, B{i}, النشاط!${type_letter}$2:${type_letter}${max_r}, "0")'
+                    ws_dash[f"C{i}"] = f'=COUNTIFS(النشاط!$C$2:$C${max_r}, B{i}, النشاط!$D$2:$D${max_r}, "1")'
+                    ws_dash[f"D{i}"] = f'=COUNTIFS(النشاط!$C$2:$C${max_r}, B{i}, النشاط!$D$2:$D${max_r}, "0")'
                     ws_dash[f"E{i}"] = f'=C{i}+D{i}'
                     ws_dash[f"F{i}"] = f'=IF(E{i}>0, C{i}/E{i}, 0)'
 
@@ -1596,7 +1575,12 @@ elif page == "النشاط":
                 ws_dash.add_chart(chart, "H7")
 
                 # ---------------------------
-                # تنسيق باقي الشيتات وضبط العرض والحدود
+                # تحديد الشيت النشط صراحة لإنهاء الملف بشكل صحيح
+                # ---------------------------
+                workbook.active = ws_dash
+
+                # ---------------------------
+                # تنسيق بقية الشيتات
                 # ---------------------------
                 header_fill = PatternFill(fill_type="solid", fgColor="073259")
                 header_font = Font(color="FFFFFF", bold=True)
@@ -1605,11 +1589,7 @@ elif page == "النشاط":
 
                 for ws in workbook.worksheets:
                     if ws.title == "Dashboard":
-                        # ضبط عرض أعمدة الداشبورد تلقائياً
-                        for col in range(1, 18):
-                            ws.column_dimensions[get_column_letter(col)].width = 16
                         continue
-
                     for row in ws.iter_rows():
                         for cell in row:
                             cell.border = thin_border
@@ -1623,16 +1603,24 @@ elif page == "النشاط":
                         max_length = max(len(str(cell.value or '')) for cell in column_cells)
                         column_letter = column_cells[0].column_letter
                         ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
-                    ws.row_dimensions[1].height = 25
 
+            # حفظ واستخراج المخرجات
             output.seek(0)
-
             st.session_state.processed_output = output.getvalue()
             st.session_state.processed_df = df.copy()
 
             status.empty()
             progress_bar.empty()
             st.success("تم الانتهاء")
+
+        # زر التحميل
+        if "processed_output" in st.session_state:
+            st.download_button(
+                "تحميل الملف",
+                st.session_state.processed_output,
+                file_name="activity.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
