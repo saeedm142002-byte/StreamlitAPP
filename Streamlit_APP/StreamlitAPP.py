@@ -561,8 +561,7 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig1.update_traces(
                     texttemplate="<b>%{text:,.0f}</b>",
-                    textposition="inside",
-                    insidetextanchor="end",
+                    textposition="outside",
                     textfont=DATA_LABEL_FONT
                 )
                 fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
@@ -582,8 +581,7 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig2.update_traces(
                     texttemplate="<b>%{text}</b>",
-                    textposition="inside",
-                    insidetextanchor="end",
+                    textposition="outside",
                     textfont=DATA_LABEL_FONT
                 )
                 fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
@@ -602,8 +600,7 @@ if page == "الوعود القائمة و المكسورة":
                 )
                 fig3.update_traces(
                     texttemplate="<b>%{text:.1f}</b>",
-                    textposition="inside",
-                    insidetextanchor="end",
+                    textposition="outside",
                     textfont=DATA_LABEL_FONT
                 )
                 fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
