@@ -119,6 +119,7 @@ page = st.session_state.page
 if page == "الوعود القائمة و المكسورة":
 
     import pandas as pd
+    import plotly.express as px
     from io import BytesIO
 
     st.subheader("📊 الوعود القائمة / الوعود المكسورة")
@@ -288,8 +289,11 @@ if page == "الوعود القائمة و المكسورة":
 
         # حذف الأعمدة لو موجودة
         for col in ["عدد ايام ترحيل الوعد", "فرق الايام"]:
-            if col in broken.columns:
+            if col in broken.columns and col != "فرق الايام":
                 broken.drop(columns=[col], inplace=True)
+
+        if "فرق الايام" in broken.columns:
+            broken.drop(columns=["فرق الايام"], inplace=True)
 
         # مكان العمود بعد Follow up Last Date
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
@@ -363,6 +367,264 @@ if page == "الوعود القائمة و المكسورة":
                 file_name="الوعود_المكسورة.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+        # ============================================================
+        # داشبورد الوعود: تقارير Pivot + سلايسرات + أصل البيانات + شارتات
+        # ============================================================
+
+        st.markdown("---")
+        st.markdown("## 📊 داشبورد الوعود")
+
+        required_report_cols = ["Sales Team", "Salesperson", "Net Amount", "Account Number"]
+        missing_report_cols = [c for c in required_report_cols if c not in df.columns]
+
+        if missing_report_cols:
+            st.warning(
+                f"الأعمدة دي مش موجودة في الملف المرفوع: {', '.join(missing_report_cols)} — "
+                "قسم الداشبورد مش هيظهر."
+            )
+        else:
+
+            # ---------------------------
+            # سلايسرات (المشرف / الموظف) - مشتركة على القائمة والمكسورة
+            # ---------------------------
+
+            all_supervisors = sorted(
+                pd.concat([current["Sales Team"], broken["Sales Team"]]).dropna().unique().tolist()
+            )
+            all_salespersons = sorted(
+                pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
+            )
+
+            filter_col1, filter_col2 = st.columns(2)
+
+            with filter_col1:
+                selected_supervisors = st.multiselect(
+                    "فلترة حسب المشرف (Sales Team)",
+                    options=all_supervisors,
+                    default=[]
+                )
+
+            with filter_col2:
+                selected_salespersons = st.multiselect(
+                    "فلترة حسب الموظف (Salesperson)",
+                    options=all_salespersons,
+                    default=[]
+                )
+
+            def apply_dashboard_filters(d):
+                out = d.copy()
+                if selected_supervisors:
+                    out = out[out["Sales Team"].isin(selected_supervisors)]
+                if selected_salespersons:
+                    out = out[out["Salesperson"].isin(selected_salespersons)]
+                return out
+
+            current_f = apply_dashboard_filters(current)
+            broken_f = apply_dashboard_filters(broken)
+
+            # ---------------------------
+            # دالة بناء تقرير Pivot-style (مشرف -> موظف -> اجمالي مشرف -> اجمالي كلي)
+            # ---------------------------
+
+            def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
+                base_cols = ["مبلغ المديونية", "عدد الحسابات"]
+                if extra_col:
+                    base_cols.append(extra_label)
+                out_cols = base_cols + ["الموظف", "المشرف"]
+
+                if d.empty:
+                    return pd.DataFrame(columns=out_cols)
+
+                rows = []
+                grand_amount = 0.0
+                grand_count = 0
+                grand_extra = 0.0
+
+                for supervisor, sup_group in d.groupby("Sales Team", dropna=False):
+                    sup_amount = 0.0
+                    sup_count = 0
+                    sup_extra = 0.0
+
+                    emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
+                    emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                    if extra_col:
+                        if extra_agg == "sum":
+                            emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
+                        else:
+                            emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
+
+                    for salesperson in emp_amount.sort_values(ascending=False).index:
+                        amount_val = float(emp_amount.get(salesperson, 0))
+                        count_val = int(emp_count.get(salesperson, 0))
+                        row = {
+                            "مبلغ المديونية": amount_val,
+                            "عدد الحسابات": count_val,
+                            "الموظف": salesperson,
+                            "المشرف": supervisor,
+                        }
+                        if extra_col:
+                            extra_val = float(emp_extra.get(salesperson, 0))
+                            row[extra_label] = extra_val
+                            sup_extra += extra_val
+                        rows.append(row)
+                        sup_amount += amount_val
+                        sup_count += count_val
+
+                    total_row = {
+                        "مبلغ المديونية": sup_amount,
+                        "عدد الحسابات": sup_count,
+                        "الموظف": f"{supervisor} إجمالي",
+                        "المشرف": supervisor,
+                    }
+                    if extra_col:
+                        total_row[extra_label] = (
+                            sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
+                        )
+                    rows.append(total_row)
+
+                    grand_amount += sup_amount
+                    grand_count += sup_count
+                    grand_extra += sup_extra
+
+                grand_row = {
+                    "مبلغ المديونية": grand_amount,
+                    "عدد الحسابات": grand_count,
+                    "الموظف": "الاجمالي",
+                    "المشرف": "",
+                }
+                if extra_col:
+                    grand_row[extra_label] = (
+                        grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
+                    )
+                rows.append(grand_row)
+
+                return pd.DataFrame(rows)[out_cols]
+
+            def style_summary(d, extra_label=None):
+                fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
+                if extra_label:
+                    fmt[extra_label] = "{:,.0f}"
+
+                def highlight_rows(row):
+                    is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
+                    if is_total:
+                        return ["font-weight: bold; background-color: #eef2f7"] * len(row)
+                    return [""] * len(row)
+
+                return d.style.apply(highlight_rows, axis=1).format(fmt)
+
+            # ---------------------------
+            # 1) تقرير الوعود القائمة
+            # ---------------------------
+            st.markdown("### 📄 تقرير الوعود القائمة")
+            current_summary = build_pivot_style(current_f)
+            if current_summary.empty:
+                st.info("لا توجد بيانات مطابقة.")
+            else:
+                st.dataframe(style_summary(current_summary), use_container_width=True, hide_index=True)
+
+            # ---------------------------
+            # 2) تقرير الوعود المكسورة
+            # ---------------------------
+            st.markdown("### 📄 تقرير الوعود المكسورة")
+            broken_summary = build_pivot_style(broken_f)
+            if broken_summary.empty:
+                st.info("لا توجد بيانات مطابقة.")
+            else:
+                st.dataframe(style_summary(broken_summary), use_container_width=True, hide_index=True)
+
+            # ---------------------------
+            # 3) تقرير عدد ايام ترحيل الوعد
+            # ---------------------------
+            st.markdown("### 📄 تقرير عدد ايام ترحيل الوعد")
+            days_summary = build_pivot_style(
+                broken_f,
+                extra_col="عدد ايام ترحيل الوعد",
+                extra_label="عدد ايام ترحيل الوعد",
+                extra_agg="sum"
+            )
+            if days_summary.empty:
+                st.info("لا توجد بيانات مطابقة.")
+            else:
+                st.dataframe(
+                    style_summary(days_summary, extra_label="عدد ايام ترحيل الوعد"),
+                    use_container_width=True, hide_index=True
+                )
+
+            # ---------------------------
+            # أصل البيانات
+            # ---------------------------
+            st.markdown("### 🗂️ أصل البيانات - الوعود القائمة")
+            st.dataframe(current_f, use_container_width=True, hide_index=True)
+
+            st.markdown("### 🗂️ أصل البيانات - الوعود المكسورة")
+            st.dataframe(broken_f, use_container_width=True, hide_index=True)
+
+            # ---------------------------
+            # الشارتات
+            # ---------------------------
+            st.markdown("### 📈 الرسوم البيانية")
+
+            SNB_GREEN = "#00693E"
+            SNB_GOLD = "#C9A227"
+            SNB_RED = "#A33A3A"
+
+            # 1) مبلغ المديونية لكل مشرف - قائمة مقابل مكسورة
+            sup_amount_current = (
+                current_f.groupby("Sales Team", dropna=False)["Net Amount"].sum()
+                .reset_index().rename(columns={"Net Amount": "مبلغ المديونية"})
+            )
+            sup_amount_current["النوع"] = "قائمة"
+
+            sup_amount_broken = (
+                broken_f.groupby("Sales Team", dropna=False)["Net Amount"].sum()
+                .reset_index().rename(columns={"Net Amount": "مبلغ المديونية"})
+            )
+            sup_amount_broken["النوع"] = "مكسورة"
+
+            sup_amount_combined = pd.concat([sup_amount_current, sup_amount_broken], ignore_index=True)
+
+            if not sup_amount_combined.empty:
+                fig1 = px.bar(
+                    sup_amount_combined, x="Sales Team", y="مبلغ المديونية", color="النوع",
+                    barmode="group", text="مبلغ المديونية",
+                    color_discrete_map={"قائمة": SNB_GREEN, "مكسورة": SNB_RED}
+                )
+                fig1.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+                fig1.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
+                st.plotly_chart(fig1, use_container_width=True)
+
+            # 2) أعلى الموظفين بعدد الحسابات (المكسورة)
+            emp_count_broken = (
+                broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                .reset_index(name="عدد الحسابات")
+                .sort_values("عدد الحسابات", ascending=False).head(15)
+            )
+            if not emp_count_broken.empty:
+                st.markdown("#### أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)")
+                fig2 = px.bar(
+                    emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
+                    color_discrete_sequence=[SNB_RED]
+                )
+                fig2.update_traces(textposition="outside")
+                fig2.update_layout(height=420, xaxis_tickangle=-30, margin=dict(t=20, b=10))
+                st.plotly_chart(fig2, use_container_width=True)
+
+            # 3) متوسط عدد ايام ترحيل الوعد لكل مشرف
+            days_by_sup = (
+                broken_f.groupby("Sales Team", dropna=False)["عدد ايام ترحيل الوعد"].mean()
+                .reset_index().rename(columns={"عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
+            )
+            if not days_by_sup.empty:
+                st.markdown("#### متوسط عدد أيام ترحيل الوعد لكل مشرف")
+                fig3 = px.bar(
+                    days_by_sup, x="Sales Team", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
+                    color_discrete_sequence=[SNB_GOLD]
+                )
+                fig3.update_traces(texttemplate="%{text:.1f}", textposition="outside")
+                fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
+                st.plotly_chart(fig3, use_container_width=True)
 # ======================
 # PAGE 2 - الوعود المكسورة
 # ======================
