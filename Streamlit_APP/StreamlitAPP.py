@@ -1579,65 +1579,65 @@ with pd.ExcelWriter(output, engine="openpyxl") as writer:
             if col_idx == 6:
                 cell.number_format = "0.0%"
 
-    # ---------------------------
-    # إضافة Chart تفاعلي (Bar Chart) مرتبط بالجدول
-    # ---------------------------
-    from openpyxl.chart import BarChart, Reference
-
-    chart = BarChart()
-    chart.type = "col"
-    chart.style = 10
-    chart.title = "المكالمات الناجحة وغير الناجحة لكل محصل"
-    chart.y_axis.title = "عدد المكالمات"
-    chart.x_axis.title = "المحصل"
-
-    data_ref = Reference(
-        ws_dash, min_col=3, min_row=8, max_col=4, max_row=8 + len(unique_collectors)
-    )
-    cats_ref = Reference(
-        ws_dash, min_col=2, min_row=9, max_row=8 + len(unique_collectors)
-    )
-
-    chart.add_data(data_ref, titles_from_data=True)
-    chart.set_categories(cats_ref)
-    chart.width = 18
-    chart.height = 10
-
-    ws_dash.add_chart(chart, "J7")
-
-    # ---------------------------
-    # تنسيق الشيتات الأخرى (الجداول والتعديلات المعتادة)
-    # ---------------------------
-    header_fill = PatternFill(fill_type="solid", fgColor="073259")
-    header_font = Font(color="FFFFFF", bold=True)
-    thin_side = Side(style="thin", color="000000")
-    thin_border = Border(
-        left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
-    )
-
-    for ws in workbook.worksheets:
-        if ws.title == "Dashboard":
-            continue
-        for row in ws.iter_rows():
-            for cell in row:
+        # ---------------------------
+        # إضافة Chart تفاعلي (Bar Chart) مرتبط بالجدول
+        # ---------------------------
+        from openpyxl.chart import BarChart, Reference
+    
+        chart = BarChart()
+        chart.type = "col"
+        chart.style = 10
+        chart.title = "المكالمات الناجحة وغير الناجحة لكل محصل"
+        chart.y_axis.title = "عدد المكالمات"
+        chart.x_axis.title = "المحصل"
+    
+        data_ref = Reference(
+            ws_dash, min_col=3, min_row=8, max_col=4, max_row=8 + len(unique_collectors)
+        )
+        cats_ref = Reference(
+            ws_dash, min_col=2, min_row=9, max_row=8 + len(unique_collectors)
+        )
+    
+        chart.add_data(data_ref, titles_from_data=True)
+        chart.set_categories(cats_ref)
+        chart.width = 18
+        chart.height = 10
+    
+        ws_dash.add_chart(chart, "J7")
+    
+        # ---------------------------
+        # تنسيق الشيتات الأخرى (الجداول والتعديلات المعتادة)
+        # ---------------------------
+        header_fill = PatternFill(fill_type="solid", fgColor="073259")
+        header_font = Font(color="FFFFFF", bold=True)
+        thin_side = Side(style="thin", color="000000")
+        thin_border = Border(
+            left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
+        )
+    
+        for ws in workbook.worksheets:
+            if ws.title == "Dashboard":
+                continue
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.border = thin_border
+                    cell.alignment = Alignment(
+                        horizontal="center", vertical="center"
+                    )
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
                 cell.border = thin_border
-                cell.alignment = Alignment(
-                    horizontal="center", vertical="center"
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            for column_cells in ws.columns:
+                max_len = max(
+                    len(str(cell.value or "")) for cell in column_cells
                 )
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.border = thin_border
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        for column_cells in ws.columns:
-            max_len = max(
-                len(str(cell.value or "")) for cell in column_cells
-            )
-            col_letter = get_column_letter(column_cells[0].column)
-            ws.column_dimensions[col_letter].width = min(max_len + 3, 50)
-
-    output.seek(0)
-    st.session_state.processed_output = output.getvalue()
+                col_letter = get_column_letter(column_cells[0].column)
+                ws.column_dimensions[col_letter].width = min(max_len + 3, 50)
+    
+        output.seek(0)
+        st.session_state.processed_output = output.getvalue()
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
