@@ -1421,206 +1421,44 @@ elif page == "النشاط":
                 # زرار تحميل منفصل لتحليل العملاء
                 # =========================
 
-            import io
-            import pandas as pd
-            from openpyxl.formatting.rule import CellIsRule
-            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-            from openpyxl.utils import get_column_letter
-            
-            # ==========================================
-            # إنشاء ملف الإكسيل مع الداشبورد الديناميكية
-            # ==========================================
-# ==========================================
-            # تصدير ملف الإكسيل مع الداشبورد الديناميكية (SNB Style)
-            # ==========================================
-            import openpyxl
-            from openpyxl.chart import BarChart, Reference
-            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-            from openpyxl.worksheet.table import Table, TableStyleInfo
-            from openpyxl.utils import column_index_from_string, get_column_letter
+                client_output = BytesIO()
+                with pd.ExcelWriter(client_output, engine="openpyxl") as writer:
+                    client_coverage.to_excel(writer, index=False, sheet_name="تغطية العملاء لكل موظف")
+                    repeat_contacts.to_excel(writer, index=False, sheet_name="تكرار نفس العميل")
 
-# ==========================================
-            # إنشاء ملف الإكسيل مع الداشبورد الديناميكية (SNB Style)
-            # ==========================================
-            import openpyxl
-            from openpyxl.chart import BarChart, Reference
-            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-            from openpyxl.utils import column_index_from_string, get_column_letter
+                    workbook = writer.book
+                    header_fill = PatternFill(fill_type="solid", fgColor="073259")
+                    header_font = Font(color="FFFFFF", bold=True)
+                    thin_side = Side(style="thin", color="000000")
+                    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
 
-            output = BytesIO()
-
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                # 1. تصدير الشيتات الأساسية
-                df.to_excel(writer, index=False, sheet_name="النشاط")
-                pivot_summary.to_excel(writer, index=False, sheet_name="Pivot - أداء المحصلين")
-                collector_summary.to_excel(writer, index=False, sheet_name="إجمالي الوقت المهدر")
-                calls_over_30.to_excel(writer, index=False, sheet_name="مكالمات +30 دقيقة")
-                calls_under_1.to_excel(writer, index=False, sheet_name="مكالمات أقل من دقيقة")
-                first_activity.to_excel(writer, index=False, sheet_name="أول إفادة")
-                last_activity.to_excel(writer, index=False, sheet_name="آخر إفادة")
-                if first_after_break is not None:
-                    first_after_break.to_excel(writer, index=False, sheet_name="أول إفادة بعد البريك")
-                final_state_summary.to_excel(writer, index=False, sheet_name="Final State")
-
-                workbook = writer.book
-
-                # 2. إنشاء شيت الداشبورد كأول شيت في الملف
-                ws_dash = workbook.create_sheet(title="Dashboard", index=0)
-                
-                # تفعيل خطوط الشبكة بشكل آمن لمنع الـ IndexError
-                ws_dash.sheet_view.showGridLines = True
-
-                # ---------------------------
-                # إعداد الألوان والتنسيقات (SNB Theme)
-                # ---------------------------
-                SNB_GREEN_FILL = PatternFill(fill_type="solid", fgColor="00693E")
-                CARD_BG_FILL = PatternFill(fill_type="solid", fgColor="F0F4F1")
-                BORDER_GREEN = Side(style="medium", color="00693E")
-                THIN_GREEN = Side(style="thin", color="00693E")
-                CARD_BORDER = Border(left=BORDER_GREEN, right=BORDER_GREEN, top=BORDER_GREEN, bottom=BORDER_GREEN)
-
-                FONT_TITLE = Font(name="Calibri", size=11, bold=True, color="00693E")
-                FONT_VALUE = Font(name="Calibri", size=22, bold=True, color="024930")
-                FONT_HEADER = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
-
-                # ---------------------------
-                # بناء الكروت الديناميكية (Dynamic Cards)
-                # ---------------------------
-                max_r = len(df) + 1  # سطر النهاية في شيت النشاط
-
-                cards_config = [
-                    {"col_start": "B", "col_end": "D", "title": "إجمالي المكالمات المغطاة", "formula": f'=COUNTA(النشاط!C2:C{max_r})'},
-                    {"col_start": "F", "col_end": "H", "title": "عدد المكالمات الناجحة", "formula": f'=COUNTIF(النشاط!D2:D{max_r}, "1")'},
-                    {"col_start": "J", "col_end": "L", "title": "متوسط الوقت المهدر (دقائق)", "formula": f'=AVERAGE(النشاط!F2:F{max_r})'},
-                    {"col_start": "N", "col_end": "P", "title": "إجمالي الوقت المهدر", "formula": f'=SUM(النشاط!F2:F{max_r})'}
-                ]
-
-                for card in cards_config:
-                    cs, ce = card["col_start"], card["col_end"]
-
-                    ws_dash.merge_cells(f"{cs}2:{ce}2")
-                    ws_dash.merge_cells(f"{cs}3:{ce}4")
-
-                    # العنوان
-                    cell_t = ws_dash[f"{cs}2"]
-                    cell_t.value = card["title"]
-                    cell_t.font = FONT_TITLE
-                    cell_t.alignment = Alignment(horizontal="center", vertical="center")
-
-                    # القيمة الديناميكية
-                    cell_v = ws_dash[f"{cs}3"]
-                    cell_v.value = card["formula"]
-                    cell_v.font = FONT_VALUE
-                    cell_v.alignment = Alignment(horizontal="center", vertical="center")
-
-                    # تطبيق التنسيقات
-                    for r in range(2, 5):
-                        for col_idx in range(column_index_from_string(cs), column_index_from_string(ce) + 1):
-                            cell = ws_dash.cell(row=r, column=col_idx)
-                            cell.fill = CARD_BG_FILL
-                            cell.border = CARD_BORDER
-
-                # ---------------------------
-                # إدراج جدول ملخص أداء المحصلين التفاعلي
-                # ---------------------------
-                ws_dash.merge_cells("B7:F7")
-                title_table = ws_dash["B7"]
-                title_table.value = "📊 ملخص أداء المحصلين (ديناميكي)"
-                title_table.font = FONT_HEADER
-                title_table.fill = SNB_GREEN_FILL
-                title_table.alignment = Alignment(horizontal="center", vertical="center")
-
-                headers = ["المحصل", "المكالمات الناجحة", "المكالمات غير الناجحة", "إجمالي المكالمات", "نسبة النجاح %"]
-                for idx, h in enumerate(headers, start=2):
-                    col_letter = get_column_letter(idx)
-                    c = ws_dash[f"{col_letter}8"]
-                    c.value = h
-                    c.font = Font(bold=True, color="FFFFFF")
-                    c.fill = PatternFill(fill_type="solid", fgColor="024930")
-                    c.alignment = Alignment(horizontal="center", vertical="center")
-
-                unique_collectors = sorted(df["Collector"].dropna().unique().tolist())
-                for i, collector in enumerate(unique_collectors, start=9):
-                    ws_dash[f"B{i}"] = collector
-                    ws_dash[f"C{i}"] = f'=COUNTIFS(النشاط!$C$2:$C${max_r}, B{i}, النشاط!$D$2:$D${max_r}, "1")'
-                    ws_dash[f"D{i}"] = f'=COUNTIFS(النشاط!$C$2:$C${max_r}, B{i}, النشاط!$D$2:$D${max_r}, "0")'
-                    ws_dash[f"E{i}"] = f'=C{i}+D{i}'
-                    ws_dash[f"F{i}"] = f'=IF(E{i}>0, C{i}/E{i}, 0)'
-
-                    for col_idx in range(2, 7):
-                        cell = ws_dash.cell(row=i, column=col_idx)
-                        cell.border = Border(left=THIN_GREEN, right=THIN_GREEN, top=THIN_GREEN, bottom=THIN_GREEN)
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                        if col_idx == 6:
-                            cell.number_format = '0.0%'
-
-                # ---------------------------
-                # إضافة Chart تفاعلي
-                # ---------------------------
-                chart = BarChart()
-                chart.type = "col"
-                chart.style = 10
-                chart.title = "المكالمات الناجحة وغير الناجحة لكل محصل"
-                chart.y_axis.title = "عدد المكالمات"
-                chart.x_axis.title = "المحصل"
-
-                data_ref = Reference(ws_dash, min_col=3, min_row=8, max_col=4, max_row=8 + len(unique_collectors))
-                cats_ref = Reference(ws_dash, min_col=2, min_row=9, max_row=8 + len(unique_collectors))
-
-                chart.add_data(data_ref, titles_from_data=True)
-                chart.set_categories(cats_ref)
-                chart.width = 18
-                chart.height = 10
-
-                ws_dash.add_chart(chart, "H7")
-
-                # ---------------------------
-                # تحديد الشيت النشط صراحة لإنهاء الملف بشكل صحيح
-                # ---------------------------
-                workbook.active = ws_dash
-
-                # ---------------------------
-                # تنسيق بقية الشيتات
-                # ---------------------------
-                header_fill = PatternFill(fill_type="solid", fgColor="073259")
-                header_font = Font(color="FFFFFF", bold=True)
-                thin_side = Side(style="thin", color="000000")
-                thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-
-                for ws in workbook.worksheets:
-                    if ws.title == "Dashboard":
-                        continue
-                    for row in ws.iter_rows():
-                        for cell in row:
+                    for ws in workbook.worksheets:
+                        for row in ws.iter_rows():
+                            for cell in row:
+                                cell.border = thin_border
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                        for cell in ws[1]:
+                            cell.fill = header_fill
+                            cell.font = header_font
                             cell.border = thin_border
                             cell.alignment = Alignment(horizontal="center", vertical="center")
-                    for cell in ws[1]:
-                        cell.fill = header_fill
-                        cell.font = header_font
-                        cell.border = thin_border
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                    for column_cells in ws.columns:
-                        max_length = max(len(str(cell.value or '')) for cell in column_cells)
-                        column_letter = column_cells[0].column_letter
-                        ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
+                        for column_cells in ws.columns:
+                            max_length = 0
+                            column_letter = column_cells[0].column_letter
+                            for cell in column_cells:
+                                if cell.value is not None:
+                                    max_length = max(max_length, len(str(cell.value)))
+                            ws.column_dimensions[column_letter].width = min(max_length + 3, 50)
+                        ws.row_dimensions[1].height = 25
 
-            # حفظ واستخراج المخرجات
-            output.seek(0)
-            st.session_state.processed_output = output.getvalue()
-            st.session_state.processed_df = df.copy()
+                client_output.seek(0)
 
-            status.empty()
-            progress_bar.empty()
-            st.success("تم الانتهاء")
-
-        # زر التحميل
-        if "processed_output" in st.session_state:
-            st.download_button(
-                "تحميل الملف",
-                st.session_state.processed_output,
-                file_name="activity.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                st.download_button(
+                    "⬇️ تحميل تحليل العملاء",
+                    client_output.getvalue(),
+                    file_name="client_analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
