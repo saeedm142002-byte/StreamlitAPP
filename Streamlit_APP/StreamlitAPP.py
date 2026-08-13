@@ -664,6 +664,7 @@ elif page == "الاهمال":
     
                 import pandas as pd
                 import re
+                import plotly.express as px
                 from io import BytesIO
     
                 df = pd.read_excel(uploaded_file)
@@ -743,6 +744,9 @@ elif page == "الاهمال":
                         | (df["حالة المعالجة - التمويل"].isna())
                     ]
     
+                    # عمود المشرف في الداشبورد لهذا المسار
+                    supervisor_col = "ملاحظات-التمويل"
+    
                 # ============================================================
                 # مسار SNB - إجراءات مختلفة
                 # ============================================================
@@ -795,9 +799,7 @@ elif page == "الاهمال":
                         if pd.isna(x):
                             return ""
                         x = str(x)
-                        # شيل الرموز الغير مرئية (zero-width, RTL/LTR marks, BOM)
                         x = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff]", "", x)
-                        # شيل كل المسافات (عشان أي مسافة زيادة أو ناقصة متأثرش)
                         x = re.sub(r"\s+", "", x)
                         return x.strip()
     
@@ -832,6 +834,11 @@ elif page == "الاهمال":
     
                     df = df[df["فرق عدد ايام من اخر متابعة"] >= neglect_days_threshold]
     
+                    # عمود المشرف في الداشبورد لهذا المسار
+                    supervisor_col = "Sales Team"
+    
+                df = df.reset_index(drop=True)
+    
                 # ============================
                 # تحميل الملف
                 # ============================
@@ -848,6 +855,263 @@ elif page == "الاهمال":
                     file_name="الاهمال.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+    
+                # ============================================================
+                # داشبورد الإهمال
+                # ============================================================
+    
+                st.markdown("---")
+                st.markdown("## 📊 داشبورد الإهمال")
+    
+                required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
+                missing_report_cols = [c for c in required_report_cols if c not in df.columns]
+    
+                if missing_report_cols:
+                    st.warning(
+                        f"الأعمدة دي مش موجودة في الملف المرفوع: {', '.join(missing_report_cols)} — "
+                        "قسم الداشبورد مش هيظهر."
+                    )
+                else:
+    
+                    # ---------------------------
+                    # سلايسرات (المشرف / الموظف)
+                    # ---------------------------
+    
+                    all_supervisors = sorted(df[supervisor_col].dropna().unique().tolist())
+                    all_salespersons = sorted(df["Salesperson"].dropna().unique().tolist())
+    
+                    filter_col1, filter_col2 = st.columns(2)
+    
+                    with filter_col1:
+                        selected_supervisors = st.multiselect(
+                            "فلترة حسب المشرف",
+                            options=all_supervisors,
+                            default=[],
+                            key="neglect_supervisor_filter"
+                        )
+    
+                    with filter_col2:
+                        selected_salespersons = st.multiselect(
+                            "فلترة حسب الموظف (Salesperson)",
+                            options=all_salespersons,
+                            default=[],
+                            key="neglect_salesperson_filter"
+                        )
+    
+                    def apply_dashboard_filters(d):
+                        out = d
+                        if selected_supervisors:
+                            out = out[out[supervisor_col].isin(selected_supervisors)]
+                        if selected_salespersons:
+                            out = out[out["Salesperson"].isin(selected_salespersons)]
+                        return out
+    
+                    df_f = apply_dashboard_filters(df)
+    
+                    # ---------------------------
+                    # دالة بناء تقرير Pivot-style
+                    # ---------------------------
+    
+                    def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
+                        base_cols = ["مبلغ المديونية", "عدد الحسابات"]
+                        if extra_col:
+                            base_cols.append(extra_label)
+                        out_cols = base_cols + ["الموظف", "المشرف"]
+    
+                        if d.empty:
+                            return pd.DataFrame(columns=out_cols)
+    
+                        rows = []
+                        grand_amount = 0.0
+                        grand_count = 0
+                        grand_extra = 0.0
+    
+                        for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
+                            sup_amount = 0.0
+                            sup_count = 0
+                            sup_extra = 0.0
+    
+                            emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
+                            emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                            if extra_col:
+                                if extra_agg == "sum":
+                                    emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
+                                else:
+                                    emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
+    
+                            for salesperson in emp_amount.sort_values(ascending=False).index:
+                                amount_val = float(emp_amount.get(salesperson, 0))
+                                count_val = int(emp_count.get(salesperson, 0))
+                                row = {
+                                    "مبلغ المديونية": amount_val,
+                                    "عدد الحسابات": count_val,
+                                    "الموظف": salesperson,
+                                    "المشرف": supervisor,
+                                }
+                                if extra_col:
+                                    extra_val = float(emp_extra.get(salesperson, 0))
+                                    row[extra_label] = extra_val
+                                    sup_extra += extra_val
+                                rows.append(row)
+                                sup_amount += amount_val
+                                sup_count += count_val
+    
+                            total_row = {
+                                "مبلغ المديونية": sup_amount,
+                                "عدد الحسابات": sup_count,
+                                "الموظف": f"{supervisor} إجمالي",
+                                "المشرف": supervisor,
+                            }
+                            if extra_col:
+                                total_row[extra_label] = (
+                                    sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
+                                )
+                            rows.append(total_row)
+    
+                            grand_amount += sup_amount
+                            grand_count += sup_count
+                            grand_extra += sup_extra
+    
+                        grand_row = {
+                            "مبلغ المديونية": grand_amount,
+                            "عدد الحسابات": grand_count,
+                            "الموظف": "الاجمالي",
+                            "المشرف": "",
+                        }
+                        if extra_col:
+                            grand_row[extra_label] = (
+                                grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
+                            )
+                        rows.append(grand_row)
+    
+                        return pd.DataFrame(rows)[out_cols]
+    
+                    def style_summary(d, extra_label=None):
+                        fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
+                        if extra_label:
+                            fmt[extra_label] = "{:,.0f}"
+    
+                        def highlight_rows(row):
+                            is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
+                            if is_total:
+                                return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
+                            return [""] * len(row)
+    
+                        return d.style.apply(highlight_rows, axis=1).format(fmt)
+    
+                    day_col_label = (
+                        "عدد أيام الإهمال" if neglect_portfolio_type == "NPL&Dpd60"
+                        else "فرق عدد ايام من اخر متابعة"
+                    )
+    
+                    # ---------------------------
+                    # 1) تقرير الإهمال
+                    # ---------------------------
+                    st.markdown("### 📄 تقرير الإهمال")
+                    neglect_summary = build_pivot_style(df_f)
+                    if neglect_summary.empty:
+                        st.info("لا توجد بيانات مطابقة.")
+                    else:
+                        st.dataframe(style_summary(neglect_summary), use_container_width=True, hide_index=True)
+    
+                    # ---------------------------
+                    # 2) تقرير متوسط عدد الأيام
+                    # ---------------------------
+                    st.markdown(f"### 📄 تقرير {day_col_label}")
+                    days_summary = build_pivot_style(
+                        df_f,
+                        extra_col="فرق عدد ايام من اخر متابعة",
+                        extra_label=day_col_label,
+                        extra_agg="sum"
+                    )
+                    if days_summary.empty:
+                        st.info("لا توجد بيانات مطابقة.")
+                    else:
+                        st.dataframe(
+                            style_summary(days_summary, extra_label=day_col_label),
+                            use_container_width=True, hide_index=True
+                        )
+    
+                    # ---------------------------
+                    # أصل البيانات
+                    # ---------------------------
+                    st.markdown("### 🗂️ أصل البيانات - الإهمال")
+                    st.dataframe(df_f, use_container_width=True, hide_index=True)
+    
+                    # ---------------------------
+                    # الشارتات
+                    # ---------------------------
+                    st.markdown("### 📈 الرسوم البيانية")
+    
+                    SNB_GREEN = "#00693E"
+                    SNB_GOLD = "#C9A227"
+                    SNB_RED = "#A33A3A"
+    
+                    DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="white")
+                    XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
+    
+                    sup_amount = (
+                        df_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
+                    )
+    
+                    if not sup_amount.empty:
+                        fig1 = px.bar(
+                            sup_amount, x="المشرف", y="مبلغ المديونية", text="مبلغ المديونية",
+                            color_discrete_sequence=[SNB_RED]
+                        )
+                        fig1.update_traces(
+                            texttemplate="<b>%{text:,.0f}</b>",
+                            textposition="outside",
+                            textfont=DATA_LABEL_FONT
+                        )
+                        fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
+                        fig1.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
+                        st.plotly_chart(fig1, use_container_width=True)
+    
+                    emp_count = (
+                        df_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                        .reset_index(name="عدد الحسابات")
+                        .sort_values("عدد الحسابات", ascending=False).head(15)
+                    )
+                    if not emp_count.empty:
+                        st.markdown("#### أعلى 15 موظف بعدد الحسابات (الإهمال)")
+                        fig2 = px.bar(
+                            emp_count, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
+                            color_discrete_sequence=[SNB_GOLD]
+                        )
+                        fig2.update_traces(
+                            texttemplate="<b>%{text}</b>",
+                            textposition="outside",
+                            textfont=DATA_LABEL_FONT
+                        )
+                        fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
+                        fig2.update_layout(height=420, xaxis_tickangle=-30, margin=dict(t=20, b=10))
+                        st.plotly_chart(fig2, use_container_width=True)
+    
+                    days_by_sup = (
+                        df_f.groupby(supervisor_col, dropna=False)["فرق عدد ايام من اخر متابعة"].mean()
+                        .reset_index().rename(columns={
+                            supervisor_col: "المشرف",
+                            "فرق عدد ايام من اخر متابعة": "متوسط عدد الأيام"
+                        })
+                    )
+                    if not days_by_sup.empty:
+                        st.markdown(f"#### متوسط {day_col_label} لكل مشرف")
+                        fig3 = px.bar(
+                            days_by_sup, x="المشرف", y="متوسط عدد الأيام", text="متوسط عدد الأيام",
+                            color_discrete_sequence=[SNB_GREEN]
+                        )
+                        fig3.update_traces(
+                            texttemplate="<b>%{text:.1f}</b>",
+                            textposition="outside",
+                            textfont=DATA_LABEL_FONT
+                        )
+                        fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
+                        fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
+                        st.plotly_chart(fig3, use_container_width=True)
+
+   
     
          
 
