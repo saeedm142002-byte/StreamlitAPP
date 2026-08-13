@@ -660,14 +660,19 @@ elif page == "الاهمال":
                 key="neglect_file_uploader"
             )
     
-            if uploaded_file:
+            # ============================================================
+            # الدالة المعالجة الأساسية - Cached
+            # (بتشتغل تاني بس لو الملف أو نوع المحفظة أو عدد الأيام اتغيروا،
+            #  مش لما تغيّر السلايسر)
+            # ============================================================
+            @st.cache_data(show_spinner="جاري معالجة الملف...")
+            def process_neglect(file_bytes, portfolio_type_, days_threshold_):
     
                 import pandas as pd
                 import re
-                import plotly.express as px
                 from io import BytesIO
     
-                df = pd.read_excel(uploaded_file)
+                df = pd.read_excel(BytesIO(file_bytes))
     
                 # حذف أول صف إذا كان التقرير يحتوي على صف إضافي
                 df = df.iloc[1:].reset_index(drop=True)
@@ -677,7 +682,7 @@ elif page == "الاهمال":
                 # ============================================================
                 # مسار NPL&Dpd60 - زي الكود الأصلي بالظبط + threshold قابل للتغيير
                 # ============================================================
-                if neglect_portfolio_type == "NPL&Dpd60":
+                if portfolio_type_ == "NPL&Dpd60":
     
                     text_cols = [
                         "Sales Team",
@@ -719,7 +724,7 @@ elif page == "الاهمال":
                         (today - df["Follow up Last Date"]).dt.days
                     )
     
-                    df = df[df["عدد أيام الإهمال"] >= neglect_days_threshold]
+                    df = df[df["عدد أيام الإهمال"] >= days_threshold_]
     
                     # Sub State
                     allowed_states = [
@@ -744,8 +749,7 @@ elif page == "الاهمال":
                         | (df["حالة المعالجة - التمويل"].isna())
                     ]
     
-                    # عمود المشرف في الداشبورد لهذا المسار
-                    supervisor_col = "ملاحظات-التمويل"
+                    supervisor_col_ = "ملاحظات-التمويل"
     
                 # ============================================================
                 # مسار SNB - إجراءات مختلفة
@@ -832,12 +836,22 @@ elif page == "الاهمال":
                         (today - df["Follow up Last Date"]).dt.days
                     )
     
-                    df = df[df["فرق عدد ايام من اخر متابعة"] >= neglect_days_threshold]
+                    df = df[df["فرق عدد ايام من اخر متابعة"] >= days_threshold_]
     
-                    # عمود المشرف في الداشبورد لهذا المسار
-                    supervisor_col = "Sales Team"
+                    supervisor_col_ = "Sales Team"
     
-                df = df.reset_index(drop=True)
+                return df.reset_index(drop=True), supervisor_col_
+    
+            if uploaded_file:
+    
+                import pandas as pd
+                import plotly.express as px
+                from io import BytesIO
+    
+                file_bytes = uploaded_file.getvalue()
+                df, supervisor_col = process_neglect(
+                    file_bytes, neglect_portfolio_type, neglect_days_threshold
+                )
     
                 # ============================
                 # تحميل الملف
@@ -875,6 +889,7 @@ elif page == "الاهمال":
     
                     # ---------------------------
                     # سلايسرات (المشرف / الموظف)
+                    # مش بيعملوا Re-process — بس فلترة على الداتا المحفوظة (df) اللي اتعملها كاش
                     # ---------------------------
     
                     all_supervisors = sorted(df[supervisor_col].dropna().unique().tolist())
@@ -1110,6 +1125,7 @@ elif page == "الاهمال":
                         fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
                         fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                         st.plotly_chart(fig3, use_container_width=True)
+
 
    
     
