@@ -624,152 +624,234 @@ elif page == "الاهمال":
     st.subheader("⚠️ الاهمال")
 
     if sub == "اهمال":
-
-        uploaded_file = st.file_uploader(
-            "رفع ملف المحفظة",
-            type=["xlsx", "xls"]
-        )
-
-        if uploaded_file:
-
-            import pandas as pd
-            from io import BytesIO
-
-            df = pd.read_excel(uploaded_file)
-
-            # حذف أول صف إذا كان التقرير يحتوي على صف إضافي
-            df = df.iloc[1:].reset_index(drop=True)
-
-            # تنظيف النصوص
-            text_cols = [
-                "Sales Team",
-                "Sub State",
-                "حالة المعالجة - التمويل"
-            ]
-
-            for col in text_cols:
-                if col in df.columns:
-                    df[col] = df[col].astype(str).str.strip()
-
-            # تحويل التواريخ
-            df["Follow up Last Date"] = pd.to_datetime(
-                df["Follow up Last Date"],
-                errors="coerce"
-            ).dt.normalize()
-
-            today = pd.Timestamp.today().normalize()
-
-            # ============================
-            # Sales Team
-            # ============================
-            df = df[
-                df["Sales Team"] != "Sara || Op"
-            ]
-
-            # ============================
-            # Payment
-            # سيب السالب والصفر فقط
-            # ============================
-            df["Payment"] = (
-                df["Payment"]
-                .astype(str)
-                .str.replace(",", "", regex=False)
-                .str.strip()
+    
+            # ==========================================
+            # اختيار المسار: NPL&Dpd60 أو SNB
+            # ==========================================
+            neglect_portfolio_type = st.radio(
+                "اختار نوع المحفظة",
+                options=["NPL&Dpd60", "SNB"],
+                horizontal=True,
+                key="neglect_portfolio_type"
             )
-            
-            df["Payment"] = pd.to_numeric(
-                df["Payment"],
-                errors="coerce"
-            )
-
-            df = df[
-                df["Payment"] <= 0
-            ]
-
-            # ============================
-            # Follow up Last Date
-            # عدد الأيام من آخر متابعة
-            # ============================
-            df["عدد أيام الإهمال"] = (
-                today - df["Follow up Last Date"]
-            ).dt.days
-
-            # حذف العمود لو موجود
-            if "فرق عدد ايام من اخر متابعة" in df.columns:
-                df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
-            
-            # مكان العمود بعد Follow up Last Date
-            insert_position = df.columns.get_loc("Follow up Last Date") + 1
-            
-            # إضافة العمود
-            df.insert(
-                insert_position,
-                "فرق عدد ايام من اخر متابعة",
-                (today - df["Follow up Last Date"]).dt.days
-            )
-
-            df = df[
-                df["عدد أيام الإهمال"] >= 3
-            ]
-
-            # ============================
-            # Sub State
-            # ============================
-            allowed_states = [
-                "⁠وعد بسداد مبلغ المعالجة",
-                "*رافض السداد",
-                "*مسجون",
-                "*مماطل",
-                "تم سداد جزء وليس مبلغ المعالجة",
-                "لا يجيب",
-                "وعد بسداد تسوية",
-                "وعد بسداد جزء من المتأخرات",
-                "وعد بسداد قسط",
-                "وعد بسداد كامل المتأخرات",
-                "وعد بسداد كامل المديونية",
-                "يرغب بجدولة المديونية"
-            ]
-
-            df = df[
-                df["Sub State"].isin(allowed_states)
-            ]
-
-            # ============================
-            # حالة المعالجة
-            # ============================
-            df = df[
-                (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة") |
-                (df["حالة المعالجة - التمويل"].isna())
-            ]
- 
-
-            # ============================
-            # تحميل الملف
-            # ============================
-            output = BytesIO()
-
-            with pd.ExcelWriter(
-                output,
-                engine="openpyxl"
-            ) as writer:
-                df.to_excel(
-                    writer,
-                    index=False
+    
+            # ==========================================
+            # سؤال عن عدد الأيام حسب المسار
+            # ==========================================
+            if neglect_portfolio_type == "NPL&Dpd60":
+                neglect_days_threshold = st.number_input(
+                    "عدد أيام الإهمال (الحد الأدنى)",
+                    min_value=1,
+                    value=3,
+                    step=1,
+                    key="neglect_npl_days"
                 )
-
-            output.seek(0)
-
-            st.success(f"تم استخراج {len(df)} حساب")
-
-            st.download_button(
-                "📥 تحميل تقرير الإهمال",
-                data=output,
-                file_name="الاهمال.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            else:
+                neglect_days_threshold = st.number_input(
+                    "فرق عدد ايام من اخر متابعة (الحد الأدنى)",
+                    min_value=1,
+                    value=7,
+                    step=1,
+                    key="neglect_snb_days"
+                )
+    
+            uploaded_file = st.file_uploader(
+                "رفع ملف المحفظة",
+                type=["xlsx", "xls"],
+                key="neglect_file_uploader"
             )
-
-    else:
-        st.write("متابعة الإهمال")
+    
+            if uploaded_file:
+    
+                import pandas as pd
+                import re
+                from io import BytesIO
+    
+                df = pd.read_excel(uploaded_file)
+    
+                # حذف أول صف إذا كان التقرير يحتوي على صف إضافي
+                df = df.iloc[1:].reset_index(drop=True)
+    
+                today = pd.Timestamp.today().normalize()
+    
+                # ============================================================
+                # مسار NPL&Dpd60 - زي الكود الأصلي بالظبط + threshold قابل للتغيير
+                # ============================================================
+                if neglect_portfolio_type == "NPL&Dpd60":
+    
+                    text_cols = [
+                        "Sales Team",
+                        "Sub State",
+                        "حالة المعالجة - التمويل"
+                    ]
+                    for col in text_cols:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str).str.strip()
+    
+                    df["Follow up Last Date"] = pd.to_datetime(
+                        df["Follow up Last Date"],
+                        errors="coerce"
+                    ).dt.normalize()
+    
+                    # Sales Team
+                    df = df[df["Sales Team"] != "Sara || Op"]
+    
+                    # Payment: سيب السالب والصفر فقط
+                    df["Payment"] = (
+                        df["Payment"]
+                        .astype(str)
+                        .str.replace(",", "", regex=False)
+                        .str.strip()
+                    )
+                    df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
+                    df = df[df["Payment"] <= 0]
+    
+                    # عدد أيام الإهمال
+                    df["عدد أيام الإهمال"] = (today - df["Follow up Last Date"]).dt.days
+    
+                    if "فرق عدد ايام من اخر متابعة" in df.columns:
+                        df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
+    
+                    insert_position = df.columns.get_loc("Follow up Last Date") + 1
+                    df.insert(
+                        insert_position,
+                        "فرق عدد ايام من اخر متابعة",
+                        (today - df["Follow up Last Date"]).dt.days
+                    )
+    
+                    df = df[df["عدد أيام الإهمال"] >= neglect_days_threshold]
+    
+                    # Sub State
+                    allowed_states = [
+                        "⁠وعد بسداد مبلغ المعالجة",
+                        "*رافض السداد",
+                        "*مسجون",
+                        "*مماطل",
+                        "تم سداد جزء وليس مبلغ المعالجة",
+                        "لا يجيب",
+                        "وعد بسداد تسوية",
+                        "وعد بسداد جزء من المتأخرات",
+                        "وعد بسداد قسط",
+                        "وعد بسداد كامل المتأخرات",
+                        "وعد بسداد كامل المديونية",
+                        "يرغب بجدولة المديونية"
+                    ]
+                    df = df[df["Sub State"].isin(allowed_states)]
+    
+                    # حالة المعالجة
+                    df = df[
+                        (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة")
+                        | (df["حالة المعالجة - التمويل"].isna())
+                    ]
+    
+                # ============================================================
+                # مسار SNB - إجراءات مختلفة
+                # ============================================================
+                else:
+    
+                    text_cols = ["Sales Team", "Salesperson", "Sub State"]
+                    for col in text_cols:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str).str.strip()
+    
+                    df["Follow up Last Date"] = pd.to_datetime(
+                        df["Follow up Last Date"],
+                        errors="coerce"
+                    ).dt.normalize()
+    
+                    # 1) Sales Team - زي صفحة الوعود
+                    allowed_sales_teams = [
+                        "SNB II Alsarhan II Naser",
+                        "SNB II Alsarhan II Tariq"
+                    ]
+                    df = df[df["Sales Team"].isin(allowed_sales_teams)]
+    
+                    # 2) Salesperson - زي صفحة الوعود
+                    excluded_salespersons = [
+                        "Closed payments II Alaa SNB",
+                        "Hold Companies II SNB2",
+                        "Abdullah Alsarhan",
+                        "Archive Companies II Alaa SNB"
+                    ]
+                    df = df[
+                        (~df["Salesperson"].isin(excluded_salespersons))
+                        & (df["Salesperson"].notna())
+                        & (df["Salesperson"].str.strip() != "")
+                        & (df["Salesperson"].str.lower() != "nan")
+                    ]
+    
+                    # 3) Payment - سيب الصفر بس
+                    df["Payment"] = (
+                        df["Payment"]
+                        .astype(str)
+                        .str.replace(",", "", regex=False)
+                        .str.strip()
+                    )
+                    df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
+                    df = df[df["Payment"] == 0]
+    
+                    # 4) Sub State - مطابقة "contains" لكن متسامحة مع المسافات
+                    # والرموز الزيادة (زي مسافات إضافية أو رموز غير مرئية)
+                    def normalize_text(x):
+                        if pd.isna(x):
+                            return ""
+                        x = str(x)
+                        # شيل الرموز الغير مرئية (zero-width, RTL/LTR marks, BOM)
+                        x = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff]", "", x)
+                        # شيل كل المسافات (عشان أي مسافة زيادة أو ناقصة متأثرش)
+                        x = re.sub(r"\s+", "", x)
+                        return x.strip()
+    
+                    target_states = [
+                        "تم ابلاغ العميل - اتصال",
+                        "جدولة",
+                        "سداد جزئي",
+                        "قيد التفاوض مع الورثة",
+                        "مماطل",
+                        "واعد بالسداد"
+                    ]
+                    normalized_targets = [normalize_text(t) for t in target_states]
+    
+                    df["_sub_state_norm"] = df["Sub State"].apply(normalize_text)
+                    df = df[
+                        df["_sub_state_norm"].apply(
+                            lambda v: any(t in v for t in normalized_targets)
+                        )
+                    ]
+                    df = df.drop(columns=["_sub_state_norm"])
+    
+                    # 5) Follow up Last Date - عمود الفرق + الفلترة بالـ threshold
+                    if "فرق عدد ايام من اخر متابعة" in df.columns:
+                        df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
+    
+                    insert_position = df.columns.get_loc("Follow up Last Date") + 1
+                    df.insert(
+                        insert_position,
+                        "فرق عدد ايام من اخر متابعة",
+                        (today - df["Follow up Last Date"]).dt.days
+                    )
+    
+                    df = df[df["فرق عدد ايام من اخر متابعة"] >= neglect_days_threshold]
+    
+                # ============================
+                # تحميل الملف
+                # ============================
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    df.to_excel(writer, index=False)
+                output.seek(0)
+    
+                st.success(f"تم استخراج {len(df)} حساب")
+    
+                st.download_button(
+                    "📥 تحميل تقرير الإهمال",
+                    data=output,
+                    file_name="الاهمال.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+    
+        else:
+            st.write("متابعة الإهمال")
 
 
 # ======================
