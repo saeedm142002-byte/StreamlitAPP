@@ -849,8 +849,7 @@ elif page == "الاهمال":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
     
-        else:
-            st.write("متابعة الإهمال")
+         
 
 # ======================
 # PAGE 4 - التغطية
