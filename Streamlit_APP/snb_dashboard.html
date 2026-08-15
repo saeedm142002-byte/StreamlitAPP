@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة أداء التحصيل — البنك الأهلي السعودي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy-950:#081522;
+    --navy-900:#0E2841;
+    --navy-800:#153554;
+    --navy-700:#1D4569;
+    --navy-100:#DCEAF7;
+    --green:#00693E;
+    --green-dark:#024930;
+    --green-light:#3FA372;
+    --gold:#C9A227;
+    --gold-light:#E4C55C;
+    --red:#A33A3A;
+    --paper:#F5F7FA;
+    --ink:#0E2841;
+    --muted:#6B7A8D;
+    --line:#E1E7EE;
+    --radius:14px;
+    --shadow:0 8px 28px rgba(14,40,65,.08);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Cairo',system-ui,'Segoe UI',Tahoma,sans-serif;
+    min-height:100vh;
+  }
+  ::selection{background:var(--gold-light);color:var(--navy-950);}
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    background:linear-gradient(135deg, var(--navy-900) 0%, var(--navy-950) 100%);
+    border-bottom:3px solid var(--gold);
+    padding:22px 32px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand-mark{
+    width:46px;height:46px;border-radius:10px;
+    background:conic-gradient(from 220deg, var(--gold), var(--green-light), var(--gold));
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;color:var(--navy-950);font-size:18px;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.25);
+  }
+  .brand h1{color:#fff;font-size:19px;margin:0;font-weight:800;letter-spacing:.2px;}
+  .brand p{color:var(--navy-100);opacity:.75;margin:2px 0 0;font-size:12.5px;font-weight:500;}
+  .topbar-meta{
+    color:var(--navy-100);
+    font-size:12.5px;
+    font-family:'IBM Plex Mono',monospace;
+    opacity:.8;
+    display:flex;
+    gap:16px;
+  }
+
+  .wrap{max-width:1320px;margin:0 auto;padding:28px 24px 70px;}
+
+  /* ---------- upload zone ---------- */
+  #uploadStage{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:80px 24px;
+    text-align:center;
+  }
+  .dropzone{
+    width:100%;
+    max-width:620px;
+    border:2px dashed var(--navy-700);
+    border-radius:20px;
+    padding:52px 30px;
+    background:#fff;
+    box-shadow:var(--shadow);
+    transition:.2s border-color, .2s transform;
+    cursor:pointer;
+    position:relative;
+  }
+  .dropzone.drag{border-color:var(--gold);transform:scale(1.01);background:#FFFCF3;}
+  .dropzone .icon{
+    width:64px;height:64px;margin:0 auto 18px;
+    border-radius:50%;
+    background:var(--navy-100);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .dropzone .icon svg{width:30px;height:30px;stroke:var(--navy-900);}
+  .dropzone h2{font-size:19px;margin:0 0 8px;color:var(--navy-900);}
+  .dropzone p{color:var(--muted);font-size:13.5px;margin:0 0 22px;line-height:1.8;}
+  .browse-btn{
+    display:inline-block;
+    background:var(--green);
+    color:#fff;
+    font-weight:700;
+    font-size:14px;
+    padding:12px 28px;
+    border-radius:10px;
+    border:none;
+    cursor:pointer;
+    transition:.15s background,.15s transform;
+  }
+  .browse-btn:hover{background:var(--green-dark);transform:translateY(-1px);}
+  #fileInput{display:none;}
+  .dz-note{margin-top:16px;font-size:11.5px;color:var(--muted);}
+  #uploadError{
+    margin-top:18px;color:var(--red);font-size:13px;font-weight:600;
+    display:none;
+  }
+  .file-chip{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--navy-100);color:var(--navy-900);
+    font-size:12.5px;font-weight:700;
+    padding:6px 14px;border-radius:20px;margin-top:14px;
+  }
+
+  /* ---------- dashboard ---------- */
+  #dashboard{display:none;}
+  .period-banner{
+    background:linear-gradient(135deg, var(--navy-900), var(--navy-800));
+    color:#fff;
+    border-radius:var(--radius);
+    padding:16px 22px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:22px;
+    box-shadow:var(--shadow);
+    flex-wrap:wrap;
+    gap:10px;
+    border-inline-start:5px solid var(--gold);
+  }
+  .period-banner strong{font-size:15.5px;}
+  .period-banner span{opacity:.8;font-size:12.5px;font-family:'IBM Plex Mono',monospace;}
+  .reset-btn{
+    background:rgba(255,255,255,.12);
+    border:1px solid rgba(255,255,255,.35);
+    color:#fff;font-size:12.5px;font-weight:700;
+    padding:8px 16px;border-radius:8px;cursor:pointer;
+    transition:.15s background;
+  }
+  .reset-btn:hover{background:rgba(255,255,255,.22);}
+
+  /* filters */
+  .filters{
+    background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 18px;margin-bottom:22px;box-shadow:var(--shadow);
+    display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;
+  }
+  .filter-group{display:flex;flex-direction:column;gap:6px;min-width:190px;flex:1;}
+  .filter-group label{font-size:11.5px;font-weight:700;color:var(--muted);}
+  .multiselect{position:relative;}
+  .ms-btn{
+    width:100%;text-align:right;
+    background:var(--paper);border:1px solid var(--line);border-radius:9px;
+    padding:9px 12px;font-family:inherit;font-size:13px;color:var(--navy-900);
+    cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;
+  }
+  .ms-btn .count{
+    background:var(--green);color:#fff;font-size:10.5px;font-weight:800;
+    border-radius:20px;padding:1px 8px;min-width:20px;text-align:center;
+  }
+  .ms-btn .count.zero{background:var(--line);color:var(--muted);}
+  .ms-panel{
+    display:none;position:absolute;z-index:40;top:calc(100% + 6px);right:0;left:0;
+    background:#fff;border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 12px 30px rgba(14,40,65,.18);
+    max-height:260px;overflow:auto;padding:8px;
+  }
+  .ms-panel.open{display:block;}
+  .ms-item{
+    display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;
+    font-size:12.5px;cursor:pointer;
+  }
+  .ms-item:hover{background:var(--paper);}
+  .ms-item input{accent-color:var(--green);}
+  .ms-actions{display:flex;gap:8px;padding:6px 4px 2px;border-top:1px solid var(--line);margin-top:6px;}
+  .ms-actions button{
+    flex:1;border:none;background:var(--navy-100);color:var(--navy-900);
+    font-size:11px;font-weight:700;padding:6px;border-radius:6px;cursor:pointer;
+  }
+
+  /* cards */
+  .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:26px;}
+  @media(max-width:1100px){.cards{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:560px){.cards{grid-template-columns:1fr;}}
+  .card{
+    border-radius:16px;padding:20px 18px;color:#fff;position:relative;overflow:hidden;
+    box-shadow:var(--shadow);min-height:118px;
+    display:flex;flex-direction:column;justify-content:space-between;
+  }
+  .card::after{
+    content:"";position:absolute;left:-30px;bottom:-30px;width:110px;height:110px;
+    border-radius:50%;background:rgba(255,255,255,.06);
+  }
+  .card.c1{background:linear-gradient(135deg,var(--navy-900),var(--navy-950));}
+  .card.c2{background:linear-gradient(135deg,var(--green),var(--green-dark));}
+  .card.c3{background:linear-gradient(135deg,var(--gold),#9c7d17);}
+  .card.c4{background:linear-gradient(135deg,var(--red),#6f2626);}
+  .card.c5{background:linear-gradient(135deg,var(--navy-700),var(--navy-900));}
+  .card .k-label{font-size:12px;opacity:.85;font-weight:600;}
+  .card .k-value{font-size:26px;font-weight:800;margin-top:6px;overflow-wrap:anywhere;}
+  .card .k-sub{font-size:11px;opacity:.75;margin-top:8px;font-family:'IBM Plex Mono',monospace;}
+
+  /* charts */
+  .charts-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
+  @media(max-width:900px){.charts-grid{grid-template-columns:1fr;}}
+  .chart-card{
+    background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 18px 10px;box-shadow:var(--shadow);
+  }
+  .chart-card.full{grid-column:1/-1;}
+  .chart-card h3{
+    margin:0 0 4px;font-size:14.5px;color:var(--navy-900);font-weight:800;
+    display:flex;align-items:center;gap:8px;
+  }
+  .chart-card h3::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--gold);display:inline-block;}
+  .chart-card .hint{font-size:11px;color:var(--muted);margin-bottom:10px;}
+  .chart-holder{position:relative;height:320px;}
+  .chart-holder.tall{height:400px;}
+  .empty-note{
+    text-align:center;color:var(--muted);font-size:12.5px;padding:40px 0;
+  }
+
+  footer.app-footer{
+    text-align:center;color:var(--muted);font-size:11.5px;margin-top:34px;
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">SNB</div>
+      <div>
+        <h1>لوحة أداء التحصيل</h1>
+        <p>البنك الأهلي السعودي — قسم التحصيل والمتابعة</p>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span id="clockNow"></span>
+    </div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- ============= مرحلة الرفع ============= -->
+    <div id="uploadStage">
+      <div class="dropzone" id="dropzone">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14a2 2 0 0 0 2-2v-5"/><path d="M3 14v5a2 2 0 0 0 2 2"/></svg>
+        </div>
+        <h2>ارفع ملف النشاط بعد التصنيف</h2>
+        <p>اسحب ملف الإكسيل هنا أو اضغط للاختيار — لازم يكون فيه شيت "النشاط" بالأعمدة:<br>
+        Collector, التصنيف, Created on, وقت مهدر, Final State</p>
+        <button type="button" class="browse-btn" id="browseBtn">اختيار ملف Excel</button>
+        <input type="file" id="fileInput" accept=".xlsx,.xls">
+        <div class="dz-note">الملف بيتحلل بالكامل جوه المتصفح — مفيش رفع لأي سيرفر خارجي</div>
+        <div id="uploadError"></div>
+        <div id="fileChipWrap"></div>
+      </div>
+    </div>
+
+    <!-- ============= الداشبورد ============= -->
+    <div id="dashboard">
+
+      <div class="period-banner">
+        <div>
+          <strong id="fileNameLabel">—</strong><br>
+          <span id="rowCountLabel"></span>
+        </div>
+        <button class="reset-btn" id="resetBtn">🔄 رفع ملف تاني</button>
+      </div>
+
+      <div class="filters" id="filtersRow"></div>
+
+      <div class="cards" id="cardsRow"></div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>مكالمات ناجحة مقابل غير ناجحة لكل محصل</h3>
+          <div class="hint">أكبر ١٥ محصل حسب عدد المكالمات المغطاة</div>
+          <div class="chart-holder tall"><canvas id="chartByCollector"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <h3>توزيع Final State</h3>
+          <div class="hint">أهم ١٢ حالة نهائية</div>
+          <div class="chart-holder tall"><canvas id="chartFinalState"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <h3>الوقت المهدر لكل محصل (دقيقة)</h3>
+          <div class="hint">أعلى ١٥ محصل من حيث الوقت المهدر</div>
+          <div class="chart-holder tall"><canvas id="chartWasted"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <h3>توزيع المكالمات عبر ساعات اليوم</h3>
+          <div class="hint">حسب وقت "Created on"</div>
+          <div class="chart-holder tall"><canvas id="chartHourly"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <h3>توزيع المكالمات حسب المشرف</h3>
+          <div class="hint" id="supervisorHint">—</div>
+          <div class="chart-holder"><canvas id="chartSupervisor"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+          <h3>ترتيب المحصلين حسب سكور الفاعلية</h3>
+          <div class="hint">٣٥٪ تغطية + ٣٥٪ نجاح + ٣٠٪ (١٠٠ - الوقت المهدر)</div>
+          <div class="chart-holder"><canvas id="chartScore"></canvas></div>
+        </div>
+      </div>
+
+      <footer class="app-footer">لوحة أداء تفاعلية — البنك الأهلي السعودي SNB</footer>
+    </div>
+
+  </div>
+
+<script>
+(function(){
+
+  // ---------------------------------------------------------------
+  // إعدادات عامة
+  // ---------------------------------------------------------------
+  const COLORS = {
+    green:'#00693E', greenDark:'#024930', greenLight:'#3FA372',
+    gold:'#C9A227', goldLight:'#E4C55C',
+    navy:'#0E2841', navyLight:'#1D4569',
+    red:'#A33A3A', muted:'#6B7A8D'
+  };
+  const SUPERVISOR_COLS = ['Sales Team','Supervisor','المشرف','Team Leader','TL','Manager','Supervisor Name'];
+  const PALETTE = [COLORS.green, COLORS.gold, COLORS.navyLight, COLORS.red, COLORS.greenLight, COLORS.goldLight, '#5E7A9E', '#8A5A2E'];
+
+  let RAW = [];          // كل الصفوف من الإكسيل
+  let COLS = {};         // أسماء الأعمدة المكتشفة
+  let charts = {};       // مراجع الـ Chart.js instances
+  let selected = {collector:new Set(), supervisor:new Set(), finalstate:new Set(), classif:new Set()};
+
+  const $ = (sel)=>document.querySelector(sel);
+  const $$ = (sel)=>Array.from(document.querySelectorAll(sel));
+
+  function tickClock(){
+    const now = new Date();
+    $('#clockNow').textContent = now.toLocaleString('ar-SA', {hour12:false});
+  }
+  tickClock(); setInterval(tickClock, 1000*30);
+
+  // ---------------------------------------------------------------
+  // رفع الملف (drag & drop + browse)
+  // ---------------------------------------------------------------
+  const dropzone = $('#dropzone');
+  const fileInput = $('#fileInput');
+  const errBox = $('#uploadError');
+
+  $('#browseBtn').addEventListener('click', ()=>fileInput.click());
+  dropzone.addEventListener('click', (e)=>{ if(e.target.id!=='browseBtn') fileInput.click(); });
+
+  ['dragenter','dragover'].forEach(ev=>{
+    dropzone.addEventListener(ev, (e)=>{e.preventDefault();e.stopPropagation();dropzone.classList.add('drag');});
+  });
+  ['dragleave','drop'].forEach(ev=>{
+    dropzone.addEventListener(ev, (e)=>{e.preventDefault();e.stopPropagation();dropzone.classList.remove('drag');});
+  });
+  dropzone.addEventListener('drop', (e)=>{
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) handleFile(f);
+  });
+  fileInput.addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(f) handleFile(f);
+  });
+
+  function showError(msg){
+    errBox.textContent = msg;
+    errBox.style.display = 'block';
+  }
+
+  function handleFile(file){
+    errBox.style.display='none';
+    const reader = new FileReader();
+    reader.onerror = ()=> showError('تعذّرت قراءة الملف. جرب ملف تاني.');
+    reader.onload = function(e){
+      try{
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type:'array', cellDates:true});
+
+        // فضّل شيت اسمه "النشاط" لو موجود، وإلا خد أول شيت
+        const sheetName = wb.SheetNames.includes('النشاط') ? 'النشاط' : wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, {defval:null, raw:true});
+
+        if(!rows.length){ showError('الشيت فاضي أو مش قادر أقرا صفوف منه.'); return; }
+
+        const headers = Object.keys(rows[0]);
+        const required = ['Collector','التصنيف','Created on'];
+        const missing = required.filter(c=>!headers.includes(c));
+        if(missing.length){
+          showError('الأعمدة دي ناقصة في الملف: ' + missing.join('، '));
+          return;
+        }
+
+        RAW = rows;
+        COLS.supervisor = SUPERVISOR_COLS.find(c=>headers.includes(c)) || null;
+        COLS.finalState = headers.includes('Final State') ? 'Final State' : null;
+        COLS.wasted = headers.includes('وقت مهدر') ? 'وقت مهدر' : null;
+
+        $('#fileNameLabel').textContent = file.name;
+        $('#rowCountLabel').textContent = `عدد الصفوف: ${rows.length.toLocaleString('ar-SA')} — الشيت: ${sheetName}`;
+
+        selected = {collector:new Set(), supervisor:new Set(), finalstate:new Set(), classif:new Set()};
+        buildFilters();
+        renderAll();
+
+        $('#uploadStage').style.display = 'none';
+        $('#dashboard').style.display = 'block';
+      }catch(err){
+    console.error("FULL ERROR:", err);
+
+    showError(
+        'خطأ أثناء تحليل الملف: ' +
+        (err && err.message ? err.message : String(err))
+    );
+}
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  $('#resetBtn').addEventListener('click', ()=>{
+    RAW = []; COLS = {};
+    fileInput.value = '';
+    $('#dashboard').style.display='none';
+    $('#uploadStage').style.display='flex';
+  });
+
+  // ---------------------------------------------------------------
+  // مساعدين
+  // ---------------------------------------------------------------
+  function uniqSorted(arr){
+    return Array.from(new Set(arr.filter(v=>v!==null && v!==undefined && v!=='')))
+      .sort((a,b)=>String(a).localeCompare(String(b),'ar'));
+  }
+
+  function isSuccess(v){
+    return v === 1 || v === '1' || v === true;
+  }
+
+  function getFiltered(){
+    return RAW.filter(r=>{
+      if(selected.collector.size && !selected.collector.has(r['Collector'])) return false;
+      if(COLS.supervisor && selected.supervisor.size && !selected.supervisor.has(r[COLS.supervisor])) return false;
+      if(COLS.finalState && selected.finalstate.size){
+        const fs = r[COLS.finalState] ?? 'Blank';
+        if(!selected.finalstate.has(fs)) return false;
+      }
+      if(selected.classif.size){
+        const label = isSuccess(r['التصنيف']) ? 'ناجحة' : 'غير ناجحة';
+        if(!selected.classif.has(label)) return false;
+      }
+      return true;
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // بناء السلايسرات (multi-select dropdowns)
+  // ---------------------------------------------------------------
+  function buildFilters(){
+    const wrap = $('#filtersRow');
+    wrap.innerHTML = '';
+
+    const collectorOptions = uniqSorted(RAW.map(r=>r['Collector']));
+    wrap.appendChild(makeFilterGroup('المحصل', 'collector', collectorOptions));
+
+    if(COLS.supervisor){
+      const supOptions = uniqSorted(RAW.map(r=>r[COLS.supervisor]));
+      wrap.appendChild(makeFilterGroup('المشرف', 'supervisor', supOptions));
+    }
+
+    if(COLS.finalState){
+      const fsOptions = uniqSorted(RAW.map(r=> r[COLS.finalState] ?? 'Blank'));
+      wrap.appendChild(makeFilterGroup('Final State', 'finalstate', fsOptions));
+    }
+
+    wrap.appendChild(makeFilterGroup('التصنيف', 'classif', ['ناجحة','غير ناجحة']));
+
+    // اقفال أي منيو مفتوحة لو ضغط المستخدم بره
+    document.addEventListener('click', (e)=>{
+      $$('.ms-panel.open').forEach(p=>{
+        if(!p.parentElement.contains(e.target)) p.classList.remove('open');
+      });
+    });
+  }
+
+  function makeFilterGroup(label, key, options){
+    const group = document.createElement('div');
+    group.className = 'filter-group';
+
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    group.appendChild(lbl);
+
+    const ms = document.createElement('div');
+    ms.className = 'multiselect';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-btn';
+    btn.innerHTML = `<span class="ms-btn-label">الكل</span><span class="count zero">${options.length}</span>`;
+    ms.appendChild(btn);
+
+    const panel = document.createElement('div');
+    panel.className = 'ms-panel';
+
+    options.forEach(opt=>{
+      const item = document.createElement('label');
+      item.className = 'ms-item';
+      item.innerHTML = `<input type="checkbox" value="${String(opt).replace(/"/g,'&quot;')}"> <span>${opt}</span>`;
+      const checkbox = item.querySelector('input');
+      checkbox.addEventListener('change', ()=>{
+        if(checkbox.checked) selected[key].add(opt); else selected[key].delete(opt);
+        updateBtnLabel(btn, selected[key], options.length);
+        renderAll();
+      });
+      panel.appendChild(item);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'ms-actions';
+    const allBtn = document.createElement('button');
+    allBtn.textContent = 'الكل';
+    allBtn.type='button';
+    allBtn.addEventListener('click', ()=>{
+      selected[key] = new Set();
+      panel.querySelectorAll('input').forEach(cb=>cb.checked=false);
+      updateBtnLabel(btn, selected[key], options.length);
+      renderAll();
+    });
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'مسح';
+    clearBtn.type='button';
+    clearBtn.addEventListener('click', ()=>{
+      selected[key] = new Set(options);
+      panel.querySelectorAll('input').forEach(cb=>cb.checked=true);
+      updateBtnLabel(btn, selected[key], options.length);
+      renderAll();
+    });
+    actions.appendChild(allBtn);
+    actions.appendChild(clearBtn);
+    panel.appendChild(actions);
+
+    ms.appendChild(panel);
+    group.appendChild(ms);
+
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      $$('.ms-panel.open').forEach(p=>{ if(p!==panel) p.classList.remove('open'); });
+      panel.classList.toggle('open');
+    });
+
+    return group;
+  }
+
+  function updateBtnLabel(btn, set, total){
+    const labelEl = btn.querySelector('.ms-btn-label');
+    const countEl = btn.querySelector('.count');
+    if(set.size === 0){
+      labelEl.textContent = 'الكل';
+      countEl.textContent = total;
+      countEl.classList.add('zero');
+    }else{
+      labelEl.textContent = `${set.size} مختار`;
+      countEl.textContent = set.size;
+      countEl.classList.remove('zero');
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // الحسابات
+  // ---------------------------------------------------------------
+  function aggregateByCollector(rows){
+    const map = new Map();
+    rows.forEach(r=>{
+      const c = r['Collector'] ?? '—';
+      if(!map.has(c)) map.set(c, {collector:c, covered:0, success:0, wasted:0});
+      const o = map.get(c);
+      o.covered += 1;
+      if(isSuccess(r['التصنيف'])) o.success += 1;
+      if(COLS.wasted && typeof r[COLS.wasted] === 'number') o.wasted += r[COLS.wasted];
+    });
+    return Array.from(map.values());
+  }
+
+  function normalize(arr, key){
+    const vals = arr.map(o=>o[key]);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return arr.map(o=>{
+      const n = (max === min) ? 100 : ((o[key]-min)/(max-min))*100;
+      return {...o, [key+'_n']: n};
+    });
+  }
+
+  function computeScores(agg){
+    let a = normalize(agg, 'covered');
+    a = normalize(a, 'success');
+    a = normalize(a, 'wasted');
+    return a.map(o=>({
+      ...o,
+      score: (o.covered_n*0.35 + o.success_n*0.35 + (100-o.wasted_n)*0.30)
+    }));
+  }
+
+  // ---------------------------------------------------------------
+  // الرسم الكامل
+  // ---------------------------------------------------------------
+  function renderAll(){
+    const filtered = getFiltered();
+    if(!filtered.length){
+      renderEmptyState();
+      return;
+    }
+    const agg = aggregateByCollector(filtered);
+    const scored = computeScores(agg).sort((a,b)=>b.score-a.score);
+
+    renderCards(filtered, agg, scored);
+    renderChartByCollector(agg);
+    renderChartFinalState(filtered);
+    renderChartWasted(agg);
+    renderChartHourly(filtered);
+    renderChartSupervisor(filtered);
+    renderChartScore(scored);
+  }
+
+  function renderEmptyState(){
+    $('#cardsRow').innerHTML = '<div class="empty-note" style="grid-column:1/-1">مفيش بيانات مطابقة للفلاتر المختارة.</div>';
+    Object.values(charts).forEach(c=>c && c.destroy());
+    charts = {};
+  }
+
+  function renderCards(filtered, agg, scored){
+    const totalCovered = filtered.length;
+    const totalSuccess = filtered.filter(r=>isSuccess(r['التصنيف'])).length;
+    const successRate = totalCovered ? (totalSuccess/totalCovered*100) : 0;
+    const wastedVals = COLS.wasted ? filtered.map(r=>r[COLS.wasted]).filter(v=>typeof v==='number') : [];
+    const avgWasted = wastedVals.length ? (wastedVals.reduce((a,b)=>a+b,0)/wastedVals.length) : 0;
+    const activeCollectors = agg.length;
+    const top = scored[0];
+
+    const cards = [
+      {cls:'c1', label:'عدد المكالمات المغطاة', value: totalCovered.toLocaleString('ar-SA'), sub:`${activeCollectors} محصل نشط`},
+      {cls:'c2', label:'عدد المكالمات الناجحة', value: totalSuccess.toLocaleString('ar-SA'), sub:`${successRate.toFixed(1)}% من المغطاة`},
+      {cls:'c3', label:'متوسط الوقت المهدر', value: avgWasted.toFixed(1)+' د', sub: COLS.wasted ? 'لكل مكالمة' : 'عمود وقت مهدر غير موجود'},
+      {cls:'c4', label:'أكتر محصل فاعلية', value: top ? top.collector : '—', sub: top ? `سكور ${top.score.toFixed(0)}/100` : ''},
+      {cls:'c5', label:'عدد المحصلين النشطين', value: activeCollectors.toLocaleString('ar-SA'), sub:'ضمن الفلتر الحالي'},
+    ];
+
+    $('#cardsRow').innerHTML = cards.map(c=>`
+      <div class="card ${c.cls}">
+        <div class="k-label">${c.label}</div>
+        <div class="k-value">${c.value}</div>
+        <div class="k-sub">${c.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  function destroyChart(key){
+    if(charts[key]){ charts[key].destroy(); charts[key]=null; }
+  }
+
+  function baseOptions(extra){
+    return Object.assign({
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ font:{family:'Cairo', size:11.5} } } },
+      font:{family:'Cairo'}
+    }, extra||{});
+  }
+
+  function renderChartByCollector(agg){
+    destroyChart('byCollector');
+    const top15 = [...agg].sort((a,b)=>b.covered-a.covered).slice(0,15).reverse();
+    const ctx = $('#chartByCollector').getContext('2d');
+    charts.byCollector = new Chart(ctx, {
+      type:'bar',
+      data:{
+        labels: top15.map(o=>o.collector),
+        datasets:[
+          {label:'ناجحة', data: top15.map(o=>o.success), backgroundColor:COLORS.green, stack:'s'},
+          {label:'غير ناجحة', data: top15.map(o=>o.covered-o.success), backgroundColor:COLORS.gold, stack:'s'},
+        ]
+      },
+      options: baseOptions({
+        indexAxis:'y',
+        scales:{ x:{stacked:true, grid:{color:'#EEF2F6'}}, y:{stacked:true, grid:{display:false}} }
+      })
+    });
+  }
+
+  function renderChartFinalState(filtered){
+    destroyChart('finalState');
+    if(!COLS.finalState){
+      charts.finalState = null;
+      $('#chartFinalState').closest('.chart-holder').innerHTML = '<div class="empty-note">عمود Final State غير موجود في الملف</div>';
+      return;
+    }
+    const counts = new Map();
+    filtered.forEach(r=>{
+      const v = r[COLS.finalState] ?? 'Blank';
+      counts.set(v, (counts.get(v)||0)+1);
+    });
+    let entries = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]);
+    if(entries.length>12){
+      const top = entries.slice(0,11);
+      const otherSum = entries.slice(11).reduce((s,e)=>s+e[1],0);
+      entries = [...top, ['أخرى', otherSum]];
+    }
+    const ctx = $('#chartFinalState').getContext('2d');
+    charts.finalState = new Chart(ctx, {
+      type:'bar',
+      data:{ labels: entries.map(e=>e[0]), datasets:[{ label:'عدد', data: entries.map(e=>e[1]), backgroundColor: COLORS.navy, borderRadius:6 }] },
+      options: baseOptions({ plugins:{legend:{display:false}}, scales:{ x:{ticks:{autoSkip:false, maxRotation:35, minRotation:20}}, y:{grid:{color:'#EEF2F6'}} } })
+    });
+  }
+
+  function renderChartWasted(agg){
+    destroyChart('wasted');
+    const top15 = [...agg].sort((a,b)=>b.wasted-a.wasted).slice(0,15).reverse();
+    const ctx = $('#chartWasted').getContext('2d');
+    charts.wasted = new Chart(ctx, {
+      type:'bar',
+      data:{ labels: top15.map(o=>o.collector), datasets:[{ label:'الوقت المهدر (دقيقة)', data: top15.map(o=>Math.round(o.wasted*10)/10), backgroundColor: COLORS.red, borderRadius:6 }] },
+      options: baseOptions({ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#EEF2F6'}}, y:{grid:{display:false}} } })
+    });
+  }
+
+  function renderChartHourly(filtered){
+    destroyChart('hourly');
+    const buckets = new Array(24).fill(0);
+    filtered.forEach(r=>{
+      const d = r['Created on'];
+      if(d instanceof Date && !isNaN(d)){ buckets[d.getHours()] += 1; }
+    });
+    const ctx = $('#chartHourly').getContext('2d');
+    charts.hourly = new Chart(ctx, {
+      type:'bar',
+      data:{ labels: buckets.map((_,h)=>h+':00'), datasets:[{ label:'عدد المكالمات', data: buckets, backgroundColor: COLORS.greenDark, borderRadius:6 }] },
+      options: baseOptions({ plugins:{legend:{display:false}}, scales:{ y:{grid:{color:'#EEF2F6'}} } })
+    });
+  }
+
+  function renderChartSupervisor(filtered){
+    destroyChart('supervisor');
+    const hintEl = $('#supervisorHint');
+    if(!COLS.supervisor){
+      hintEl.textContent = 'عمود المشرف غير موجود في الملف';
+      $('#chartSupervisor').closest('.chart-holder').innerHTML = '<div class="empty-note">عمود المشرف غير موجود في الملف</div>';
+      return;
+    }
+    hintEl.textContent = 'عدد المكالمات لكل مشرف';
+    const counts = new Map();
+    filtered.forEach(r=>{
+      const v = r[COLS.supervisor] ?? 'غير محدد';
+      counts.set(v, (counts.get(v)||0)+1);
+    });
+    const entries = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]);
+    const ctx = $('#chartSupervisor').getContext('2d');
+    charts.supervisor = new Chart(ctx, {
+      type:'doughnut',
+      data:{ labels: entries.map(e=>e[0]), datasets:[{ data: entries.map(e=>e[1]), backgroundColor: PALETTE, borderWidth:2, borderColor:'#fff' }] },
+      options: baseOptions({ plugins:{ legend:{ position:'bottom', labels:{boxWidth:11, font:{family:'Cairo', size:11}} } } })
+    });
+  }
+
+  function renderChartScore(scored){
+    destroyChart('score');
+    const top12 = scored.slice(0,12).reverse();
+    const ctx = $('#chartScore').getContext('2d');
+    charts.score = new Chart(ctx, {
+      type:'bar',
+      data:{ labels: top12.map(o=>o.collector), datasets:[{ label:'سكور الفاعلية', data: top12.map(o=>Math.round(o.score*10)/10), backgroundColor: COLORS.gold, borderRadius:6 }] },
+      options: baseOptions({ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{max:100, grid:{color:'#EEF2F6'}}, y:{grid:{display:false}} } })
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
