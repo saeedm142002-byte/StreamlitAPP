@@ -117,13 +117,11 @@ page = st.session_state.page
 # PAGE 1 - الوعود القائمة
 # ======================
 if page == "الوعود القائمة و المكسورة":
-
     import pandas as pd
     import plotly.express as px
     from io import BytesIO
-
     st.subheader("📊 الوعود القائمة / الوعود المكسورة")
-
+    
     # ==========================================
     # اختيار المسار: NPL&Dpd60 أو SNB
     # ==========================================
@@ -132,23 +130,22 @@ if page == "الوعود القائمة و المكسورة":
         options=["NPL&Dpd60", "SNB"],
         horizontal=True
     )
-
+    
     portfolio_file = st.file_uploader(
         "رفع ملف المحفظة",
         type=["xlsx", "xls"]
     )
-
+    
     # ============================================================
     # الدالة المعالجة الأساسية - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري معالجة الملف...")
     def process_portfolio(file_bytes, portfolio_type_):
-
         df = pd.read_excel(BytesIO(file_bytes))
-
+        
         # حذف أول صف بعد الـ Header
         df = df.iloc[1:].reset_index(drop=True)
-
+        
         # تنظيف النصوص
         text_cols = [
             "Sales Team",
@@ -158,52 +155,43 @@ if page == "الوعود القائمة و المكسورة":
             "حالة المعالجة - التمويل",
             "ملاحظات-التمويل"
         ]
-
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
-
+                # تحويل "nan" النصي إلى NaN حقيقي عشان الفلترة تشتغل صح
+                df[col] = df[col].replace(["nan", "None", ""], pd.NA)
+        
         # تحويل التواريخ
         df["Follow up Due Date"] = pd.to_datetime(
             df["Follow up Due Date"],
             errors="coerce"
         ).dt.normalize()
-
+        
         df["Follow up Last Date"] = pd.to_datetime(
             df["Follow up Last Date"],
             errors="coerce"
         ).dt.normalize()
-
+        
         today = pd.Timestamp.today().normalize()
-
+        
         # ==========================================
         # بناء الـ base حسب المسار المختار
         # ==========================================
-
         if portfolio_type_ == "NPL&Dpd60":
-
             base = df.copy()
-
             base = base[
                 base["Sales Team"] != "Sara || Op"
             ]
-
             base = base[
                 base["Final State"].str.contains(
                     "واعد بالسداد",
                     na=False
                 )
             ]
-
-            base = base[
-                (base["حالة المعالجة - التمويل"] == "غير معالج") |
-                (base["حالة المعالجة - التمويل"].isna())
-            ]
-
+            # ← شيلنا فلتر "حالة المعالجة - التمويل" من هنا عشان يبقى آخر خطوة
+            
         else:  # SNB
-
             base = df.copy()
-
             allowed_sales_teams = [
                 "SNB II Alsarhan II Naser",
                 "SNB II Alsarhan II Tariq"
@@ -211,7 +199,6 @@ if page == "الوعود القائمة و المكسورة":
             base = base[
                 base["Sales Team"].isin(allowed_sales_teams)
             ]
-
             excluded_salespersons = [
                 "Closed payments II Alaa SNB",
                 "Hold Companies II SNB2",
@@ -224,76 +211,105 @@ if page == "الوعود القائمة و المكسورة":
                 & (base["Salesperson"].str.strip() != "")
                 & (base["Salesperson"].str.lower() != "nan")
             ]
-
             base = base[
                 base["Sub State"].str.contains(
                     "واعد بالسداد",
                     na=False
                 )
             ]
-
+        
         # ==========================================
         # الوعود القائمة
         # ==========================================
         current = base.copy()
-
         current = current[
             current["Follow up Due Date"] == today
         ]
-
         current = current[
             current["Follow up Last Date"].notna()
         ]
-
         current = current[
             current["Follow up Last Date"] != today
         ]
-
+        
         # ==========================================
         # الوعود المكسورة
         # ==========================================
         broken = base.copy()
-
         broken = broken[
             broken["Follow up Due Date"] < today
         ]
-
         broken = broken[
             broken["Follow up Last Date"].notna()
         ]
-
         broken["فرق الايام"] = (
             broken["Follow up Last Date"] - broken["Follow up Due Date"]
         ).dt.days
-
         broken = broken[
             broken["فرق الايام"] < 0
         ]
-
         broken = broken.drop(columns=["فرق الايام"])
-
+        
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
-
         broken.insert(
             insert_position,
             "عدد ايام ترحيل الوعد",
             (today - broken["Follow up Due Date"]).dt.days
         )
-
         broken = broken[
             broken["عدد ايام ترحيل الوعد"] > 0
         ]
-
+        
         return current.reset_index(drop=True), broken.reset_index(drop=True)
-
+    
     if portfolio_file:
-
         file_bytes = portfolio_file.getvalue()
         current, broken = process_portfolio(file_bytes, portfolio_type)
-
+        
+        # ==========================================
+        # فلترة "حالة المعالجة - التمويل" (آخر خطوة) - فقط في NPL&Dpd60
+        # ==========================================
+        if portfolio_type == "NPL&Dpd60":
+            # نجيب القيم الفريدة من العمودين مع بعض عشان الفلتر يبقى شامل
+            all_status = pd.concat([
+                current["حالة المعالجة - التمويل"],
+                broken["حالة المعالجة - التمويل"]
+            ]).dropna().unique().tolist()
+            
+            # نضيف خيار "فارغ / NaN" لو فيه قيم فاضية
+            has_empty = (
+                current["حالة المعالجة - التمويل"].isna().any() or 
+                broken["حالة المعالجة - التمويل"].isna().any()
+            )
+            
+            options = sorted([str(x) for x in all_status if str(x).strip() != ""])
+            if has_empty:
+                options = ["(فارغ / غير محدد)"] + options
+            
+            selected_status = st.multiselect(
+                "فلتر حسب حالة المعالجة - التمويل (اختياري)",
+                options=options,
+                default=[],  # فاضي = يعرض الكل
+                help="اختار الحالة اللي عايزها. لو سبتها فاضية هيعرض كل الحالات."
+            )
+            
+            if selected_status:
+                def apply_status_filter(df):
+                    if "(فارغ / غير محدد)" in selected_status:
+                        mask = df["حالة المعالجة - التمويل"].isna()
+                        other_selected = [s for s in selected_status if s != "(فارغ / غير محدد)"]
+                        if other_selected:
+                            mask = mask | df["حالة المعالجة - التمويل"].isin(other_selected)
+                        return df[mask]
+                    else:
+                        return df[df["حالة المعالجة - التمويل"].isin(selected_status)]
+                
+                current = apply_status_filter(current)
+                broken = apply_status_filter(broken)
+        
         st.success(f"تم استخراج وعود قائمة {len(current)} حساب")
         st.success(f"تم استخراج وعود مكسورة {len(broken)} حساب")
-
+        
         # ==========================================
         # ملفات التحميل (Excel)
         # ==========================================
@@ -301,14 +317,13 @@ if page == "الوعود القائمة و المكسورة":
         with pd.ExcelWriter(output_current, engine="openpyxl") as writer:
             current.to_excel(writer, index=False)
         output_current.seek(0)
-
+        
         output_broken = BytesIO()
         with pd.ExcelWriter(output_broken, engine="openpyxl") as writer:
             broken.to_excel(writer, index=False)
         output_broken.seek(0)
-
+        
         col1, col2 = st.columns(2)
-
         with col1:
             st.download_button(
                 "📥 تحميل الوعود القائمة",
@@ -316,7 +331,6 @@ if page == "الوعود القائمة و المكسورة":
                 file_name="الوعود_القائمة.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
         with col2:
             st.download_button(
                 "📥 تحميل الوعود المكسورة",
@@ -324,7 +338,6 @@ if page == "الوعود القائمة و المكسورة":
                 file_name="الوعود_المكسورة.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
         # ============================================================
         # داشبورد الوعود
         # ============================================================
