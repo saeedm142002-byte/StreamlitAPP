@@ -636,296 +636,368 @@ elif page == "الاهمال":
 
     st.subheader("⚠️ الاهمال")
     if sub == "اهمال":
-    
-            # ==========================================
-            # اختيار المسار: NPL&Dpd60 أو SNB
-            # ==========================================
-            neglect_portfolio_type = st.radio(
-                "اختار نوع المحفظة",
-                options=["NPL&Dpd60", "SNB"],
-                horizontal=True,
-                key="neglect_portfolio_type"
+
+        import pandas as pd
+        import re
+        from io import BytesIO
+
+        # ==========================================
+        # اختيار المسار: NPL&Dpd60 أو SNB
+        # ==========================================
+        neglect_portfolio_type = st.radio(
+            "اختار نوع المحفظة",
+            options=["NPL&Dpd60", "SNB"],
+            horizontal=True,
+            key="neglect_portfolio_type"
+        )
+
+        # ==========================================
+        # سؤال عن عدد الأيام حسب المسار
+        # ==========================================
+        if neglect_portfolio_type == "NPL&Dpd60":
+            neglect_days_threshold = st.number_input(
+                "عدد أيام الإهمال (الحد الأدنى)",
+                min_value=1, value=3, step=1, key="neglect_npl_days"
             )
-    
-            # ==========================================
-            # سؤال عن عدد الأيام حسب المسار
-            # ==========================================
-            if neglect_portfolio_type == "NPL&Dpd60":
-                neglect_days_threshold = st.number_input(
-                    "عدد أيام الإهمال (الحد الأدنى)",
-                    min_value=1,
-                    value=3,
-                    step=1,
-                    key="neglect_npl_days"
+        else:
+            neglect_days_threshold = st.number_input(
+                "فرق عدد ايام من اخر متابعة (الحد الأدنى)",
+                min_value=1, value=7, step=1, key="neglect_snb_days"
+            )
+
+        uploaded_file = st.file_uploader(
+            "رفع ملف المحفظة",
+            type=["xlsx", "xls"],
+            key="neglect_file_uploader"
+        )
+
+        # ==========================================
+        # الحالات الافتراضية (default) لكل مسار
+        # ==========================================
+        NPL_DEFAULT_STATES = [
+            "⁠وعد بسداد مبلغ المعالجة",
+            "*رافض السداد",
+            "*مسجون",
+            "*مماطل",
+            "تم سداد جزء وليس مبلغ المعالجة",
+            "لا يجيب",
+            "وعد بسداد تسوية",
+            "وعد بسداد جزء من المتأخرات",
+            "وعد بسداد قسط",
+            "وعد بسداد كامل المتأخرات",
+            "وعد بسداد كامل المديونية",
+            "يرغب بجدولة المديونية"
+        ]
+
+        SNB_DEFAULT_STATES = [
+            "تم ابلاغ العميل - اتصال",
+            "جدولة",
+            "سداد جزئي",
+            "قيد التفاوض مع الورثة",
+            "مماطل",
+            "واعد بالسداد"
+        ]
+
+        def normalize_text(x):
+            if pd.isna(x):
+                return ""
+            x = str(x)
+            x = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\u2060\ufeff]", "", x)
+            x = re.sub(r"\s+", "", x)
+            return x.strip()
+
+        # ============================================================
+        # الدالة المعالجة الأساسية - Cached
+        # ============================================================
+        @st.cache_data(show_spinner="جاري معالجة الملف...")
+        def process_neglect(file_bytes, portfolio_type_, days_threshold_, selected_states_):
+
+            selected_states_norm = {normalize_text(s) for s in selected_states_}
+
+            df = pd.read_excel(BytesIO(file_bytes))
+            df = df.iloc[1:].reset_index(drop=True)
+
+            today = pd.Timestamp.today().normalize()
+
+            if portfolio_type_ == "NPL&Dpd60":
+
+                text_cols = ["Sales Team", "Sub State", "حالة المعالجة - التمويل"]
+                for col in text_cols:
+                    if col in df.columns:
+                        df[col] = df[col].astype(str).str.strip()
+
+                df["Follow up Last Date"] = pd.to_datetime(
+                    df["Follow up Last Date"], errors="coerce"
+                ).dt.normalize()
+
+                df = df[df["Sales Team"] != "Sara || Op"]
+
+                df["Payment"] = (
+                    df["Payment"].astype(str).str.replace(",", "", regex=False).str.strip()
                 )
+                df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
+                df = df[df["Payment"] <= 0]
+
+                df["عدد أيام الإهمال"] = (today - df["Follow up Last Date"]).dt.days
+
+                if "فرق عدد ايام من اخر متابعة" in df.columns:
+                    df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
+
+                insert_position = df.columns.get_loc("Follow up Last Date") + 1
+                df.insert(
+                    insert_position, "فرق عدد ايام من اخر متابعة",
+                    (today - df["Follow up Last Date"]).dt.days
+                )
+
+                df = df[df["عدد أيام الإهمال"] >= days_threshold_]
+
+                # فلترة حسب الحالات المختارة (بدل الليستة الثابتة)
+                df = df[df["Sub State"].apply(normalize_text).isin(selected_states_norm)]
+
+                df = df[
+                    (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة")
+                    | (df["حالة المعالجة - التمويل"].isna())
+                ]
+
+                supervisor_col_ = "ملاحظات-التمويل"
+
             else:
-                neglect_days_threshold = st.number_input(
-                    "فرق عدد ايام من اخر متابعة (الحد الأدنى)",
-                    min_value=1,
-                    value=7,
-                    step=1,
-                    key="neglect_snb_days"
+
+                text_cols = ["Sales Team", "Salesperson", "Sub State"]
+                for col in text_cols:
+                    if col in df.columns:
+                        df[col] = df[col].astype(str).str.strip()
+
+                df["Follow up Last Date"] = pd.to_datetime(
+                    df["Follow up Last Date"], errors="coerce"
+                ).dt.normalize()
+
+                allowed_sales_teams = [
+                    "SNB II Alsarhan II Naser",
+                    "SNB II Alsarhan II Tariq"
+                ]
+                df = df[df["Sales Team"].isin(allowed_sales_teams)]
+
+                excluded_salespersons = [
+                    "Closed payments II Alaa SNB",
+                    "Hold Companies II SNB2",
+                    "Abdullah Alsarhan",
+                    "Archive Companies II Alaa SNB"
+                ]
+                df = df[
+                    (~df["Salesperson"].isin(excluded_salespersons))
+                    & (df["Salesperson"].notna())
+                    & (df["Salesperson"].str.strip() != "")
+                    & (df["Salesperson"].str.lower() != "nan")
+                ]
+
+                df["Payment"] = (
+                    df["Payment"].astype(str).str.replace(",", "", regex=False).str.strip()
                 )
-    
-            uploaded_file = st.file_uploader(
-                "رفع ملف المحفظة",
-                type=["xlsx", "xls"],
-                key="neglect_file_uploader"
-            )
-    
-            # ============================================================
-            # الدالة المعالجة الأساسية - Cached
-            # (بتشتغل تاني بس لو الملف أو نوع المحفظة أو عدد الأيام اتغيروا،
-            #  مش لما تغيّر السلايسر)
-            # ============================================================
-            @st.cache_data(show_spinner="جاري معالجة الملف...")
-            def process_neglect(file_bytes, portfolio_type_, days_threshold_):
-    
-                import pandas as pd
-                import re
-                from io import BytesIO
-    
-                df = pd.read_excel(BytesIO(file_bytes))
-    
-                # حذف أول صف إذا كان التقرير يحتوي على صف إضافي
-                df = df.iloc[1:].reset_index(drop=True)
-    
-                today = pd.Timestamp.today().normalize()
-    
-                # ============================================================
-                # مسار NPL&Dpd60 - زي الكود الأصلي بالظبط + threshold قابل للتغيير
-                # ============================================================
-                if portfolio_type_ == "NPL&Dpd60":
-    
-                    text_cols = [
-                        "Sales Team",
-                        "Sub State",
-                        "حالة المعالجة - التمويل"
-                    ]
-                    for col in text_cols:
-                        if col in df.columns:
-                            df[col] = df[col].astype(str).str.strip()
-    
-                    df["Follow up Last Date"] = pd.to_datetime(
-                        df["Follow up Last Date"],
-                        errors="coerce"
-                    ).dt.normalize()
-    
-                    # Sales Team
-                    df = df[df["Sales Team"] != "Sara || Op"]
-    
-                    # Payment: سيب السالب والصفر فقط
-                    df["Payment"] = (
-                        df["Payment"]
-                        .astype(str)
-                        .str.replace(",", "", regex=False)
-                        .str.strip()
+                df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
+                df = df[df["Payment"] == 0]
+
+                # فلترة حسب الحالات المختارة (contains بعد normalize)
+                df = df[
+                    df["Sub State"].apply(
+                        lambda v: any(t in normalize_text(v) for t in selected_states_norm)
                     )
-                    df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
-                    df = df[df["Payment"] <= 0]
-    
-                    # عدد أيام الإهمال
-                    df["عدد أيام الإهمال"] = (today - df["Follow up Last Date"]).dt.days
-    
-                    if "فرق عدد ايام من اخر متابعة" in df.columns:
-                        df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
-    
-                    insert_position = df.columns.get_loc("Follow up Last Date") + 1
-                    df.insert(
-                        insert_position,
-                        "فرق عدد ايام من اخر متابعة",
-                        (today - df["Follow up Last Date"]).dt.days
-                    )
-    
-                    df = df[df["عدد أيام الإهمال"] >= days_threshold_]
-    
-                    # Sub State
-                    allowed_states = [
-                        "⁠وعد بسداد مبلغ المعالجة",
-                        "*رافض السداد",
-                        "*مسجون",
-                        "*مماطل",
-                        "تم سداد جزء وليس مبلغ المعالجة",
-                        "لا يجيب",
-                        "وعد بسداد تسوية",
-                        "وعد بسداد جزء من المتأخرات",
-                        "وعد بسداد قسط",
-                        "وعد بسداد كامل المتأخرات",
-                        "وعد بسداد كامل المديونية",
-                        "يرغب بجدولة المديونية"
-                    ]
-                    df = df[df["Sub State"].isin(allowed_states)]
-    
-                    # حالة المعالجة
-                    df = df[
-                        (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة")
-                        | (df["حالة المعالجة - التمويل"].isna())
-                    ]
-    
-                    supervisor_col_ = "ملاحظات-التمويل"
-    
-                # ============================================================
-                # مسار SNB - إجراءات مختلفة
-                # ============================================================
+                ]
+
+                if "فرق عدد ايام من اخر متابعة" in df.columns:
+                    df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
+
+                insert_position = df.columns.get_loc("Follow up Last Date") + 1
+                df.insert(
+                    insert_position, "فرق عدد ايام من اخر متابعة",
+                    (today - df["Follow up Last Date"]).dt.days
+                )
+
+                df = df[df["فرق عدد ايام من اخر متابعة"] >= days_threshold_]
+
+                supervisor_col_ = "Sales Team"
+
+            return df.reset_index(drop=True), supervisor_col_
+
+        # ============================================================
+        # قراءة الحالات الموجودة في الملف (بدون تنفيذ الفلترة الكاملة)
+        # ============================================================
+        @st.cache_data(show_spinner="جاري قراءة الحالات...")
+        def read_sub_states(file_bytes_):
+            df_raw = pd.read_excel(BytesIO(file_bytes_))
+            df_raw = df_raw.iloc[1:].reset_index(drop=True)
+            if "Sub State" not in df_raw.columns:
+                return []
+            vals = df_raw["Sub State"].dropna().astype(str).str.strip()
+            vals = vals[vals != ""]
+            return sorted(vals.unique().tolist())
+
+        if uploaded_file:
+
+            file_bytes = uploaded_file.getvalue()
+            all_states = read_sub_states(file_bytes)
+
+            pool_key = f"neglect_pools_{neglect_portfolio_type}"
+            sig_key = f"{pool_key}_sig"
+            run_key = f"neglect_run_{neglect_portfolio_type}"
+            file_signature = (uploaded_file.name, len(file_bytes), neglect_portfolio_type)
+
+            # تبني البوكسين أول مرة فقط، أو لو الملف/المسار اتغير
+            if st.session_state.get(sig_key) != file_signature:
+                default_states = (
+                    NPL_DEFAULT_STATES if neglect_portfolio_type == "NPL&Dpd60"
+                    else SNB_DEFAULT_STATES
+                )
+                default_norm = [normalize_text(s) for s in default_states]
+
+                if neglect_portfolio_type == "NPL&Dpd60":
+                    neglect_states = [s for s in all_states if normalize_text(s) in default_norm]
                 else:
-    
-                    text_cols = ["Sales Team", "Salesperson", "Sub State"]
-                    for col in text_cols:
-                        if col in df.columns:
-                            df[col] = df[col].astype(str).str.strip()
-    
-                    df["Follow up Last Date"] = pd.to_datetime(
-                        df["Follow up Last Date"],
-                        errors="coerce"
-                    ).dt.normalize()
-    
-                    # 1) Sales Team - زي صفحة الوعود
-                    allowed_sales_teams = [
-                        "SNB II Alsarhan II Naser",
-                        "SNB II Alsarhan II Tariq"
+                    neglect_states = [
+                        s for s in all_states
+                        if any(t in normalize_text(s) for t in default_norm)
                     ]
-                    df = df[df["Sales Team"].isin(allowed_sales_teams)]
-    
-                    # 2) Salesperson - زي صفحة الوعود
-                    excluded_salespersons = [
-                        "Closed payments II Alaa SNB",
-                        "Hold Companies II SNB2",
-                        "Abdullah Alsarhan",
-                        "Archive Companies II Alaa SNB"
-                    ]
-                    df = df[
-                        (~df["Salesperson"].isin(excluded_salespersons))
-                        & (df["Salesperson"].notna())
-                        & (df["Salesperson"].str.strip() != "")
-                        & (df["Salesperson"].str.lower() != "nan")
-                    ]
-    
-                    # 3) Payment - سيب الصفر بس
-                    df["Payment"] = (
-                        df["Payment"]
-                        .astype(str)
-                        .str.replace(",", "", regex=False)
-                        .str.strip()
-                    )
-                    df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
-                    df = df[df["Payment"] == 0]
-    
-                    # 4) Sub State - مطابقة "contains" لكن متسامحة مع المسافات
-                    # والرموز الزيادة (زي مسافات إضافية أو رموز غير مرئية)
-                    def normalize_text(x):
-                        if pd.isna(x):
-                            return ""
-                        x = str(x)
-                        x = re.sub(r"[\u200b\u200c\u200d\u200e\u200f\ufeff]", "", x)
-                        x = re.sub(r"\s+", "", x)
-                        return x.strip()
-    
-                    target_states = [
-                        "تم ابلاغ العميل - اتصال",
-                        "جدولة",
-                        "سداد جزئي",
-                        "قيد التفاوض مع الورثة",
-                        "مماطل",
-                        "واعد بالسداد"
-                    ]
-                    normalized_targets = [normalize_text(t) for t in target_states]
-    
-                    df["_sub_state_norm"] = df["Sub State"].apply(normalize_text)
-                    df = df[
-                        df["_sub_state_norm"].apply(
-                            lambda v: any(t in v for t in normalized_targets)
-                        )
-                    ]
-                    df = df.drop(columns=["_sub_state_norm"])
-    
-                    # 5) Follow up Last Date - عمود الفرق + الفلترة بالـ threshold
-                    if "فرق عدد ايام من اخر متابعة" in df.columns:
-                        df.drop(columns=["فرق عدد ايام من اخر متابعة"], inplace=True)
-    
-                    insert_position = df.columns.get_loc("Follow up Last Date") + 1
-                    df.insert(
-                        insert_position,
-                        "فرق عدد ايام من اخر متابعة",
-                        (today - df["Follow up Last Date"]).dt.days
-                    )
-    
-                    df = df[df["فرق عدد ايام من اخر متابعة"] >= days_threshold_]
-    
-                    supervisor_col_ = "Sales Team"
-    
-                return df.reset_index(drop=True), supervisor_col_
-    
-            if uploaded_file:
-    
-                import pandas as pd
-                import plotly.express as px
-                from io import BytesIO
-    
-                file_bytes = uploaded_file.getvalue()
-                df, supervisor_col = process_neglect(
-                    file_bytes, neglect_portfolio_type, neglect_days_threshold
+
+                other_states = [s for s in all_states if s not in neglect_states]
+
+                st.session_state[pool_key] = {
+                    "not_neglect": sorted(other_states),
+                    "neglect": sorted(neglect_states)
+                }
+                st.session_state[sig_key] = file_signature
+                st.session_state[run_key] = False
+
+            pools = st.session_state[pool_key]
+
+            st.markdown("---")
+            st.markdown("### 🗂️ اختيار حالات الإهمال")
+
+            box1, box2 = st.columns(2)
+
+            with box1:
+                st.markdown("#### باقي الحالات")
+                search_other = st.text_input(
+                    "🔍 بحث",
+                    key=f"search_other_{neglect_portfolio_type}"
                 )
-    
-                # ============================
-                # تحميل الملف
-                # ============================
+                filtered_other = (
+                    [s for s in pools["not_neglect"] if search_other.strip() in s]
+                    if search_other.strip() else pools["not_neglect"]
+                )
+
+                pick_other = st.selectbox(
+                    "اختار حالة",
+                    options=filtered_other or ["— لا يوجد —"],
+                    key=f"pick_other_{neglect_portfolio_type}"
+                )
+                if st.button("➡️ Insert", key=f"insert_{neglect_portfolio_type}",
+                             disabled=not filtered_other):
+                    pools["not_neglect"].remove(pick_other)
+                    pools["neglect"].append(pick_other)
+                    pools["neglect"].sort()
+                    st.session_state[run_key] = False
+                    st.rerun()
+
+                st.dataframe(
+                    pd.DataFrame({"الحالة": filtered_other}),
+                    use_container_width=True, hide_index=True
+                )
+
+            with box2:
+                st.markdown("#### حالات الإهمال")
+                search_neglect = st.text_input(
+                    "🔍 بحث",
+                    key=f"search_neglect_{neglect_portfolio_type}"
+                )
+                filtered_neglect = (
+                    [s for s in pools["neglect"] if search_neglect.strip() in s]
+                    if search_neglect.strip() else pools["neglect"]
+                )
+
+                pick_neglect = st.selectbox(
+                    "اختار حالة",
+                    options=filtered_neglect or ["— لا يوجد —"],
+                    key=f"pick_neglect_{neglect_portfolio_type}"
+                )
+                if st.button("🗑️ Delete", key=f"delete_{neglect_portfolio_type}",
+                             disabled=not filtered_neglect):
+                    pools["neglect"].remove(pick_neglect)
+                    pools["not_neglect"].append(pick_neglect)
+                    pools["not_neglect"].sort()
+                    st.session_state[run_key] = False
+                    st.rerun()
+
+                st.dataframe(
+                    pd.DataFrame({"الحالة": filtered_neglect}),
+                    use_container_width=True, hide_index=True
+                )
+
+            st.markdown("---")
+            run_clicked = st.button(
+                "🚀 عمل الاهمال",
+                key=f"run_btn_{neglect_portfolio_type}",
+                type="primary",
+                disabled=not pools["neglect"]
+            )
+            if run_clicked:
+                st.session_state[run_key] = True
+
+            # ============================================================
+            # التقرير + الداشبورد - يظهروا بس بعد "عمل الاهمال"
+            # ============================================================
+            if st.session_state.get(run_key):
+
+                selected_states = tuple(sorted(pools["neglect"]))
+                df, supervisor_col = process_neglect(
+                    file_bytes, neglect_portfolio_type, neglect_days_threshold, selected_states
+                )
+
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
                     df.to_excel(writer, index=False)
                 output.seek(0)
-    
+
                 st.success(f"تم استخراج {len(df)} حساب")
-    
+
                 st.download_button(
                     "📥 تحميل تقرير الإهمال",
                     data=output,
                     file_name="الاهمال.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-    
-                # ============================================================
-                # داشبورد الإهمال
-                # ============================================================
-    
+
                 st.markdown("---")
                 st.markdown("## 📊 داشبورد الإهمال")
-    
+
                 required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
                 missing_report_cols = [c for c in required_report_cols if c not in df.columns]
-    
+
                 if missing_report_cols:
                     st.warning(
                         f"الأعمدة دي مش موجودة في الملف المرفوع: {', '.join(missing_report_cols)} — "
                         "قسم الداشبورد مش هيظهر."
                     )
                 else:
-    
-                    # ---------------------------
-                    # سلايسرات (المشرف / الموظف)
-                    # مش بيعملوا Re-process — بس فلترة على الداتا المحفوظة (df) اللي اتعملها كاش
-                    # ---------------------------
-    
+
+                    import plotly.express as px
+
                     all_supervisors = sorted(df[supervisor_col].dropna().unique().tolist())
                     all_salespersons = sorted(df["Salesperson"].dropna().unique().tolist())
-    
+
                     filter_col1, filter_col2 = st.columns(2)
-    
+
                     with filter_col1:
                         selected_supervisors = st.multiselect(
-                            "فلترة حسب المشرف",
-                            options=all_supervisors,
-                            default=[],
+                            "فلترة حسب المشرف", options=all_supervisors, default=[],
                             key="neglect_supervisor_filter"
                         )
-    
+
                     with filter_col2:
                         selected_salespersons = st.multiselect(
-                            "فلترة حسب الموظف (Salesperson)",
-                            options=all_salespersons,
-                            default=[],
+                            "فلترة حسب الموظف (Salesperson)", options=all_salespersons, default=[],
                             key="neglect_salesperson_filter"
                         )
-    
+
                     def apply_dashboard_filters(d):
                         out = d
                         if selected_supervisors:
@@ -933,32 +1005,28 @@ elif page == "الاهمال":
                         if selected_salespersons:
                             out = out[out["Salesperson"].isin(selected_salespersons)]
                         return out
-    
+
                     df_f = apply_dashboard_filters(df)
-    
-                    # ---------------------------
-                    # دالة بناء تقرير Pivot-style
-                    # ---------------------------
-    
+
                     def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
                         base_cols = ["مبلغ المديونية", "عدد الحسابات"]
                         if extra_col:
                             base_cols.append(extra_label)
                         out_cols = base_cols + ["الموظف", "المشرف"]
-    
+
                         if d.empty:
                             return pd.DataFrame(columns=out_cols)
-    
+
                         rows = []
                         grand_amount = 0.0
                         grand_count = 0
                         grand_extra = 0.0
-    
+
                         for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
                             sup_amount = 0.0
                             sup_count = 0
                             sup_extra = 0.0
-    
+
                             emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
                             emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
                             if extra_col:
@@ -966,7 +1034,7 @@ elif page == "الاهمال":
                                     emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
                                 else:
                                     emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
-    
+
                             for salesperson in emp_amount.sort_values(ascending=False).index:
                                 amount_val = float(emp_amount.get(salesperson, 0))
                                 count_val = int(emp_count.get(salesperson, 0))
@@ -983,7 +1051,7 @@ elif page == "الاهمال":
                                 rows.append(row)
                                 sup_amount += amount_val
                                 sup_count += count_val
-    
+
                             total_row = {
                                 "مبلغ المديونية": sup_amount,
                                 "عدد الحسابات": sup_count,
@@ -995,11 +1063,11 @@ elif page == "الاهمال":
                                     sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
                                 )
                             rows.append(total_row)
-    
+
                             grand_amount += sup_amount
                             grand_count += sup_count
                             grand_extra += sup_extra
-    
+
                         grand_row = {
                             "مبلغ المديونية": grand_amount,
                             "عدد الحسابات": grand_count,
@@ -1011,46 +1079,38 @@ elif page == "الاهمال":
                                 grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
                             )
                         rows.append(grand_row)
-    
+
                         return pd.DataFrame(rows)[out_cols]
-    
+
                     def style_summary(d, extra_label=None):
                         fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
                         if extra_label:
                             fmt[extra_label] = "{:,.0f}"
-    
+
                         def highlight_rows(row):
                             is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
                             if is_total:
                                 return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
                             return [""] * len(row)
-    
+
                         return d.style.apply(highlight_rows, axis=1).format(fmt)
-    
+
                     day_col_label = (
                         "عدد أيام الإهمال" if neglect_portfolio_type == "NPL&Dpd60"
                         else "فرق عدد ايام من اخر متابعة"
                     )
-    
-                    # ---------------------------
-                    # 1) تقرير الإهمال
-                    # ---------------------------
+
                     st.markdown("### 📄 تقرير الإهمال")
                     neglect_summary = build_pivot_style(df_f)
                     if neglect_summary.empty:
                         st.info("لا توجد بيانات مطابقة.")
                     else:
                         st.dataframe(style_summary(neglect_summary), use_container_width=True, hide_index=True)
-    
-                    # ---------------------------
-                    # 2) تقرير متوسط عدد الأيام
-                    # ---------------------------
+
                     st.markdown(f"### 📄 تقرير {day_col_label}")
                     days_summary = build_pivot_style(
-                        df_f,
-                        extra_col="فرق عدد ايام من اخر متابعة",
-                        extra_label=day_col_label,
-                        extra_agg="sum"
+                        df_f, extra_col="فرق عدد ايام من اخر متابعة",
+                        extra_label=day_col_label, extra_agg="sum"
                     )
                     if days_summary.empty:
                         st.info("لا توجد بيانات مطابقة.")
@@ -1059,44 +1119,34 @@ elif page == "الاهمال":
                             style_summary(days_summary, extra_label=day_col_label),
                             use_container_width=True, hide_index=True
                         )
-    
-                    # ---------------------------
-                    # أصل البيانات
-                    # ---------------------------
+
                     st.markdown("### 🗂️ أصل البيانات - الإهمال")
                     st.dataframe(df_f, use_container_width=True, hide_index=True)
-    
-                    # ---------------------------
-                    # الشارتات
-                    # ---------------------------
+
                     st.markdown("### 📈 الرسوم البيانية")
-    
+
                     SNB_GREEN = "#00693E"
                     SNB_GOLD = "#C9A227"
                     SNB_RED = "#A33A3A"
-    
+
                     DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="white")
                     XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
-    
+
                     sup_amount = (
                         df_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
                         .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
                     )
-    
+
                     if not sup_amount.empty:
                         fig1 = px.bar(
                             sup_amount, x="المشرف", y="مبلغ المديونية", text="مبلغ المديونية",
                             color_discrete_sequence=[SNB_RED]
                         )
-                        fig1.update_traces(
-                            texttemplate="<b>%{text:,.0f}</b>",
-                            textposition="outside",
-                            textfont=DATA_LABEL_FONT
-                        )
+                        fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
                         fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
                         fig1.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                         st.plotly_chart(fig1, use_container_width=True)
-    
+
                     emp_count = (
                         df_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
                         .reset_index(name="عدد الحسابات")
@@ -1108,15 +1158,11 @@ elif page == "الاهمال":
                             emp_count, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
                             color_discrete_sequence=[SNB_GOLD]
                         )
-                        fig2.update_traces(
-                            texttemplate="<b>%{text}</b>",
-                            textposition="outside",
-                            textfont=DATA_LABEL_FONT
-                        )
+                        fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
                         fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
                         fig2.update_layout(height=420, xaxis_tickangle=-30, margin=dict(t=20, b=10))
                         st.plotly_chart(fig2, use_container_width=True)
-    
+
                     days_by_sup = (
                         df_f.groupby(supervisor_col, dropna=False)["فرق عدد ايام من اخر متابعة"].mean()
                         .reset_index().rename(columns={
@@ -1130,11 +1176,7 @@ elif page == "الاهمال":
                             days_by_sup, x="المشرف", y="متوسط عدد الأيام", text="متوسط عدد الأيام",
                             color_discrete_sequence=[SNB_GREEN]
                         )
-                        fig3.update_traces(
-                            texttemplate="<b>%{text:.1f}</b>",
-                            textposition="outside",
-                            textfont=DATA_LABEL_FONT
-                        )
+                        fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
                         fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
                         fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                         st.plotly_chart(fig3, use_container_width=True)
