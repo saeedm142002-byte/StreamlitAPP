@@ -754,10 +754,8 @@ elif page == "الاهمال":
                 # فلترة حسب الحالات المختارة (بدل الليستة الثابتة)
                 df = df[df["Sub State"].apply(normalize_text).isin(selected_states_norm)]
 
-                df = df[
-                    (df["حالة المعالجة - التمويل"] == "لم يتم المعالجة")
-                    | (df["حالة المعالجة - التمويل"].isna())
-                ]
+                # ملحوظة: فلتر "حالة المعالجة - التمويل" اتشال من هنا
+                # عشان يبقى اختيار المستخدم بعد ما كل المعالجة تخلص (تحت في الصفحة)
 
                 supervisor_col_ = "ملاحظات-التمويل"
 
@@ -951,6 +949,44 @@ elif page == "الاهمال":
                 df, supervisor_col = process_neglect(
                     file_bytes, neglect_portfolio_type, neglect_days_threshold, selected_states
                 )
+
+                # ============================================================
+                # فلتر "حالة المعالجة - التمويل" (اختياري من المستخدم)
+                # بيتطبق آخر خطوة بعد ما df يخلص تماماً، وقبل التحميل والداشبورد
+                # ============================================================
+                status_col = "حالة المعالجة - التمويل"
+
+                if neglect_portfolio_type == "NPL&Dpd60" and status_col in df.columns:
+
+                    raw_statuses = df[status_col].unique().tolist()
+
+                    status_options = []
+                    for v in raw_statuses:
+                        if pd.isna(v) or str(v).strip().lower() in ("nan", ""):
+                            status_options.append("بدون حالة (فاضي)")
+                        else:
+                            status_options.append(str(v).strip())
+                    status_options = sorted(set(status_options))
+
+                    selected_statuses = st.multiselect(
+                        "فلترة حسب حالة المعالجة - التمويل",
+                        options=status_options,
+                        default=[],
+                        key=f"neglect_processing_status_filter_{neglect_portfolio_type}",
+                        help="سيب الاختيار فاضي عشان تعرض كل الحالات"
+                    )
+
+                    if selected_statuses:
+
+                        def status_mask(series):
+                            normalized = series.apply(
+                                lambda v: "بدون حالة (فاضي)"
+                                if (pd.isna(v) or str(v).strip().lower() in ("nan", ""))
+                                else str(v).strip()
+                            )
+                            return normalized.isin(selected_statuses)
+
+                        df = df[status_mask(df[status_col])].reset_index(drop=True)
 
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1180,7 +1216,6 @@ elif page == "الاهمال":
                         fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
                         fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
                         st.plotly_chart(fig3, use_container_width=True)
-
 
    
     
