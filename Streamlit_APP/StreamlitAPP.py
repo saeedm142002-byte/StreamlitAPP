@@ -123,100 +123,257 @@ if page == "الوعود القائمة و المكسورة":
     import traceback
 
     # ============================================================
-    # 🎨 تصميم مودرن (CSS)
+    # 🎨 نظام تصميم مودرن شامل (CSS)
     # ============================================================
     st.markdown("""
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Tajawal', sans-serif;
+        }
+
+        /* ===== خلفية عامة هادئة ===== */
+        .main .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 3rem;
+        }
+
+        /* ===== الهيدر الرئيسي ===== */
         .promises-header {
-            background: linear-gradient(135deg, #0f3d2e 0%, #00693E 55%, #0a4a34 100%);
-            padding: 26px 30px;
-            border-radius: 18px;
-            margin-bottom: 22px;
-            box-shadow: 0 8px 24px rgba(0,105,62,0.25);
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(120deg, #0a3d2c 0%, #00693E 50%, #0f7a4a 100%);
+            padding: 32px 34px;
+            border-radius: 20px;
+            margin-bottom: 26px;
+            box-shadow: 0 10px 30px rgba(0,105,62,0.28);
+        }
+        .promises-header::after {
+            content: "";
+            position: absolute;
+            top: -60px; left: -40px;
+            width: 220px; height: 220px;
+            background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%);
+            border-radius: 50%;
         }
         .promises-header h1 {
             color: #fff;
             margin: 0;
-            font-size: 26px;
+            font-size: 27px;
             font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         .promises-header p {
-            color: #d9ecdf;
-            margin: 6px 0 0 0;
-            font-size: 14px;
+            color: #cfe9db;
+            margin: 8px 0 0 0;
+            font-size: 14.5px;
+            font-weight: 500;
         }
-        .kpi-card {
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 18px 20px;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-            border-left: 6px solid #00693E;
-            text-align: center;
+        .header-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 999px;
+            margin-top: 12px;
+            border: 1px solid rgba(255,255,255,0.25);
         }
-        .kpi-card.broken { border-left-color: #A33A3A; }
-        .kpi-card .kpi-label {
-            font-size: 13px;
-            color: #6b7280;
-            font-weight: 600;
+
+        /* ===== بطاقات KPI ===== */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
             margin-bottom: 6px;
         }
-        .kpi-card .kpi-value {
-            font-size: 30px;
-            font-weight: 800;
-            color: #111827;
+        .kpi-card {
+            position: relative;
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 20px 22px;
+            box-shadow: 0 6px 20px rgba(17,24,39,0.07);
+            border: 1px solid #eef1ef;
+            overflow: hidden;
         }
-        .section-title {
-            background: #f3f7f5;
+        .kpi-card::before {
+            content: "";
+            position: absolute;
+            top: 0; right: 0;
+            width: 90px; height: 90px;
+            background: radial-gradient(circle, rgba(0,105,62,0.08) 0%, rgba(0,105,62,0) 70%);
+        }
+        .kpi-card.broken::before {
+            background: radial-gradient(circle, rgba(163,58,58,0.10) 0%, rgba(163,58,58,0) 70%);
+        }
+        .kpi-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .kpi-icon {
+            width: 40px; height: 40px;
             border-radius: 12px;
-            padding: 10px 18px;
-            margin: 22px 0 12px 0;
-            border-right: 5px solid #00693E;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 19px;
+            background: #e7f4ec;
+        }
+        .kpi-card.broken .kpi-icon { background: #f8e8e7; }
+        .kpi-label {
+            font-size: 13px;
+            color: #6b7280;
             font-weight: 700;
-            font-size: 16px;
+            margin-top: 12px;
+        }
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 2px;
+        }
+        .kpi-sub {
+            font-size: 12px;
+            color: #9aa4b2;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        /* ===== عناوين الأقسام ===== */
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: linear-gradient(90deg, #f3f8f5 0%, #ffffff 100%);
+            border-radius: 12px;
+            padding: 12px 18px;
+            margin: 26px 0 14px 0;
+            border-right: 5px solid #00693E;
+            font-weight: 800;
+            font-size: 16.5px;
             color: #0f3d2e;
         }
+
+        /* ===== لوحة الفلاتر ===== */
+        .filter-panel {
+            background: #f9fbfa;
+            border: 1px solid #e6ede9;
+            border-radius: 16px;
+            padding: 16px 18px 4px 18px;
+            margin-bottom: 18px;
+        }
+        .filter-panel-title {
+            font-size: 13.5px;
+            font-weight: 800;
+            color: #374151;
+            margin-bottom: 8px;
+            display: flex; align-items: center; gap: 6px;
+        }
+
+        /* ===== بطاقة تحيط بالشارت ===== */
+        .chart-card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 14px 16px 4px 16px;
+            border: 1px solid #eef1ef;
+            box-shadow: 0 4px 14px rgba(17,24,39,0.05);
+            margin-bottom: 18px;
+        }
+        .chart-card-title {
+            font-weight: 800;
+            font-size: 14.5px;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        /* ===== تبويبات (Tabs) ===== */
+        button[data-baseweb="tab"] {
+            font-weight: 700 !important;
+            font-size: 14.5px !important;
+        }
+        div[data-baseweb="tab-list"] {
+            gap: 6px;
+        }
+        button[aria-selected="true"] {
+            background: #eaf5ef !important;
+            color: #00693E !important;
+            border-radius: 10px 10px 0 0 !important;
+        }
+
+        /* ===== رفع الملف ===== */
+        div[data-testid="stFileUploader"] {
+            border: 2px dashed #00693E44;
+            border-radius: 16px;
+            padding: 8px;
+            background: #fafffc;
+        }
+
+        /* ===== أزرار التحميل ===== */
+        div[data-testid="stDownloadButton"] button {
+            border-radius: 12px !important;
+            font-weight: 700 !important;
+            border: 1px solid #d8e6de !important;
+            transition: all 0.15s ease-in-out;
+        }
+        div[data-testid="stDownloadButton"] button:hover {
+            border-color: #00693E !important;
+            color: #00693E !important;
+            transform: translateY(-1px);
+        }
+
+        /* ===== حالة فارغة ===== */
+        .empty-state {
+            text-align: center;
+            padding: 26px 10px;
+            color: #9aa4b2;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* ===== صندوق الأخطاء ===== */
         .error-box {
             background: #fdecea;
             border: 1px solid #f5c2c0;
-            border-radius: 12px;
-            padding: 16px 18px;
+            border-radius: 14px;
+            padding: 18px 20px;
             color: #7a1f1a;
             font-weight: 600;
-            line-height: 1.9;
+            line-height: 2;
         }
         .error-box code {
             background: #fbe0de;
-            padding: 2px 6px;
+            padding: 2px 7px;
             border-radius: 6px;
+            font-weight: 700;
         }
-        div[data-testid="stFileUploader"] {
-            border: 2px dashed #00693E33;
-            border-radius: 14px;
-            padding: 6px;
+        .error-title {
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 6px;
         }
     </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
     <div class="promises-header">
         <h1>📊 الوعود القائمة / الوعود المكسورة</h1>
         <p>تتبع الوعود بالسداد، معرفة المكسور منها والقائم، وتحليل الأداء لكل مشرف وموظف</p>
+        <span class="header-badge">تحديث لحظي عند رفع الملف</span>
     </div>
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # 🛠️ أداة مساعدة: تتحقق من وجود أعمدة معينة، ولو ناقصة توضح
-    # بالظبط في أي خطوة حصلت المشكلة
+    # 🛠️ أدوات مساعدة للتحقق من الأعمدة وعرض الأخطاء بدقة
     # ============================================================
     def require_columns(df, required_cols, step_name):
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
-            raise KeyError(
-                f"STEP::{step_name}::MISSING::" + "|".join(missing)
-            )
+            raise KeyError("STEP::" + step_name + "::MISSING::" + "|".join(missing))
 
     def show_error(exc):
-        """
-        يفكك الخطأ ويوضح للمستخدم في أي خطوة بالظبط حصل، وأي عمود
-        ناقص (لو الخطأ ناتج عن require_columns)، أو أي خطأ عام آخر.
-        """
         msg = str(exc)
         if msg.startswith("STEP::"):
             try:
@@ -225,7 +382,7 @@ if page == "الوعود القائمة و المكسورة":
                 cols_html = "".join([f"<li><code>{c}</code></li>" for c in cols_list])
                 st.markdown(f"""
                 <div class="error-box">
-                    ❌ حصل خطأ أثناء تنفيذ خطوة: <code>{step_name}</code><br>
+                    <div class="error-title">❌ حصل خطأ أثناء تنفيذ خطوة: <code>{step_name}</code></div>
                     الأعمدة التالية غير موجودة في الملف المرفوع:
                     <ul>{cols_html}</ul>
                     تأكد إن أسماء الأعمدة في ملف الإكسيل مطابقة تمامًا (بما فيها المسافات والحروف).
@@ -236,7 +393,7 @@ if page == "الوعود القائمة و المكسورة":
         else:
             st.markdown(f"""
             <div class="error-box">
-                ❌ حصل خطأ غير متوقع.<br>
+                <div class="error-title">❌ حصل خطأ غير متوقع</div>
                 <b>نوع الخطأ:</b> <code>{type(exc).__name__}</code><br>
                 <b>تفاصيل:</b> {msg}
             </div>
@@ -263,16 +420,13 @@ if page == "الوعود القائمة و المكسورة":
     # ============================================================
     @st.cache_data(show_spinner="جاري معالجة الملف...")
     def process_portfolio(file_bytes, portfolio_type_):
-        # -------- قراءة الملف --------
         try:
             df = pd.read_excel(BytesIO(file_bytes))
         except Exception as e:
             raise KeyError(f"STEP::قراءة ملف الإكسيل::MISSING::{e}")
 
-        # حذف أول صف بعد الـ Header
         df = df.iloc[1:].reset_index(drop=True)
 
-        # -------- التحقق من الأعمدة الأساسية المطلوبة دايمًا --------
         base_required = [
             "Sales Team", "Salesperson", "Final State", "Sub State",
             "Follow up Due Date", "Follow up Last Date"
@@ -286,51 +440,31 @@ if page == "الوعود القائمة و المكسورة":
                 "التحقق من أعمدة مسار NPL&Dpd60"
             )
 
-        # تنظيف النصوص
         text_cols = [
-            "Sales Team",
-            "Salesperson",
-            "Final State",
-            "Sub State",
-            "حالة المعالجة - التمويل",
-            "ملاحظات-التمويل"
+            "Sales Team", "Salesperson", "Final State", "Sub State",
+            "حالة المعالجة - التمويل", "ملاحظات-التمويل"
         ]
         for col in text_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
                 df[col] = df[col].replace(["nan", "None", ""], pd.NA)
 
-        # تحويل التواريخ
-        df["Follow up Due Date"] = pd.to_datetime(
-            df["Follow up Due Date"], errors="coerce"
-        ).dt.normalize()
-
-        df["Follow up Last Date"] = pd.to_datetime(
-            df["Follow up Last Date"], errors="coerce"
-        ).dt.normalize()
+        df["Follow up Due Date"] = pd.to_datetime(df["Follow up Due Date"], errors="coerce").dt.normalize()
+        df["Follow up Last Date"] = pd.to_datetime(df["Follow up Last Date"], errors="coerce").dt.normalize()
 
         today = pd.Timestamp.today().normalize()
 
-        # ==========================================
-        # بناء الـ base حسب المسار المختار
-        # ==========================================
         if portfolio_type_ == "NPL&Dpd60":
             base = df.copy()
             base = base[base["Sales Team"] != "Sara || Op"]
             base = base[base["Final State"].str.contains("واعد بالسداد", na=False)]
-
-        else:  # SNB
+        else:
             base = df.copy()
-            allowed_sales_teams = [
-                "SNB II Alsarhan II Naser",
-                "SNB II Alsarhan II Tariq"
-            ]
+            allowed_sales_teams = ["SNB II Alsarhan II Naser", "SNB II Alsarhan II Tariq"]
             base = base[base["Sales Team"].isin(allowed_sales_teams)]
             excluded_salespersons = [
-                "Closed payments II Alaa SNB",
-                "Hold Companies II SNB2",
-                "Abdullah Alsarhan",
-                "Archive Companies II Alaa SNB"
+                "Closed payments II Alaa SNB", "Hold Companies II SNB2",
+                "Abdullah Alsarhan", "Archive Companies II Alaa SNB"
             ]
             base = base[
                 (~base["Salesperson"].isin(excluded_salespersons))
@@ -340,30 +474,21 @@ if page == "الوعود القائمة و المكسورة":
             ]
             base = base[base["Sub State"].str.contains("واعد بالسداد", na=False)]
 
-        # ==========================================
-        # الوعود القائمة
-        # ==========================================
         current = base.copy()
         current = current[current["Follow up Due Date"] == today]
         current = current[current["Follow up Last Date"].notna()]
         current = current[current["Follow up Last Date"] != today]
 
-        # ==========================================
-        # الوعود المكسورة
-        # ==========================================
         broken = base.copy()
         broken = broken[broken["Follow up Due Date"] < today]
         broken = broken[broken["Follow up Last Date"].notna()]
-        broken["فرق الايام"] = (
-            broken["Follow up Last Date"] - broken["Follow up Due Date"]
-        ).dt.days
+        broken["فرق الايام"] = (broken["Follow up Last Date"] - broken["Follow up Due Date"]).dt.days
         broken = broken[broken["فرق الايام"] < 0]
         broken = broken.drop(columns=["فرق الايام"])
 
         insert_position = broken.columns.get_loc("Follow up Last Date") + 1
         broken.insert(
-            insert_position,
-            "عدد ايام ترحيل الوعد",
+            insert_position, "عدد ايام ترحيل الوعد",
             (today - broken["Follow up Due Date"]).dt.days
         )
         broken = broken[broken["عدد ايام ترحيل الوعد"] > 0]
@@ -375,15 +500,11 @@ if page == "الوعود القائمة و المكسورة":
             file_bytes = portfolio_file.getvalue()
             current, broken = process_portfolio(file_bytes, portfolio_type)
 
-            # ==========================================
-            # فلترة "حالة المعالجة - التمويل" (آخر خطوة) - فقط في NPL&Dpd60
-            # ==========================================
             if portfolio_type == "NPL&Dpd60":
                 require_columns(current, ["حالة المعالجة - التمويل"], "فلتر حالة المعالجة - التمويل")
 
                 all_status = pd.concat([
-                    current["حالة المعالجة - التمويل"],
-                    broken["حالة المعالجة - التمويل"]
+                    current["حالة المعالجة - التمويل"], broken["حالة المعالجة - التمويل"]
                 ]).dropna().unique().tolist()
 
                 has_empty = (
@@ -395,12 +516,14 @@ if page == "الوعود القائمة و المكسورة":
                 if has_empty:
                     options = ["(فارغ / غير محدد)"] + options
 
-                selected_status = st.multiselect(
-                    "فلتر حسب حالة المعالجة - التمويل (اختياري)",
-                    options=options,
-                    default=[],
-                    help="اختار الحالة اللي عايزها. لو سبتها فاضية هيعرض كل الحالات."
-                )
+                with st.container():
+                    st.markdown('<div class="filter-panel"><div class="filter-panel-title">🔎 فلترة إضافية</div>', unsafe_allow_html=True)
+                    selected_status = st.multiselect(
+                        "فلتر حسب حالة المعالجة - التمويل (اختياري)",
+                        options=options, default=[],
+                        help="اختار الحالة اللي عايزها. لو سبتها فاضية هيعرض كل الحالات."
+                    )
+                    st.markdown('</div>', unsafe_allow_html=True)
 
                 if selected_status:
                     def apply_status_filter(df):
@@ -417,23 +540,31 @@ if page == "الوعود القائمة و المكسورة":
                     broken = apply_status_filter(broken)
 
             # ==========================================
-            # 🔢 بطاقات KPI مودرن بدل st.success
+            # 🔢 بطاقات KPI
             # ==========================================
-            kpi_col1, kpi_col2 = st.columns(2)
-            with kpi_col1:
-                st.markdown(f"""
+            total_accounts = len(current) + len(broken)
+            broken_pct = (len(broken) / total_accounts * 100) if total_accounts else 0
+
+            st.markdown(f"""
+            <div class="kpi-grid">
                 <div class="kpi-card">
-                    <div class="kpi-label">✅ الوعود القائمة</div>
+                    <div class="kpi-top">
+                        <div class="kpi-icon">✅</div>
+                    </div>
+                    <div class="kpi-label">الوعود القائمة</div>
                     <div class="kpi-value">{len(current):,}</div>
+                    <div class="kpi-sub">حساب لسه المتابعة عليه مستمرة</div>
                 </div>
-                """, unsafe_allow_html=True)
-            with kpi_col2:
-                st.markdown(f"""
                 <div class="kpi-card broken">
-                    <div class="kpi-label">⚠️ الوعود المكسورة</div>
+                    <div class="kpi-top">
+                        <div class="kpi-icon">⚠️</div>
+                    </div>
+                    <div class="kpi-label">الوعود المكسورة</div>
                     <div class="kpi-value">{len(broken):,}</div>
+                    <div class="kpi-sub">{broken_pct:.1f}% من إجمالي الحسابات</div>
                 </div>
-                """, unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -453,16 +584,14 @@ if page == "الوعود القائمة و المكسورة":
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 st.download_button(
-                    "📥 تحميل الوعود القائمة",
-                    data=output_current,
+                    "📥 تحميل الوعود القائمة", data=output_current,
                     file_name="الوعود_القائمة.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
             with dl_col2:
                 st.download_button(
-                    "📥 تحميل الوعود المكسورة",
-                    data=output_broken,
+                    "📥 تحميل الوعود المكسورة", data=output_broken,
                     file_name="الوعود_المكسورة.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
@@ -474,13 +603,9 @@ if page == "الوعود القائمة و المكسورة":
             st.markdown('<div class="section-title">📊 داشبورد الوعود</div>', unsafe_allow_html=True)
 
             supervisor_col = "ملاحظات-التمويل" if portfolio_type == "NPL&Dpd60" else "Sales Team"
-
             required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
             require_columns(current, required_report_cols, "بناء قسم الداشبورد")
 
-            # ---------------------------
-            # سلايسرات (المشرف / الموظف)
-            # ---------------------------
             all_supervisors = sorted(
                 pd.concat([current[supervisor_col], broken[supervisor_col]]).dropna().unique().tolist()
             )
@@ -488,21 +613,19 @@ if page == "الوعود القائمة و المكسورة":
                 pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
             )
 
+            st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر الداشبورد</div>', unsafe_allow_html=True)
             filter_col1, filter_col2 = st.columns(2)
             with filter_col1:
                 selected_supervisors = st.multiselect(
-                    "فلترة حسب المشرف",
-                    options=all_supervisors,
-                    default=[],
+                    "فلترة حسب المشرف", options=all_supervisors, default=[],
                     key="promises_supervisor_filter"
                 )
             with filter_col2:
                 selected_salespersons = st.multiselect(
-                    "فلترة حسب الموظف (Salesperson)",
-                    options=all_salespersons,
-                    default=[],
+                    "فلترة حسب الموظف (Salesperson)", options=all_salespersons, default=[],
                     key="promises_salesperson_filter"
                 )
+            st.markdown('</div>', unsafe_allow_html=True)
 
             def apply_dashboard_filters(d):
                 out = d
@@ -515,9 +638,6 @@ if page == "الوعود القائمة و المكسورة":
             current_f = apply_dashboard_filters(current)
             broken_f = apply_dashboard_filters(broken)
 
-            # ---------------------------
-            # دالة بناء تقرير Pivot-style
-            # ---------------------------
             def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
                 base_cols = ["مبلغ المديونية", "عدد الحسابات"]
                 if extra_col:
@@ -549,10 +669,8 @@ if page == "الوعود القائمة و المكسورة":
                         amount_val = float(emp_amount.get(salesperson, 0))
                         count_val = int(emp_count.get(salesperson, 0))
                         row = {
-                            "مبلغ المديونية": amount_val,
-                            "عدد الحسابات": count_val,
-                            "الموظف": salesperson,
-                            "المشرف": supervisor,
+                            "مبلغ المديونية": amount_val, "عدد الحسابات": count_val,
+                            "الموظف": salesperson, "المشرف": supervisor,
                         }
                         if extra_col:
                             extra_val = float(emp_extra.get(salesperson, 0))
@@ -563,10 +681,8 @@ if page == "الوعود القائمة و المكسورة":
                         sup_count += count_val
 
                     total_row = {
-                        "مبلغ المديونية": sup_amount,
-                        "عدد الحسابات": sup_count,
-                        "الموظف": f"{supervisor} إجمالي",
-                        "المشرف": supervisor,
+                        "مبلغ المديونية": sup_amount, "عدد الحسابات": sup_count,
+                        "الموظف": f"{supervisor} إجمالي", "المشرف": supervisor,
                     }
                     if extra_col:
                         total_row[extra_label] = (
@@ -579,10 +695,8 @@ if page == "الوعود القائمة و المكسورة":
                     grand_extra += sup_extra
 
                 grand_row = {
-                    "مبلغ المديونية": grand_amount,
-                    "عدد الحسابات": grand_count,
-                    "الموظف": "الاجمالي",
-                    "المشرف": "",
+                    "مبلغ المديونية": grand_amount, "عدد الحسابات": grand_count,
+                    "الموظف": "الاجمالي", "المشرف": "",
                 }
                 if extra_col:
                     grand_row[extra_label] = (
@@ -605,9 +719,6 @@ if page == "الوعود القائمة و المكسورة":
 
                 return d.style.apply(highlight_rows, axis=1).format(fmt)
 
-            # ---------------------------
-            # التقارير داخل Tabs بدل ما تكون كلها تحت بعض
-            # ---------------------------
             tab_current, tab_broken, tab_days, tab_raw = st.tabs([
                 "📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"
             ])
@@ -615,27 +726,25 @@ if page == "الوعود القائمة و المكسورة":
             with tab_current:
                 current_summary = build_pivot_style(current_f)
                 if current_summary.empty:
-                    st.info("لا توجد بيانات مطابقة.")
+                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
                 else:
                     st.dataframe(style_summary(current_summary), use_container_width=True, hide_index=True)
 
             with tab_broken:
                 broken_summary = build_pivot_style(broken_f)
                 if broken_summary.empty:
-                    st.info("لا توجد بيانات مطابقة.")
+                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
                 else:
                     st.dataframe(style_summary(broken_summary), use_container_width=True, hide_index=True)
 
             with tab_days:
                 require_columns(broken_f, ["عدد ايام ترحيل الوعد"], "تقرير عدد أيام ترحيل الوعد")
                 days_summary = build_pivot_style(
-                    broken_f,
-                    extra_col="عدد ايام ترحيل الوعد",
-                    extra_label="عدد ايام ترحيل الوعد",
-                    extra_agg="sum"
+                    broken_f, extra_col="عدد ايام ترحيل الوعد",
+                    extra_label="عدد ايام ترحيل الوعد", extra_agg="sum"
                 )
                 if days_summary.empty:
-                    st.info("لا توجد بيانات مطابقة.")
+                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
                 else:
                     st.dataframe(
                         style_summary(days_summary, extra_label="عدد ايام ترحيل الوعد"),
@@ -656,25 +765,33 @@ if page == "الوعود القائمة و المكسورة":
             SNB_GREEN = "#00693E"
             SNB_GOLD = "#C9A227"
             SNB_RED = "#A33A3A"
+            LABEL_FONT = dict(size=14, family="Tajawal", color="#111827")
 
-            DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="white")
-            XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
+            def style_fig(fig, angle=-20):
+                fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color="#374151"))
+                fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color="#9aa4b2"), gridcolor="#f1f5f3")
+                fig.update_layout(
+                    height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Tajawal"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                return fig
 
             chart_col1, chart_col2 = st.columns(2)
 
             with chart_col1:
+                st.markdown('<div class="chart-card"><div class="chart-card-title">مبلغ المديونية لكل مشرف (قائمة مقابل مكسورة)</div>', unsafe_allow_html=True)
                 sup_amount_current = (
                     current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
                     .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
                 )
                 sup_amount_current["النوع"] = "قائمة"
-
                 sup_amount_broken = (
                     broken_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
                     .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
                 )
                 sup_amount_broken["النوع"] = "مكسورة"
-
                 sup_amount_combined = pd.concat([sup_amount_current, sup_amount_broken], ignore_index=True)
 
                 if not sup_amount_combined.empty:
@@ -684,20 +801,14 @@ if page == "الوعود القائمة و المكسورة":
                         color_discrete_map={"قائمة": SNB_GREEN, "مكسورة": SNB_RED},
                         template="plotly_white"
                     )
-                    fig1.update_traces(
-                        texttemplate="<b>%{text:,.0f}</b>",
-                        textposition="outside",
-                        textfont=dict(size=14, family="Arial Black", color="#111827")
-                    )
-                    fig1.update_xaxes(tickfont=dict(size=13))
-                    fig1.update_layout(
-                        height=420, xaxis_tickangle=-20, margin=dict(t=30, b=10),
-                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
+                    fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
+                    st.plotly_chart(style_fig(fig1), use_container_width=True)
+                else:
+                    st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with chart_col2:
+                st.markdown('<div class="chart-card"><div class="chart-card-title">متوسط أيام ترحيل الوعد لكل مشرف</div>', unsafe_allow_html=True)
                 days_by_sup = (
                     broken_f.groupby(supervisor_col, dropna=False)["عدد ايام ترحيل الوعد"].mean()
                     .reset_index().rename(columns={supervisor_col: "المشرف", "عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
@@ -707,45 +818,35 @@ if page == "الوعود القائمة و المكسورة":
                         days_by_sup, x="المشرف", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
                         color_discrete_sequence=[SNB_GOLD], template="plotly_white"
                     )
-                    fig3.update_traces(
-                        texttemplate="<b>%{text:.1f}</b>",
-                        textposition="outside",
-                        textfont=dict(size=14, family="Arial Black", color="#111827")
-                    )
-                    fig3.update_xaxes(tickfont=dict(size=13))
-                    fig3.update_layout(
-                        height=420, xaxis_tickangle=-20, margin=dict(t=30, b=10),
-                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)"
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
+                    fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=LABEL_FONT)
+                    st.plotly_chart(style_fig(fig3), use_container_width=True)
+                else:
+                    st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
+            st.markdown('<div class="chart-card"><div class="chart-card-title">أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)</div>', unsafe_allow_html=True)
             emp_count_broken = (
                 broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
                 .reset_index(name="عدد الحسابات")
                 .sort_values("عدد الحسابات", ascending=False).head(15)
             )
             if not emp_count_broken.empty:
-                st.markdown("#### أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)")
                 fig2 = px.bar(
                     emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
                     color_discrete_sequence=[SNB_RED], template="plotly_white"
                 )
-                fig2.update_traces(
-                    texttemplate="<b>%{text}</b>",
-                    textposition="outside",
-                    textfont=dict(size=14, family="Arial Black", color="#111827")
-                )
-                fig2.update_xaxes(tickfont=dict(size=13))
-                fig2.update_layout(
-                    height=420, xaxis_tickangle=-30, margin=dict(t=30, b=10),
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)"
-                )
-                st.plotly_chart(fig2, use_container_width=True)
+                fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=LABEL_FONT)
+                st.plotly_chart(style_fig(fig2, angle=-30), use_container_width=True)
+            else:
+                st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         except KeyError as e:
             show_error(e)
         except Exception as e:
             show_error(e)
+    else:
+        st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التحليل</div>', unsafe_allow_html=True)
 # ======================
 # PAGE 2 - الوعود المكسورة
 # ======================
