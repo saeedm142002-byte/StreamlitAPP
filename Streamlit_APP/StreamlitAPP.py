@@ -859,12 +859,297 @@ elif page == "الاهمال":
 
     sub = st.session_state.sub_page
 
-    st.subheader("⚠️ الاهمال")
     if sub == "اهمال":
 
         import pandas as pd
         import re
+        import traceback
         from io import BytesIO
+
+        # ============================================================
+        # 🎨 نظام تصميم مودرن شامل (نفس ستايل صفحة الوعود)
+        # ============================================================
+        st.markdown("""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+            html, body, [class*="css"] {
+                font-family: 'Tajawal', sans-serif;
+            }
+
+            .main .block-container {
+                padding-top: 1.2rem;
+                padding-bottom: 3rem;
+            }
+
+            /* ===== الهيدر الرئيسي ===== */
+            .neglect-header {
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(120deg, #5a1f1a 0%, #A33A3A 50%, #b8493f 100%);
+                padding: 32px 34px;
+                border-radius: 20px;
+                margin-bottom: 26px;
+                box-shadow: 0 10px 30px rgba(163,58,58,0.28);
+            }
+            .neglect-header::after {
+                content: "";
+                position: absolute;
+                top: -60px; left: -40px;
+                width: 220px; height: 220px;
+                background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%);
+                border-radius: 50%;
+            }
+            .neglect-header h1 {
+                color: #fff;
+                margin: 0;
+                font-size: 27px;
+                font-weight: 800;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .neglect-header p {
+                color: #f3dcda;
+                margin: 8px 0 0 0;
+                font-size: 14.5px;
+                font-weight: 500;
+            }
+            .header-badge {
+                display: inline-block;
+                background: rgba(255,255,255,0.14);
+                color: #fff;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 4px 12px;
+                border-radius: 999px;
+                margin-top: 12px;
+                border: 1px solid rgba(255,255,255,0.25);
+            }
+
+            /* ===== بطاقات KPI ===== */
+            .kpi-grid {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 16px;
+                margin-bottom: 6px;
+            }
+            .kpi-card {
+                position: relative;
+                background: #ffffff;
+                border-radius: 18px;
+                padding: 20px 22px;
+                box-shadow: 0 6px 20px rgba(17,24,39,0.07);
+                border: 1px solid #eef1ef;
+                border-left: 6px solid #A33A3A;
+                overflow: hidden;
+            }
+            .kpi-card::before {
+                content: "";
+                position: absolute;
+                top: 0; right: 0;
+                width: 90px; height: 90px;
+                background: radial-gradient(circle, rgba(163,58,58,0.10) 0%, rgba(163,58,58,0) 70%);
+            }
+            .kpi-top {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .kpi-icon {
+                width: 40px; height: 40px;
+                border-radius: 12px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 19px;
+                background: #f8e8e7;
+            }
+            .kpi-label {
+                font-size: 13px;
+                color: #6b7280;
+                font-weight: 700;
+                margin-top: 12px;
+            }
+            .kpi-value {
+                font-size: 32px;
+                font-weight: 800;
+                color: #0f172a;
+                margin-top: 2px;
+            }
+            .kpi-sub {
+                font-size: 12px;
+                color: #9aa4b2;
+                font-weight: 600;
+                margin-top: 4px;
+            }
+
+            /* ===== عناوين الأقسام ===== */
+            .section-title {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                background: linear-gradient(90deg, #faf3f2 0%, #ffffff 100%);
+                border-radius: 12px;
+                padding: 12px 18px;
+                margin: 26px 0 14px 0;
+                border-right: 5px solid #A33A3A;
+                font-weight: 800;
+                font-size: 16.5px;
+                color: #4a1815;
+            }
+
+            /* ===== لوحة الفلاتر ===== */
+            .filter-panel {
+                background: #f9fbfa;
+                border: 1px solid #e6ede9;
+                border-radius: 16px;
+                padding: 16px 18px 4px 18px;
+                margin-bottom: 18px;
+            }
+            .filter-panel-title {
+                font-size: 13.5px;
+                font-weight: 800;
+                color: #374151;
+                margin-bottom: 8px;
+                display: flex; align-items: center; gap: 6px;
+            }
+
+            /* ===== لوحة اختيار الحالات ===== */
+            .states-panel {
+                background: #fffaf9;
+                border: 1px solid #f1dedd;
+                border-radius: 16px;
+                padding: 16px 18px;
+                margin-bottom: 10px;
+            }
+            .states-panel-title {
+                font-size: 14.5px;
+                font-weight: 800;
+                color: #4a1815;
+                margin-bottom: 8px;
+            }
+
+            /* ===== بطاقة تحيط بالشارت ===== */
+            .chart-card {
+                background: #ffffff;
+                border-radius: 18px;
+                padding: 14px 16px 4px 16px;
+                border: 1px solid #eef1ef;
+                box-shadow: 0 4px 14px rgba(17,24,39,0.05);
+                margin-bottom: 18px;
+            }
+            .chart-card-title {
+                font-weight: 800;
+                font-size: 14.5px;
+                color: #0f172a;
+                margin-bottom: 4px;
+            }
+
+            /* ===== رفع الملف ===== */
+            div[data-testid="stFileUploader"] {
+                border: 2px dashed #A33A3A44;
+                border-radius: 16px;
+                padding: 8px;
+                background: #fffaf9;
+            }
+
+            /* ===== أزرار التحميل ===== */
+            div[data-testid="stDownloadButton"] button {
+                border-radius: 12px !important;
+                font-weight: 700 !important;
+                border: 1px solid #ecdcda !important;
+                transition: all 0.15s ease-in-out;
+            }
+            div[data-testid="stDownloadButton"] button:hover {
+                border-color: #A33A3A !important;
+                color: #A33A3A !important;
+                transform: translateY(-1px);
+            }
+
+            /* ===== زر تشغيل التقرير ===== */
+            div[data-testid="stButton"] button[kind="primary"] {
+                background: linear-gradient(120deg, #A33A3A, #8a2f2f) !important;
+                border: none !important;
+                border-radius: 12px !important;
+                font-weight: 800 !important;
+                box-shadow: 0 4px 14px rgba(163,58,58,0.25);
+            }
+
+            /* ===== حالة فارغة ===== */
+            .empty-state {
+                text-align: center;
+                padding: 26px 10px;
+                color: #9aa4b2;
+                font-weight: 600;
+                font-size: 14px;
+            }
+
+            /* ===== صندوق الأخطاء ===== */
+            .error-box {
+                background: #fdecea;
+                border: 1px solid #f5c2c0;
+                border-radius: 14px;
+                padding: 18px 20px;
+                color: #7a1f1a;
+                font-weight: 600;
+                line-height: 2;
+            }
+            .error-box code {
+                background: #fbe0de;
+                padding: 2px 7px;
+                border-radius: 6px;
+                font-weight: 700;
+            }
+            .error-title {
+                font-size: 16px;
+                font-weight: 800;
+                margin-bottom: 6px;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="neglect-header">
+            <h1>⚠️ الاهمال</h1>
+            <p>رصد الحسابات المهملة اللي محدّش تابعها لفترة، وتحليل الأداء لكل مشرف وموظف</p>
+            <span class="header-badge">تحديث لحظي عند رفع الملف</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ============================================================
+        # 🛠️ أدوات مساعدة للتحقق من الأعمدة وعرض الأخطاء بدقة
+        # ============================================================
+        def require_columns(df, required_cols, step_name):
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                raise KeyError("STEP::" + step_name + "::MISSING::" + "|".join(missing))
+
+        def show_error(exc):
+            msg = str(exc)
+            if msg.startswith("STEP::"):
+                try:
+                    _, step_name, _, cols_part = msg.split("::", 3)
+                    cols_list = cols_part.split("|")
+                    cols_html = "".join([f"<li><code>{c}</code></li>" for c in cols_list])
+                    st.markdown(f"""
+                    <div class="error-box">
+                        <div class="error-title">❌ حصل خطأ أثناء تنفيذ خطوة: <code>{step_name}</code></div>
+                        الأعمدة التالية غير موجودة في الملف المرفوع:
+                        <ul>{cols_html}</ul>
+                        تأكد إن أسماء الأعمدة في ملف الإكسيل مطابقة تمامًا (بما فيها المسافات والحروف).
+                    </div>
+                    """, unsafe_allow_html=True)
+                except Exception:
+                    st.error(f"❌ خطأ غير متوقع: {msg}")
+            else:
+                st.markdown(f"""
+                <div class="error-box">
+                    <div class="error-title">❌ حصل خطأ غير متوقع</div>
+                    <b>نوع الخطأ:</b> <code>{type(exc).__name__}</code><br>
+                    <b>تفاصيل:</b> {msg}
+                </div>
+                """, unsafe_allow_html=True)
+                with st.expander("🔍 تفاصيل تقنية (Traceback)"):
+                    st.code(traceback.format_exc())
 
         # ==========================================
         # اختيار المسار: NPL&Dpd60 أو SNB
@@ -939,12 +1224,22 @@ elif page == "الاهمال":
 
             selected_states_norm = {normalize_text(s) for s in selected_states_}
 
-            df = pd.read_excel(BytesIO(file_bytes))
+            try:
+                df = pd.read_excel(BytesIO(file_bytes))
+            except Exception as e:
+                raise KeyError(f"STEP::قراءة ملف الإكسيل::MISSING::{e}")
+
             df = df.iloc[1:].reset_index(drop=True)
 
             today = pd.Timestamp.today().normalize()
 
             if portfolio_type_ == "NPL&Dpd60":
+
+                require_columns(
+                    df,
+                    ["Sales Team", "Sub State", "Follow up Last Date", "Payment"],
+                    "معالجة مسار NPL&Dpd60"
+                )
 
                 text_cols = ["Sales Team", "Sub State", "حالة المعالجة - التمويل"]
                 for col in text_cols:
@@ -975,16 +1270,18 @@ elif page == "الاهمال":
                 )
 
                 df = df[df["عدد أيام الإهمال"] >= days_threshold_]
-
-                # فلترة حسب الحالات المختارة (بدل الليستة الثابتة)
                 df = df[df["Sub State"].apply(normalize_text).isin(selected_states_norm)]
 
-                # ملحوظة: فلتر "حالة المعالجة - التمويل" اتشال من هنا
-                # عشان يبقى اختيار المستخدم بعد ما كل المعالجة تخلص (تحت في الصفحة)
-
                 supervisor_col_ = "ملاحظات-التمويل"
+                require_columns(df, [supervisor_col_], "التحقق من عمود المشرف (NPL&Dpd60)")
 
             else:
+
+                require_columns(
+                    df,
+                    ["Sales Team", "Salesperson", "Sub State", "Follow up Last Date", "Payment"],
+                    "معالجة مسار SNB"
+                )
 
                 text_cols = ["Sales Team", "Salesperson", "Sub State"]
                 for col in text_cols:
@@ -1020,7 +1317,6 @@ elif page == "الاهمال":
                 df["Payment"] = pd.to_numeric(df["Payment"], errors="coerce")
                 df = df[df["Payment"] == 0]
 
-                # فلترة حسب الحالات المختارة (contains بعد normalize)
                 df = df[
                     df["Sub State"].apply(
                         lambda v: any(t in normalize_text(v) for t in selected_states_norm)
@@ -1056,8 +1352,15 @@ elif page == "الاهمال":
             return sorted(vals.unique().tolist())
 
         if uploaded_file:
-
+          try:
             file_bytes = uploaded_file.getvalue()
+
+            require_columns(
+                pd.read_excel(BytesIO(file_bytes), nrows=1),
+                ["Sub State"],
+                "قراءة الحالات (Sub State) من الملف"
+            )
+
             all_states = read_sub_states(file_bytes)
 
             pool_key = f"neglect_pools_{neglect_portfolio_type}"
@@ -1092,13 +1395,12 @@ elif page == "الاهمال":
 
             pools = st.session_state[pool_key]
 
-            st.markdown("---")
-            st.markdown("### 🗂️ اختيار حالات الإهمال")
+            st.markdown('<div class="section-title">🗂️ اختيار حالات الإهمال</div>', unsafe_allow_html=True)
 
             box1, box2 = st.columns(2)
 
             with box1:
-                st.markdown("#### باقي الحالات")
+                st.markdown('<div class="states-panel"><div class="states-panel-title">📋 باقي الحالات</div>', unsafe_allow_html=True)
                 search_other = st.text_input(
                     "🔍 بحث",
                     key=f"search_other_{neglect_portfolio_type}"
@@ -1125,9 +1427,10 @@ elif page == "الاهمال":
                     pd.DataFrame({"الحالة": filtered_other}),
                     use_container_width=True, hide_index=True
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with box2:
-                st.markdown("#### حالات الإهمال")
+                st.markdown('<div class="states-panel"><div class="states-panel-title">⚠️ حالات الإهمال</div>', unsafe_allow_html=True)
                 search_neglect = st.text_input(
                     "🔍 بحث",
                     key=f"search_neglect_{neglect_portfolio_type}"
@@ -1154,8 +1457,9 @@ elif page == "الاهمال":
                     pd.DataFrame({"الحالة": filtered_neglect}),
                     use_container_width=True, hide_index=True
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
 
-            st.markdown("---")
+            st.markdown("<br>", unsafe_allow_html=True)
             run_clicked = st.button(
                 "🚀 عمل الاهمال",
                 key=f"run_btn_{neglect_portfolio_type}",
@@ -1177,7 +1481,6 @@ elif page == "الاهمال":
 
                 # ============================================================
                 # فلتر "حالة المعالجة - التمويل" (اختياري من المستخدم)
-                # بيتطبق آخر خطوة بعد ما df يخلص تماماً، وقبل التحميل والداشبورد
                 # ============================================================
                 status_col = "حالة المعالجة - التمويل"
 
@@ -1193,6 +1496,7 @@ elif page == "الاهمال":
                             status_options.append(str(v).strip())
                     status_options = sorted(set(status_options))
 
+                    st.markdown('<div class="filter-panel"><div class="filter-panel-title">🔎 فلترة إضافية</div>', unsafe_allow_html=True)
                     selected_statuses = st.multiselect(
                         "فلترة حسب حالة المعالجة - التمويل",
                         options=status_options,
@@ -1200,6 +1504,7 @@ elif page == "الاهمال":
                         key=f"neglect_processing_status_filter_{neglect_portfolio_type}",
                         help="سيب الاختيار فاضي عشان تعرض كل الحالات"
                     )
+                    st.markdown('</div>', unsafe_allow_html=True)
 
                     if selected_statuses:
 
@@ -1218,212 +1523,229 @@ elif page == "الاهمال":
                     df.to_excel(writer, index=False)
                 output.seek(0)
 
-                st.success(f"تم استخراج {len(df)} حساب")
+                # ==========================================
+                # 🔢 بطاقة KPI
+                # ==========================================
+                st.markdown(f"""
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-top">
+                            <div class="kpi-icon">⚠️</div>
+                        </div>
+                        <div class="kpi-label">إجمالي الحسابات المهملة</div>
+                        <div class="kpi-value">{len(df):,}</div>
+                        <div class="kpi-sub">حسابات مطابقة لحدود الإهمال المحددة</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
 
                 st.download_button(
                     "📥 تحميل تقرير الإهمال",
                     data=output,
                     file_name="الاهمال.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
 
-                st.markdown("---")
-                st.markdown("## 📊 داشبورد الإهمال")
+                st.markdown('<div class="section-title">📊 داشبورد الإهمال</div>', unsafe_allow_html=True)
 
                 required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
-                missing_report_cols = [c for c in required_report_cols if c not in df.columns]
+                require_columns(df, required_report_cols, "بناء قسم الداشبورد")
 
-                if missing_report_cols:
-                    st.warning(
-                        f"الأعمدة دي مش موجودة في الملف المرفوع: {', '.join(missing_report_cols)} — "
-                        "قسم الداشبورد مش هيظهر."
+                import plotly.express as px
+
+                all_supervisors = sorted(df[supervisor_col].dropna().unique().tolist())
+                all_salespersons = sorted(df["Salesperson"].dropna().unique().tolist())
+
+                st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر الداشبورد</div>', unsafe_allow_html=True)
+                filter_col1, filter_col2 = st.columns(2)
+                with filter_col1:
+                    selected_supervisors = st.multiselect(
+                        "فلترة حسب المشرف", options=all_supervisors, default=[],
+                        key="neglect_supervisor_filter"
                     )
-                else:
+                with filter_col2:
+                    selected_salespersons = st.multiselect(
+                        "فلترة حسب الموظف (Salesperson)", options=all_salespersons, default=[],
+                        key="neglect_salesperson_filter"
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
 
-                    import plotly.express as px
+                def apply_dashboard_filters(d):
+                    out = d
+                    if selected_supervisors:
+                        out = out[out[supervisor_col].isin(selected_supervisors)]
+                    if selected_salespersons:
+                        out = out[out["Salesperson"].isin(selected_salespersons)]
+                    return out
 
-                    all_supervisors = sorted(df[supervisor_col].dropna().unique().tolist())
-                    all_salespersons = sorted(df["Salesperson"].dropna().unique().tolist())
+                df_f = apply_dashboard_filters(df)
 
-                    filter_col1, filter_col2 = st.columns(2)
+                def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
+                    base_cols = ["مبلغ المديونية", "عدد الحسابات"]
+                    if extra_col:
+                        base_cols.append(extra_label)
+                    out_cols = base_cols + ["الموظف", "المشرف"]
 
-                    with filter_col1:
-                        selected_supervisors = st.multiselect(
-                            "فلترة حسب المشرف", options=all_supervisors, default=[],
-                            key="neglect_supervisor_filter"
-                        )
+                    if d.empty:
+                        return pd.DataFrame(columns=out_cols)
 
-                    with filter_col2:
-                        selected_salespersons = st.multiselect(
-                            "فلترة حسب الموظف (Salesperson)", options=all_salespersons, default=[],
-                            key="neglect_salesperson_filter"
-                        )
+                    rows = []
+                    grand_amount = 0.0
+                    grand_count = 0
+                    grand_extra = 0.0
 
-                    def apply_dashboard_filters(d):
-                        out = d
-                        if selected_supervisors:
-                            out = out[out[supervisor_col].isin(selected_supervisors)]
-                        if selected_salespersons:
-                            out = out[out["Salesperson"].isin(selected_salespersons)]
-                        return out
+                    for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
+                        sup_amount = 0.0
+                        sup_count = 0
+                        sup_extra = 0.0
 
-                    df_f = apply_dashboard_filters(df)
-
-                    def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
-                        base_cols = ["مبلغ المديونية", "عدد الحسابات"]
+                        emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
+                        emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
                         if extra_col:
-                            base_cols.append(extra_label)
-                        out_cols = base_cols + ["الموظف", "المشرف"]
+                            if extra_agg == "sum":
+                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
+                            else:
+                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
 
-                        if d.empty:
-                            return pd.DataFrame(columns=out_cols)
-
-                        rows = []
-                        grand_amount = 0.0
-                        grand_count = 0
-                        grand_extra = 0.0
-
-                        for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
-                            sup_amount = 0.0
-                            sup_count = 0
-                            sup_extra = 0.0
-
-                            emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
-                            emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
-                            if extra_col:
-                                if extra_agg == "sum":
-                                    emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
-                                else:
-                                    emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
-
-                            for salesperson in emp_amount.sort_values(ascending=False).index:
-                                amount_val = float(emp_amount.get(salesperson, 0))
-                                count_val = int(emp_count.get(salesperson, 0))
-                                row = {
-                                    "مبلغ المديونية": amount_val,
-                                    "عدد الحسابات": count_val,
-                                    "الموظف": salesperson,
-                                    "المشرف": supervisor,
-                                }
-                                if extra_col:
-                                    extra_val = float(emp_extra.get(salesperson, 0))
-                                    row[extra_label] = extra_val
-                                    sup_extra += extra_val
-                                rows.append(row)
-                                sup_amount += amount_val
-                                sup_count += count_val
-
-                            total_row = {
-                                "مبلغ المديونية": sup_amount,
-                                "عدد الحسابات": sup_count,
-                                "الموظف": f"{supervisor} إجمالي",
+                        for salesperson in emp_amount.sort_values(ascending=False).index:
+                            amount_val = float(emp_amount.get(salesperson, 0))
+                            count_val = int(emp_count.get(salesperson, 0))
+                            row = {
+                                "مبلغ المديونية": amount_val,
+                                "عدد الحسابات": count_val,
+                                "الموظف": salesperson,
                                 "المشرف": supervisor,
                             }
                             if extra_col:
-                                total_row[extra_label] = (
-                                    sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
-                                )
-                            rows.append(total_row)
+                                extra_val = float(emp_extra.get(salesperson, 0))
+                                row[extra_label] = extra_val
+                                sup_extra += extra_val
+                            rows.append(row)
+                            sup_amount += amount_val
+                            sup_count += count_val
 
-                            grand_amount += sup_amount
-                            grand_count += sup_count
-                            grand_extra += sup_extra
-
-                        grand_row = {
-                            "مبلغ المديونية": grand_amount,
-                            "عدد الحسابات": grand_count,
-                            "الموظف": "الاجمالي",
-                            "المشرف": "",
+                        total_row = {
+                            "مبلغ المديونية": sup_amount,
+                            "عدد الحسابات": sup_count,
+                            "الموظف": f"{supervisor} إجمالي",
+                            "المشرف": supervisor,
                         }
                         if extra_col:
-                            grand_row[extra_label] = (
-                                grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
+                            total_row[extra_label] = (
+                                sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
                             )
-                        rows.append(grand_row)
+                        rows.append(total_row)
 
-                        return pd.DataFrame(rows)[out_cols]
+                        grand_amount += sup_amount
+                        grand_count += sup_count
+                        grand_extra += sup_extra
 
-                    def style_summary(d, extra_label=None):
-                        fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
-                        if extra_label:
-                            fmt[extra_label] = "{:,.0f}"
+                    grand_row = {
+                        "مبلغ المديونية": grand_amount,
+                        "عدد الحسابات": grand_count,
+                        "الموظف": "الاجمالي",
+                        "المشرف": "",
+                    }
+                    if extra_col:
+                        grand_row[extra_label] = (
+                            grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
+                        )
+                    rows.append(grand_row)
 
-                        def highlight_rows(row):
-                            is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
-                            if is_total:
-                                return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
-                            return [""] * len(row)
+                    return pd.DataFrame(rows)[out_cols]
 
-                        return d.style.apply(highlight_rows, axis=1).format(fmt)
+                def style_summary(d, extra_label=None):
+                    fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
+                    if extra_label:
+                        fmt[extra_label] = "{:,.0f}"
 
-                    day_col_label = (
-                        "عدد أيام الإهمال" if neglect_portfolio_type == "NPL&Dpd60"
-                        else "فرق عدد ايام من اخر متابعة"
-                    )
+                    def highlight_rows(row):
+                        is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
+                        if is_total:
+                            return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
+                        return [""] * len(row)
 
-                    st.markdown("### 📄 تقرير الإهمال")
+                    return d.style.apply(highlight_rows, axis=1).format(fmt)
+
+                day_col_label = (
+                    "عدد أيام الإهمال" if neglect_portfolio_type == "NPL&Dpd60"
+                    else "فرق عدد ايام من اخر متابعة"
+                )
+
+                tab_report, tab_days, tab_raw = st.tabs([
+                    "📄 تقرير الإهمال", f"📄 {day_col_label}", "🗂️ أصل البيانات"
+                ])
+
+                with tab_report:
                     neglect_summary = build_pivot_style(df_f)
                     if neglect_summary.empty:
-                        st.info("لا توجد بيانات مطابقة.")
+                        st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
                     else:
                         st.dataframe(style_summary(neglect_summary), use_container_width=True, hide_index=True)
 
-                    st.markdown(f"### 📄 تقرير {day_col_label}")
+                with tab_days:
+                    require_columns(df_f, ["فرق عدد ايام من اخر متابعة"], f"تقرير {day_col_label}")
                     days_summary = build_pivot_style(
                         df_f, extra_col="فرق عدد ايام من اخر متابعة",
                         extra_label=day_col_label, extra_agg="sum"
                     )
                     if days_summary.empty:
-                        st.info("لا توجد بيانات مطابقة.")
+                        st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
                     else:
                         st.dataframe(
                             style_summary(days_summary, extra_label=day_col_label),
                             use_container_width=True, hide_index=True
                         )
 
-                    st.markdown("### 🗂️ أصل البيانات - الإهمال")
+                with tab_raw:
+                    st.markdown("#### 🗂️ أصل البيانات - الإهمال")
                     st.dataframe(df_f, use_container_width=True, hide_index=True)
 
-                    st.markdown("### 📈 الرسوم البيانية")
+                # ---------------------------
+                # الشارتات
+                # ---------------------------
+                st.markdown('<div class="section-title">📈 الرسوم البيانية</div>', unsafe_allow_html=True)
 
-                    SNB_GREEN = "#00693E"
-                    SNB_GOLD = "#C9A227"
-                    SNB_RED = "#A33A3A"
+                SNB_GREEN = "#00693E"
+                SNB_GOLD = "#C9A227"
+                SNB_RED = "#A33A3A"
+                LABEL_FONT = dict(size=14, family="Tajawal", color="#111827")
 
-                    DATA_LABEL_FONT = dict(size=16, family="Arial Black", color="white")
-                    XAXIS_TICK_FONT = dict(size=14, family="Arial Black", color="white")
+                def style_fig(fig, angle=-20):
+                    fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color="#374151"))
+                    fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color="#9aa4b2"), gridcolor="#f1f5f3")
+                    fig.update_layout(
+                        height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
+                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="Tajawal"),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    return fig
 
+                chart_col1, chart_col2 = st.columns(2)
+
+                with chart_col1:
+                    st.markdown('<div class="chart-card"><div class="chart-card-title">مبلغ المديونية لكل مشرف</div>', unsafe_allow_html=True)
                     sup_amount = (
                         df_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
                         .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
                     )
-
                     if not sup_amount.empty:
                         fig1 = px.bar(
                             sup_amount, x="المشرف", y="مبلغ المديونية", text="مبلغ المديونية",
-                            color_discrete_sequence=[SNB_RED]
+                            color_discrete_sequence=[SNB_RED], template="plotly_white"
                         )
-                        fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
-                        fig1.update_xaxes(tickfont=XAXIS_TICK_FONT)
-                        fig1.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
-                        st.plotly_chart(fig1, use_container_width=True)
+                        fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
+                        st.plotly_chart(style_fig(fig1), use_container_width=True)
+                    else:
+                        st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-                    emp_count = (
-                        df_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
-                        .reset_index(name="عدد الحسابات")
-                        .sort_values("عدد الحسابات", ascending=False).head(15)
-                    )
-                    if not emp_count.empty:
-                        st.markdown("#### أعلى 15 موظف بعدد الحسابات (الإهمال)")
-                        fig2 = px.bar(
-                            emp_count, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
-                            color_discrete_sequence=[SNB_GOLD]
-                        )
-                        fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
-                        fig2.update_xaxes(tickfont=XAXIS_TICK_FONT)
-                        fig2.update_layout(height=420, xaxis_tickangle=-30, margin=dict(t=20, b=10))
-                        st.plotly_chart(fig2, use_container_width=True)
-
+                with chart_col2:
+                    st.markdown(f'<div class="chart-card"><div class="chart-card-title">متوسط {day_col_label} لكل مشرف</div>', unsafe_allow_html=True)
                     days_by_sup = (
                         df_f.groupby(supervisor_col, dropna=False)["فرق عدد ايام من اخر متابعة"].mean()
                         .reset_index().rename(columns={
@@ -1432,15 +1754,39 @@ elif page == "الاهمال":
                         })
                     )
                     if not days_by_sup.empty:
-                        st.markdown(f"#### متوسط {day_col_label} لكل مشرف")
                         fig3 = px.bar(
                             days_by_sup, x="المشرف", y="متوسط عدد الأيام", text="متوسط عدد الأيام",
-                            color_discrete_sequence=[SNB_GREEN]
+                            color_discrete_sequence=[SNB_GREEN], template="plotly_white"
                         )
-                        fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=DATA_LABEL_FONT)
-                        fig3.update_xaxes(tickfont=XAXIS_TICK_FONT)
-                        fig3.update_layout(height=420, xaxis_tickangle=-20, margin=dict(t=20, b=10))
-                        st.plotly_chart(fig3, use_container_width=True)
+                        fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=LABEL_FONT)
+                        st.plotly_chart(style_fig(fig3), use_container_width=True)
+                    else:
+                        st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="chart-card"><div class="chart-card-title">أعلى 15 موظف بعدد الحسابات (الإهمال)</div>', unsafe_allow_html=True)
+                emp_count = (
+                    df_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                    .reset_index(name="عدد الحسابات")
+                    .sort_values("عدد الحسابات", ascending=False).head(15)
+                )
+                if not emp_count.empty:
+                    fig2 = px.bar(
+                        emp_count, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
+                        color_discrete_sequence=[SNB_GOLD], template="plotly_white"
+                    )
+                    fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=LABEL_FONT)
+                    st.plotly_chart(style_fig(fig2, angle=-30), use_container_width=True)
+                else:
+                    st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+          except KeyError as e:
+            show_error(e)
+          except Exception as e:
+            show_error(e)
+        else:
+            st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التحليل</div>', unsafe_allow_html=True)
 
    
     
