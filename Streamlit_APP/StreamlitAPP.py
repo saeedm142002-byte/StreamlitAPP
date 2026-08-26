@@ -762,11 +762,22 @@ if page == "الوعود القائمة و المكسورة":
             SNB_GREEN = "#00693E"
             SNB_GOLD = "#C9A227"
             SNB_RED = "#A33A3A"
-            LABEL_FONT = dict(size=14, family="Tajawal", color="#111827")
+
+            # النص بيبقى أبيض في الوضع الداكن (Dark) وأسود في الوضع الفاتح (Light)
+            def get_theme_text_color():
+                try:
+                    base = st.get_option("theme.base")
+                except Exception:
+                    base = None
+                return "#FFFFFF" if base == "dark" else "#111827"
+
+            AXIS_TEXT_COLOR = get_theme_text_color()
+            GRID_COLOR = "#374151" if AXIS_TEXT_COLOR == "#FFFFFF" else "#f1f5f3"
+            LABEL_FONT = dict(size=14, family="Tajawal", color=AXIS_TEXT_COLOR)
 
             def style_fig(fig, angle=-20):
-                fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color="#374151"))
-                fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color="#9aa4b2"), gridcolor="#f1f5f3")
+                fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
+                fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
                 fig.update_layout(
                     height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -1712,11 +1723,22 @@ elif page == "الاهمال":
                 SNB_GREEN = "#00693E"
                 SNB_GOLD = "#C9A227"
                 SNB_RED = "#A33A3A"
-                LABEL_FONT = dict(size=14, family="Tajawal", color="#111827")
+
+                # النص بيبقى أبيض في الوضع الداكن (Dark) وأسود في الوضع الفاتح (Light)
+                def get_theme_text_color():
+                    try:
+                        base = st.get_option("theme.base")
+                    except Exception:
+                        base = None
+                    return "#FFFFFF" if base == "dark" else "#111827"
+
+                AXIS_TEXT_COLOR = get_theme_text_color()
+                GRID_COLOR = "#374151" if AXIS_TEXT_COLOR == "#FFFFFF" else "#f1f5f3"
+                LABEL_FONT = dict(size=14, family="Tajawal", color=AXIS_TEXT_COLOR)
 
                 def style_fig(fig, angle=-20):
-                    fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color="#374151"))
-                    fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color="#9aa4b2"), gridcolor="#f1f5f3")
+                    fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
+                    fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
                     fig.update_layout(
                         height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
