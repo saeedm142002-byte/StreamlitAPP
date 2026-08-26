@@ -542,9 +542,6 @@ if page == "الوعود القائمة و المكسورة":
             # ==========================================
             # 🔢 بطاقات KPI
             # ==========================================
-            total_accounts = len(current) + len(broken)
-            broken_pct = (len(broken) / total_accounts * 100) if total_accounts else 0
-
             st.markdown(f"""
             <div class="kpi-grid">
                 <div class="kpi-card">
@@ -553,7 +550,7 @@ if page == "الوعود القائمة و المكسورة":
                     </div>
                     <div class="kpi-label">الوعود القائمة</div>
                     <div class="kpi-value">{len(current):,}</div>
-                    <div class="kpi-sub">حساب لسه المتابعة عليه مستمرة</div>
+                    <div class="kpi-sub">حسابات يجب متابعتها اليوم</div>
                 </div>
                 <div class="kpi-card broken">
                     <div class="kpi-top">
@@ -561,7 +558,7 @@ if page == "الوعود القائمة و المكسورة":
                     </div>
                     <div class="kpi-label">الوعود المكسورة</div>
                     <div class="kpi-value">{len(broken):,}</div>
-                    <div class="kpi-sub">{broken_pct:.1f}% من إجمالي الحسابات</div>
+                    <div class="kpi-sub">حسابات موعد متابعتها عدي</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
