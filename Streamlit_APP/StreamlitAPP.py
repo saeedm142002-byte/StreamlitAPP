@@ -2747,7 +2747,7 @@ elif page == "التدوير":
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
         <p>إعادة توزيع العملاء على المحصلين بحيث لا يحتفظ أي عميل بمحصله القديم، مع الحفاظ على نفس عدد العملاء ومتبقي المديونية لكل محصل قدر الإمكان</p>
-        <span class="header-badge">توزيع آلي متوازن</span>
+        <span class="header-badge">توزيع آلي متوازن + تحسين محلي</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2785,6 +2785,151 @@ elif page == "التدوير":
             """, unsafe_allow_html=True)
             with st.expander("🔍 تفاصيل تقنية (Traceback)"):
                 st.code(traceback.format_exc())
+
+    # ============================================================
+    # 🧠 مرحلة التحسين المحلي (Local Search) بعد التوزيع الأولي
+    # ============================================================
+    def _sample_by_debt(items, cap):
+        """
+        لو عدد العملاء عند محصل معين كبير جدًا، بناخد عينة موزعة على مستويات
+        المديونية المختلفة (مش بس الأعلى) بدل ما نفحص كل الاحتمالات (أداء أسرع).
+        """
+        if len(items) <= cap:
+            return items
+        items_sorted = sorted(items, key=lambda x: x["debt"], reverse=True)
+        step = len(items_sorted) / cap
+        return [items_sorted[int(i * step)] for i in range(cap)]
+
+    def refine_assignment(groups, assignment, current_count, current_debt,
+                           target_count, target_debt, collectors,
+                           max_passes=30, pool_cap=120):
+        """
+        تحسين محلي (Local Search) فوق نتيجة التوزيع الأولي (Greedy) لتقليل
+        الفرق الكلي بين (قديم/جديد) في عدد العملاء ومتبقي المديونية معًا:
+
+        - Move  : نقل عميل واحد (كل حساباته) لمحصل تاني لو ده بيقلل الانحراف
+                  الكلي (بيأثر على العدد والمديونية عند المحصلين المعنيين).
+        - Swap  : تبديل عميلين بين محصلين مختلفين. عدد العملاء عند الاتنين
+                  بيفضل زي ما هو، وبس بيتحسن توازن متبقي المديونية بينهم.
+
+        بتكرر الاتنين على شكل "passes" لحد ما محدش يقدر يحسن أكتر أو
+        نوصل للحد الأقصى لعدد المحاولات.
+        """
+
+        def pen(count_val, target_c, debt_val, target_d):
+            tc = target_c or 1
+            td = target_d or 1.0
+            pc = (count_val - target_c) / tc
+            pdv = (debt_val - target_d) / td
+            return pc * pc + pdv * pdv
+
+        groups_by_collector = {c: [] for c in collectors}
+        for g in groups:
+            cid = assignment.get(g["id"])
+            if cid is not None:
+                groups_by_collector[cid].append(g)
+
+        passes_done = 0
+        improved = True
+
+        while improved and passes_done < max_passes:
+            improved = False
+            passes_done += 1
+
+            # ---------- 1) Move: نقل عميل واحد لمحصل أنسب ----------
+            for g in groups:
+                gid = g["id"]
+                c_old = assignment[gid]
+
+                old_pen_old = pen(
+                    current_count[c_old], target_count.get(c_old, 0),
+                    current_debt[c_old], target_debt.get(c_old, 0.0)
+                )
+
+                best_c, best_delta = None, -1e-9
+
+                for c_new in collectors:
+                    if c_new == c_old or c_new in g["forbidden"]:
+                        continue
+
+                    old_pen_new = pen(
+                        current_count[c_new], target_count.get(c_new, 0),
+                        current_debt[c_new], target_debt.get(c_new, 0.0)
+                    )
+                    new_pen_old = pen(
+                        current_count[c_old] - 1, target_count.get(c_old, 0),
+                        current_debt[c_old] - g["debt"], target_debt.get(c_old, 0.0)
+                    )
+                    new_pen_new = pen(
+                        current_count[c_new] + 1, target_count.get(c_new, 0),
+                        current_debt[c_new] + g["debt"], target_debt.get(c_new, 0.0)
+                    )
+
+                    delta = (new_pen_old + new_pen_new) - (old_pen_old + old_pen_new)
+                    if delta < best_delta:
+                        best_delta = delta
+                        best_c = c_new
+
+                if best_c is not None:
+                    current_count[c_old] -= 1
+                    current_debt[c_old] -= g["debt"]
+                    current_count[best_c] += 1
+                    current_debt[best_c] += g["debt"]
+                    assignment[gid] = best_c
+                    groups_by_collector[c_old].remove(g)
+                    groups_by_collector[best_c].append(g)
+                    improved = True
+
+            # ---------- 2) Swap: تبديل عميلين بين محصلين لتوازن المديونية ----------
+            for i, c1 in enumerate(collectors):
+                for c2 in collectors[i + 1:]:
+                    list1 = [g for g in groups_by_collector[c1] if c2 not in g["forbidden"]]
+                    list2 = [g for g in groups_by_collector[c2] if c1 not in g["forbidden"]]
+                    if not list1 or not list2:
+                        continue
+
+                    list1 = _sample_by_debt(list1, pool_cap)
+                    list2 = _sample_by_debt(list2, pool_cap)
+
+                    old_pen_pair = pen(
+                        current_count[c1], target_count.get(c1, 0),
+                        current_debt[c1], target_debt.get(c1, 0.0)
+                    ) + pen(
+                        current_count[c2], target_count.get(c2, 0),
+                        current_debt[c2], target_debt.get(c2, 0.0)
+                    )
+
+                    best_pair, best_delta = None, -1e-9
+
+                    for g1 in list1:
+                        for g2 in list2:
+                            new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
+                            new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
+                            new_pen_pair = pen(
+                                current_count[c1], target_count.get(c1, 0),
+                                new_debt1, target_debt.get(c1, 0.0)
+                            ) + pen(
+                                current_count[c2], target_count.get(c2, 0),
+                                new_debt2, target_debt.get(c2, 0.0)
+                            )
+                            delta = new_pen_pair - old_pen_pair
+                            if delta < best_delta:
+                                best_delta = delta
+                                best_pair = (g1, g2)
+
+                    if best_pair:
+                        g1, g2 = best_pair
+                        assignment[g1["id"]] = c2
+                        assignment[g2["id"]] = c1
+                        current_debt[c1] += (g2["debt"] - g1["debt"])
+                        current_debt[c2] += (g1["debt"] - g2["debt"])
+                        groups_by_collector[c1].remove(g1)
+                        groups_by_collector[c1].append(g2)
+                        groups_by_collector[c2].remove(g2)
+                        groups_by_collector[c2].append(g1)
+                        improved = True
+
+        return passes_done
 
     st.markdown("""
     الملف المطلوب لازم يحتوي على 4 أعمدة:
@@ -2880,6 +3025,15 @@ elif page == "التدوير":
                 + "|".join(unassignable[:25])
             )
 
+        # ------------------------------------------------------
+        # 🔧 تحسين محلي: تقليل الفرق في العدد والمديونية أكتر من التوزيع
+        # الأولي (Greedy) عن طريق Move + Swap بين المحصلين
+        # ------------------------------------------------------
+        refine_assignment(
+            groups, assignment, current_count, current_debt,
+            target_count, target_debt, collectors
+        )
+
         df["المحصل الجديد"] = df["رقم الهوية"].map(assignment)
 
         # جدول مقارنة قبل / بعد لكل محصل
@@ -2946,7 +3100,8 @@ elif page == "التدوير":
             if same_collector_violations == 0 and split_id_violations == 0:
                 st.markdown(
                     '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
-                    'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل.</div>',
+                    'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل. '
+                    'وتم كمان تشغيل مرحلة تحسين محلي لتقليل الفروق في العدد والمديونية قدر الإمكان.</div>',
                     unsafe_allow_html=True
                 )
 
