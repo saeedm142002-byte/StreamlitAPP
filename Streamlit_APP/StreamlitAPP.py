@@ -84,7 +84,7 @@ pages = [
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
     ("اخطاء الحالات", "❌"),
-    ("مطابقة السدادات", "💰")
+    ("التدوير", "💰")
     
 ]
 
@@ -2526,8 +2526,539 @@ elif page == "اخطاء الحالات":
 elif page == "الاوتودايلر":
     st.subheader("📞 الاوتودايلر")
 
-elif page == "مطابقة السدادات":
-    st.subheader("💰 مطابقة السدادات")
+elif page == "التدوير":
+
+    import pandas as pd
+    import numpy as np
+    import plotly.express as px
+    import traceback
+    from io import BytesIO
+
+    # ============================================================
+    # 🎨 نظام تصميم مودرن شامل (نفس عائلة التصميم، بلمسة لون خاصة بالتدوير)
+    # ============================================================
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Tajawal', sans-serif;
+        }
+
+        .main .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 3rem;
+        }
+
+        /* ===== الهيدر الرئيسي ===== */
+        .rotation-header {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(120deg, #0d2d4a 0%, #155a8a 50%, #1c76b3 100%);
+            padding: 32px 34px;
+            border-radius: 20px;
+            margin-bottom: 26px;
+            box-shadow: 0 10px 30px rgba(21,90,138,0.28);
+        }
+        .rotation-header::after {
+            content: "";
+            position: absolute;
+            top: -60px; left: -40px;
+            width: 220px; height: 220px;
+            background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%);
+            border-radius: 50%;
+        }
+        .rotation-header h1 {
+            color: #fff;
+            margin: 0;
+            font-size: 27px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .rotation-header p {
+            color: #d3e9f7;
+            margin: 8px 0 0 0;
+            font-size: 14.5px;
+            font-weight: 500;
+        }
+        .header-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 999px;
+            margin-top: 12px;
+            border: 1px solid rgba(255,255,255,0.25);
+        }
+
+        /* ===== بطاقات KPI ===== */
+        .kpi-grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 6px;
+        }
+        .kpi-card {
+            position: relative;
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 20px 22px;
+            box-shadow: 0 6px 20px rgba(17,24,39,0.07);
+            border: 1px solid #eef1ef;
+            border-left: 6px solid #155a8a;
+            overflow: hidden;
+        }
+        .kpi-card.ok { border-left-color: #00693E; }
+        .kpi-card::before {
+            content: "";
+            position: absolute;
+            top: 0; right: 0;
+            width: 90px; height: 90px;
+            background: radial-gradient(circle, rgba(21,90,138,0.10) 0%, rgba(21,90,138,0) 70%);
+        }
+        .kpi-icon {
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 19px;
+            background: #e5f0f8;
+        }
+        .kpi-card.ok .kpi-icon { background: #e7f4ec; }
+        .kpi-label {
+            font-size: 13px;
+            color: #6b7280;
+            font-weight: 700;
+            margin-top: 12px;
+        }
+        .kpi-value {
+            font-size: 30px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 2px;
+        }
+        .kpi-sub {
+            font-size: 12px;
+            color: #9aa4b2;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        /* ===== عناوين الأقسام ===== */
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: linear-gradient(90deg, #f1f7fb 0%, #ffffff 100%);
+            border-radius: 12px;
+            padding: 12px 18px;
+            margin: 26px 0 14px 0;
+            border-right: 5px solid #155a8a;
+            font-weight: 800;
+            font-size: 16.5px;
+            color: #0d2d4a;
+        }
+
+        /* ===== بطاقة تحيط بالشارت ===== */
+        .chart-card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 14px 16px 4px 16px;
+            border: 1px solid #eef1ef;
+            box-shadow: 0 4px 14px rgba(17,24,39,0.05);
+            margin-bottom: 18px;
+        }
+        .chart-card-title {
+            font-weight: 800;
+            font-size: 14.5px;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        /* ===== رفع الملف ===== */
+        div[data-testid="stFileUploader"] {
+            border: 2px dashed #155a8a44;
+            border-radius: 16px;
+            padding: 8px;
+            background: #f8fbfd;
+        }
+
+        /* ===== أزرار التحميل ===== */
+        div[data-testid="stDownloadButton"] button {
+            border-radius: 12px !important;
+            font-weight: 700 !important;
+            border: 1px solid #d8e6f0 !important;
+            transition: all 0.15s ease-in-out;
+        }
+        div[data-testid="stDownloadButton"] button:hover {
+            border-color: #155a8a !important;
+            color: #155a8a !important;
+            transform: translateY(-1px);
+        }
+
+        /* ===== حالة فارغة ===== */
+        .empty-state {
+            text-align: center;
+            padding: 26px 10px;
+            color: #9aa4b2;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* ===== صندوق الأخطاء ===== */
+        .error-box {
+            background: #fdecea;
+            border: 1px solid #f5c2c0;
+            border-radius: 14px;
+            padding: 18px 20px;
+            color: #7a1f1a;
+            font-weight: 600;
+            line-height: 2;
+        }
+        .error-box code {
+            background: #fbe0de;
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-weight: 700;
+        }
+        .error-title {
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        /* ===== صندوق تأكيد النجاح ===== */
+        .success-box {
+            background: #eaf6ef;
+            border: 1px solid #c9e9d5;
+            border-radius: 14px;
+            padding: 14px 18px;
+            color: #0f3d2e;
+            font-weight: 700;
+            margin-bottom: 14px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="rotation-header">
+        <h1>🔄 التدوير</h1>
+        <p>إعادة توزيع العملاء على المحصلين بحيث لا يحتفظ أي عميل بمحصله القديم، مع الحفاظ على نفس عدد العملاء ومتبقي المديونية لكل محصل قدر الإمكان</p>
+        <span class="header-badge">توزيع آلي متوازن</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============================================================
+    # 🛠️ أدوات مساعدة للتحقق من الأعمدة وعرض الأخطاء بدقة
+    # ============================================================
+    def require_columns(df, required_cols, step_name):
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            raise KeyError("STEP::" + step_name + "::MISSING::" + "|".join(missing))
+
+    def show_error(exc):
+        msg = str(exc)
+        if msg.startswith("STEP::"):
+            try:
+                _, step_name, _, cols_part = msg.split("::", 3)
+                cols_list = cols_part.split("|")
+                cols_html = "".join([f"<li><code>{c}</code></li>" for c in cols_list])
+                st.markdown(f"""
+                <div class="error-box">
+                    <div class="error-title">❌ حصل خطأ أثناء تنفيذ خطوة: <code>{step_name}</code></div>
+                    التفاصيل:
+                    <ul>{cols_html}</ul>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.error(f"❌ خطأ غير متوقع: {msg}")
+        else:
+            st.markdown(f"""
+            <div class="error-box">
+                <div class="error-title">❌ حصل خطأ غير متوقع</div>
+                <b>نوع الخطأ:</b> <code>{type(exc).__name__}</code><br>
+                <b>تفاصيل:</b> {msg}
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("🔍 تفاصيل تقنية (Traceback)"):
+                st.code(traceback.format_exc())
+
+    st.markdown("""
+    الملف المطلوب لازم يحتوي على 4 أعمدة:
+    **رقم الهوية** — **اسم المحصل القديم** — **متبقي المديونية** — **رقم الحساب**
+    """)
+
+    rotation_file = st.file_uploader(
+        "رفع ملف المحفظة",
+        type=["xlsx", "xls"],
+        key="rotation_file_uploader"
+    )
+
+    REQUIRED_ROTATION_COLS = [
+        "رقم الهوية", "اسم المحصل القديم", "متبقي المديونية", "رقم الحساب"
+    ]
+
+    # ============================================================
+    # الدالة الأساسية لإعادة التوزيع - Cached
+    # ============================================================
+    @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة على المحصلين...")
+    def rotate_portfolio(file_bytes):
+        try:
+            df = pd.read_excel(BytesIO(file_bytes))
+        except Exception as e:
+            raise KeyError(f"STEP::قراءة ملف الإكسيل::MISSING::{e}")
+
+        require_columns(df, REQUIRED_ROTATION_COLS, "التحقق من الأعمدة المطلوبة")
+
+        df = df.copy()
+        df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
+        df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
+        df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.strip()
+
+        df["متبقي المديونية"] = (
+            df["متبقي المديونية"].astype(str).str.replace(",", "", regex=False).str.strip()
+        )
+        df["متبقي المديونية"] = pd.to_numeric(df["متبقي المديونية"], errors="coerce").fillna(0.0)
+
+        collectors = sorted([c for c in df["اسم المحصل القديم"].unique().tolist() if c and c.lower() != "nan"])
+        if len(collectors) < 2:
+            raise KeyError(
+                "STEP::التحقق من عدد المحصلين::MISSING::"
+                "لازم يكون في الملف محصلين اثنين على الأقل عشان تدوير المحفظة"
+            )
+
+        # ------------------------------------------------------
+        # الأهداف الأصلية لكل محصل:
+        # عدد العملاء (IDs مميزة) + إجمالي متبقي المديونية (على مستوى الحسابات)
+        # ------------------------------------------------------
+        target_count = df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
+        target_debt = df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
+
+        # ------------------------------------------------------
+        # تجميع الصفوف حسب رقم الهوية — كل عميل ينتقل ككتلة واحدة
+        # ------------------------------------------------------
+        groups = []
+        for id_val, g in df.groupby("رقم الهوية", sort=False):
+            groups.append({
+                "id": id_val,
+                "debt": float(g["متبقي المديونية"].sum()),
+                "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
+            })
+
+        # المجموعات الأكبر (من حيث المديونية) الأول، لتوزيع أفضل
+        groups.sort(key=lambda x: x["debt"], reverse=True)
+
+        current_count = {c: 0 for c in collectors}
+        current_debt = {c: 0.0 for c in collectors}
+        assignment = {}
+        unassignable = []
+
+        for grp in groups:
+            candidates = [c for c in collectors if c not in grp["forbidden"]]
+            if not candidates:
+                unassignable.append(str(grp["id"]))
+                continue
+
+            def score(c):
+                tc = target_count.get(c, 0) or 1
+                td = target_debt.get(c, 0.0) or 1.0
+                deficit_count = (target_count.get(c, 0) - current_count[c]) / tc
+                deficit_debt = (target_debt.get(c, 0.0) - current_debt[c]) / td
+                return deficit_count + deficit_debt
+
+            best = max(candidates, key=score)
+            assignment[grp["id"]] = best
+            current_count[best] += 1
+            current_debt[best] += grp["debt"]
+
+        if unassignable:
+            raise KeyError(
+                "STEP::تعذر إيجاد محصل بديل لبعض العملاء (رقم الهوية)::MISSING::"
+                + "|".join(unassignable[:25])
+            )
+
+        df["المحصل الجديد"] = df["رقم الهوية"].map(assignment)
+
+        # جدول مقارنة قبل / بعد لكل محصل
+        summary_rows = []
+        for c in collectors:
+            summary_rows.append({
+                "المحصل": c,
+                "عدد العملاء (قديم)": target_count.get(c, 0),
+                "عدد العملاء (جديد)": current_count.get(c, 0),
+                "فرق العدد": current_count.get(c, 0) - target_count.get(c, 0),
+                "متبقي المديونية (قديم)": target_debt.get(c, 0.0),
+                "متبقي المديونية (جديد)": current_debt.get(c, 0.0),
+                "فرق المديونية": current_debt.get(c, 0.0) - target_debt.get(c, 0.0),
+            })
+        summary_df = pd.DataFrame(summary_rows)
+
+        return df.reset_index(drop=True), summary_df
+
+    if rotation_file:
+        try:
+            file_bytes = rotation_file.getvalue()
+            result_df, summary_df = rotate_portfolio(file_bytes)
+
+            # ------------------------------------------------------
+            # تحقق نهائي (Sanity check) من الشرطين الأساسيين
+            # ------------------------------------------------------
+            same_collector_violations = int(
+                (result_df["المحصل الجديد"] == result_df["اسم المحصل القديم"]).sum()
+            )
+            split_id_violations = int(
+                result_df.groupby("رقم الهوية")["المحصل الجديد"].nunique().gt(1).sum()
+            )
+
+            total_clients = result_df["رقم الهوية"].nunique()
+
+            # ==========================================
+            # 🔢 بطاقات KPI
+            # ==========================================
+            st.markdown(f"""
+            <div class="kpi-grid-3">
+                <div class="kpi-card ok">
+                    <div class="kpi-icon">👥</div>
+                    <div class="kpi-label">عدد العملاء اللي اتدوروا</div>
+                    <div class="kpi-value">{total_clients:,}</div>
+                    <div class="kpi-sub">على {len(result_df):,} حساب</div>
+                </div>
+                <div class="kpi-card {'ok' if same_collector_violations == 0 else ''}">
+                    <div class="kpi-icon">{'✅' if same_collector_violations == 0 else '⚠️'}</div>
+                    <div class="kpi-label">صفوف احتفظت بنفس المحصل</div>
+                    <div class="kpi-value">{same_collector_violations:,}</div>
+                    <div class="kpi-sub">لازم تكون صفر دايمًا</div>
+                </div>
+                <div class="kpi-card {'ok' if split_id_violations == 0 else ''}">
+                    <div class="kpi-icon">{'✅' if split_id_violations == 0 else '⚠️'}</div>
+                    <div class="kpi-label">هويات اتوزعت على أكتر من محصل</div>
+                    <div class="kpi-value">{split_id_violations:,}</div>
+                    <div class="kpi-sub">لازم تكون صفر دايمًا</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            if same_collector_violations == 0 and split_id_violations == 0:
+                st.markdown(
+                    '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
+                    'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل.</div>',
+                    unsafe_allow_html=True
+                )
+
+            # ==========================================
+            # تحميل النتيجة
+            # ==========================================
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                result_df.to_excel(writer, index=False, sheet_name="التدوير")
+                summary_df.to_excel(writer, index=False, sheet_name="مقارنة قبل وبعد")
+            output.seek(0)
+
+            st.download_button(
+                "📥 تحميل ملف التدوير (مع جدول المقارنة)",
+                data=output,
+                file_name="التدوير.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            # ==========================================
+            # جدول المقارنة + البيانات
+            # ==========================================
+            st.markdown('<div class="section-title">📊 مقارنة قبل وبعد لكل محصل</div>', unsafe_allow_html=True)
+
+            def style_summary(d):
+                fmt = {
+                    "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العدد": "{:+,.0f}",
+                    "متبقي المديونية (قديم)": "{:,.0f}", "متبقي المديونية (جديد)": "{:,.0f}", "فرق المديونية": "{:+,.0f}",
+                }
+                return d.style.format(fmt)
+
+            tab_summary, tab_data = st.tabs(["📄 جدول المقارنة", "🗂️ البيانات الكاملة بعد التدوير"])
+
+            with tab_summary:
+                st.dataframe(style_summary(summary_df), use_container_width=True, hide_index=True)
+
+            with tab_data:
+                st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+            # ==========================================
+            # الرسوم البيانية
+            # ==========================================
+            st.markdown('<div class="section-title">📈 الرسوم البيانية</div>', unsafe_allow_html=True)
+
+            BLUE = "#155a8a"
+            GOLD = "#C9A227"
+
+            def get_theme_text_color():
+                try:
+                    base = st.get_option("theme.base")
+                except Exception:
+                    base = None
+                return "#FFFFFF" if base == "dark" else "#111827"
+
+            AXIS_TEXT_COLOR = get_theme_text_color()
+            GRID_COLOR = "#374151" if AXIS_TEXT_COLOR == "#FFFFFF" else "#f1f5f3"
+            LABEL_FONT = dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR)
+
+            def style_fig(fig, angle=-20):
+                fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
+                fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
+                fig.update_layout(
+                    height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Tajawal"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                return fig
+
+            chart_col1, chart_col2 = st.columns(2)
+
+            with chart_col1:
+                st.markdown('<div class="chart-card"><div class="chart-card-title">عدد العملاء: قديم مقابل جديد لكل محصل</div>', unsafe_allow_html=True)
+                count_melt = summary_df.melt(
+                    id_vars="المحصل",
+                    value_vars=["عدد العملاء (قديم)", "عدد العملاء (جديد)"],
+                    var_name="النوع", value_name="عدد العملاء"
+                )
+                fig1 = px.bar(
+                    count_melt, x="المحصل", y="عدد العملاء", color="النوع",
+                    barmode="group", text="عدد العملاء",
+                    color_discrete_map={"عدد العملاء (قديم)": GOLD, "عدد العملاء (جديد)": BLUE},
+                    template="plotly_white"
+                )
+                fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
+                st.plotly_chart(style_fig(fig1), use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            with chart_col2:
+                st.markdown('<div class="chart-card"><div class="chart-card-title">متبقي المديونية: قديم مقابل جديد لكل محصل</div>', unsafe_allow_html=True)
+                debt_melt = summary_df.melt(
+                    id_vars="المحصل",
+                    value_vars=["متبقي المديونية (قديم)", "متبقي المديونية (جديد)"],
+                    var_name="النوع", value_name="متبقي المديونية"
+                )
+                fig2 = px.bar(
+                    debt_melt, x="المحصل", y="متبقي المديونية", color="النوع",
+                    barmode="group", text="متبقي المديونية",
+                    color_discrete_map={"متبقي المديونية (قديم)": GOLD, "متبقي المديونية (جديد)": BLUE},
+                    template="plotly_white"
+                )
+                fig2.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
+                st.plotly_chart(style_fig(fig2), use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        except KeyError as e:
+            show_error(e)
+        except Exception as e:
+            show_error(e)
+    else:
+        st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
 
 elif page == "وعود لا يوجد لها تاريخ الوعد":
     st.subheader("📅 وعود بدون تاريخ")
