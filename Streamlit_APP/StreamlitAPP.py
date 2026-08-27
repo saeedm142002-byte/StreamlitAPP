@@ -11,6 +11,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 import plotly.express as px
 import plotly.express as px
 import textwrap
+import io
 
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
