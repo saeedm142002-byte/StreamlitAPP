@@ -2616,7 +2616,7 @@ elif page == "التوزيع":
 
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
-        df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
+        df = df.dropna(subset=["Account Number"])
 
         overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
                       .agg(عدد_الحسابات=("Account Number", "count"),
@@ -2626,10 +2626,9 @@ elif page == "التوزيع":
 
         leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
         leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
-        remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
 
         st.markdown("### ارفع ملف المستهدفات")
-        st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
+        st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ — هيتوزع بس على المحصلين المذكورين هنا")
         targets_file = st.file_uploader("ارفع ملف المستهدف لكل محصل", type=["xlsx"], key="targets_file")
 
         if targets_file and st.button("نفذ التوزيع"):
@@ -2641,7 +2640,7 @@ elif page == "التوزيع":
                 st.error(f"الأعمدة دي ناقصة في ملف المستهدفات: {missing_cols}")
                 st.stop()
 
-            # تحويل الملف الطويل لديكشنري {محصل: {منتج: {count, amount}}}
+            # يبني قائمة المحصلين من الفايل بس - مفيش حد بيتضاف من برا
             targets = {}
             for _, r in targets_raw.iterrows():
                 sp = str(r["المحصل"]).strip()
@@ -2651,11 +2650,8 @@ elif page == "التوزيع":
                     "amount": r["المبلغ"] if pd.notna(r["المبلغ"]) else 0.0,
                 }
 
-            missing_sps = set(remaining_sps) - set(targets.keys())
-            if missing_sps:
-                st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
-                for sp in missing_sps:
-                    targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
+            selected_sps = list(targets.keys())
+            st.info(f"التوزيع هيتم بس على: {', '.join(selected_sps)}")
 
             new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
 
@@ -2671,9 +2667,6 @@ elif page == "التوزيع":
             new_df.to_excel(output, index=False)
             st.download_button("تحميل الملف بعد التوزيع", output.getvalue(),
                                 file_name="portfolio_after_distribution.xlsx")
-        
-
-
 
 
 
