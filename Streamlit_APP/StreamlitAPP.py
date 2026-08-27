@@ -55,6 +55,55 @@ def predict_text(text):
     return pred, round(confidence, 2)
 
 
+def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
+                                  id_col="ID", acc_col="Account Number",
+                                  amt_col="Amount", product_col="نوع المتنج-التمويل"):
+    """
+    targets: dict {salesperson: {product: {"count": x, "amount": y}}}
+    يوزع كل ID (بكل حساباته) على المحصل الأقرب لهدفه، منتج بمنتج.
+    يرجع df معدّل + جدول ملخص.
+    """
+    df = df.copy()
+    df[sp_col] = df[sp_col].astype(object)
+    leaving_df = df[df[sp_col] == leaving_sp]
+    remaining = list(targets.keys())
+
+    assigned_count = {c: {p: 0 for p in set(leaving_df[product_col])} for c in remaining}
+    assigned_amount = {c: {p: 0.0 for p in set(leaving_df[product_col])} for c in remaining}
+
+    for product, sub in leaving_df.groupby(product_col):
+        groups = (sub.groupby(id_col)
+                     .agg(cnt=(acc_col, "count"), amt=(amt_col, "sum"))
+                     .reset_index()
+                     .sort_values("amt", ascending=False))
+
+        for _, g in groups.iterrows():
+            best_c, best_score = None, float("-inf")
+            for c in remaining:
+                t = targets[c].get(product, {"count": 0, "amount": 0})
+                tc, ta = t["count"], t["amount"]
+                if tc == 0 and ta == 0:
+                    continue
+                dc = (tc - assigned_count[c][product]) / tc if tc else 0
+                da = (ta - assigned_amount[c][product]) / ta if ta else 0
+                score = dc + da
+                if score > best_score:
+                    best_score, best_c = score, c
+            if best_c is None:  # محدش حاطط هدف لهذا المنتج -> يتوزع بالتساوي
+                best_c = min(remaining, key=lambda c: assigned_count[c][product])
+
+            mask = (df[id_col] == g[id_col]) & (df[product_col] == product) & (df[sp_col] == leaving_sp)
+            df.loc[mask, sp_col] = best_c
+            assigned_count[best_c][product] += g["cnt"]
+            assigned_amount[best_c][product] += g["amt"]
+
+    summary = (df[df[sp_col].isin(remaining)]
+               .groupby([sp_col, product_col])
+               .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
+               .reset_index())
+    return df, summary
+
+
 # ======================
 # PAGE CONFIG
 # ======================
@@ -2507,12 +2556,63 @@ elif page == "النشاط":
 # PAGE 6 - باقي الصفحات (مختصر)
 # ======================
 elif page == "التوزيع":
-
     st.subheader("⚖️👥 توزيع المحافظ")
-    uploaded_file = st.file_uploader(
-        "ارفع ملف Excel",
-        type=["xlsx"]
-    )
+    uploaded_file = st.file_uploader("ارفع ملف Excel", type=["xlsx"])
+
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file)
+        df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
+
+        # 1) عرض كل محصل وعدد حسابات كل منتج عنده
+        overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
+                      .agg(عدد_الحسابات=("Account Number", "count"),
+                           إجمالي_المبلغ=("Amount", "sum"))
+                      .reset_index())
+        st.dataframe(overview, use_container_width=True)
+
+        # 2) اختيار المحصل اللي هيمشي
+        leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
+
+        leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
+        remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
+
+        st.markdown("### حدد المستهدف لكل محصل باقي، لكل نوع منتج")
+        target_rows = []
+        for p in leaving_products:
+            row = {"المحصل": None}
+            for sp in remaining_sps:
+                row[f"{p} - عدد"] = 0
+                row[f"{p} - مبلغ"] = 0.0
+        target_df = pd.DataFrame({"المحصل": remaining_sps})
+        for p in leaving_products:
+            target_df[f"{p} - عدد"] = 0
+            target_df[f"{p} - مبلغ"] = 0.0
+
+        edited = st.data_editor(target_df, use_container_width=True, num_rows="fixed", key="targets_editor")
+
+        if st.button("نفذ التوزيع"):
+            targets = {}
+            for _, r in edited.iterrows():
+                sp = r["المحصل"]
+                targets[sp] = {}
+                for p in leaving_products:
+                    targets[sp][p] = {"count": r[f"{p} - عدد"], "amount": r[f"{p} - مبلغ"]}
+
+            new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
+
+            st.success("تم التوزيع")
+            st.markdown("### النتيجة: كل محصل معاه كام")
+            st.dataframe(summary, use_container_width=True)
+
+            totals = (summary.groupby("المحصل")[["عدد_الحسابات", "إجمالي_المبلغ"]]
+                      .sum().reset_index()) if "المحصل" in summary.columns else \
+                      summary.groupby("Salesperson")[["عدد_الحسابات", "إجمالي_المبلغ"]].sum().reset_index()
+            st.dataframe(totals, use_container_width=True)
+
+            output = io.BytesIO()
+            new_df.to_excel(output, index=False)
+            st.download_button("تحميل الملف بعد التوزيع", output.getvalue(),
+                                file_name="portfolio_after_distribution.xlsx")
     
    
         
