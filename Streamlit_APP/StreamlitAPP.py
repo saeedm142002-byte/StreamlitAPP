@@ -2508,7 +2508,7 @@ elif page == "النشاط":
 # ======================
 elif page == "التوزيع":
 
-    st.subheader("📦 توزيع المحافظ")
+    st.subheader("⚖️👥 توزيع المحافظ")
     uploaded_file = st.file_uploader(
         "ارفع ملف Excel",
         type=["xlsx"]
@@ -3216,5 +3216,5 @@ elif page == "التدوير":
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
 
-elif page == "التوزيع":
-    st.subheader("التوزيع")
+elif page == "الت":
+    st.subheader("الت")
