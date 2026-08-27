@@ -2557,46 +2557,50 @@ elif page == "النشاط":
 # ======================
 elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
-    uploaded_file = st.file_uploader("ارفع ملف Excel", type=["xlsx"])
+    uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx"], key="portfolio_file")
 
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
         df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
 
-        # 1) عرض كل محصل وعدد حسابات كل منتج عنده
         overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
                       .agg(عدد_الحسابات=("Account Number", "count"),
                            إجمالي_المبلغ=("Amount", "sum"))
                       .reset_index())
         st.dataframe(overview, use_container_width=True)
 
-        # 2) اختيار المحصل اللي هيمشي
         leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
-
         leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
         remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
 
-        st.markdown("### حدد المستهدف لكل محصل باقي، لكل نوع منتج")
-        target_rows = []
-        for p in leaving_products:
-            row = {"المحصل": None}
-            for sp in remaining_sps:
-                row[f"{p} - عدد"] = 0
-                row[f"{p} - مبلغ"] = 0.0
-        target_df = pd.DataFrame({"المحصل": remaining_sps})
-        for p in leaving_products:
-            target_df[f"{p} - عدد"] = 0
-            target_df[f"{p} - مبلغ"] = 0.0
+        st.markdown("### ارفع ملف المستهدفات")
+        st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
+        targets_file = st.file_uploader("ارفع ملف المستهدف لكل محصل", type=["xlsx"], key="targets_file")
 
-        edited = st.data_editor(target_df, use_container_width=True, num_rows="fixed", key="targets_editor")
+        if targets_file and st.button("نفذ التوزيع"):
+            targets_raw = pd.read_excel(targets_file)
+            targets_raw.columns = [c.strip() for c in targets_raw.columns]
 
-        if st.button("نفذ التوزيع"):
+            missing_cols = {"المحصل", "نوع المنتج", "عدد الحسابات", "المبلغ"} - set(targets_raw.columns)
+            if missing_cols:
+                st.error(f"الأعمدة دي ناقصة في ملف المستهدفات: {missing_cols}")
+                st.stop()
+
+            # تحويل الملف الطويل لديكشنري {محصل: {منتج: {count, amount}}}
             targets = {}
-            for _, r in edited.iterrows():
-                sp = r["المحصل"]
-                targets[sp] = {}
-                for p in leaving_products:
-                    targets[sp][p] = {"count": r[f"{p} - عدد"], "amount": r[f"{p} - مبلغ"]}
+            for _, r in targets_raw.iterrows():
+                sp = str(r["المحصل"]).strip()
+                p = str(r["نوع المنتج"]).strip()
+                targets.setdefault(sp, {})[p] = {
+                    "count": r["عدد الحسابات"] if pd.notna(r["عدد الحسابات"]) else 0,
+                    "amount": r["المبلغ"] if pd.notna(r["المبلغ"]) else 0.0,
+                }
+
+            missing_sps = set(remaining_sps) - set(targets.keys())
+            if missing_sps:
+                st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
+                for sp in missing_sps:
+                    targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
 
             new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
 
@@ -2604,17 +2608,14 @@ elif page == "التوزيع":
             st.markdown("### النتيجة: كل محصل معاه كام")
             st.dataframe(summary, use_container_width=True)
 
-            totals = (summary.groupby("المحصل")[["عدد_الحسابات", "إجمالي_المبلغ"]]
-                      .sum().reset_index()) if "المحصل" in summary.columns else \
-                      summary.groupby("Salesperson")[["عدد_الحسابات", "إجمالي_المبلغ"]].sum().reset_index()
+            totals = (summary.groupby("Salesperson")[["عدد_الحسابات", "إجمالي_المبلغ"]]
+                      .sum().reset_index())
             st.dataframe(totals, use_container_width=True)
 
             output = io.BytesIO()
             new_df.to_excel(output, index=False)
             st.download_button("تحميل الملف بعد التوزيع", output.getvalue(),
                                 file_name="portfolio_after_distribution.xlsx")
-    
-   
         
 
 
