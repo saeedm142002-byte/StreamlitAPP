@@ -59,44 +59,45 @@ def predict_text(text):
 def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                                   id_col="ID", acc_col="Account Number",
                                   amt_col="Amount", product_col="نوع المتنج-التمويل",
-                                  refine_passes=200):
+                                  max_passes=15):
     df = df.copy()
     df[sp_col] = df[sp_col].astype(object)
     leaving_df = df[df[sp_col] == leaving_sp]
     remaining = list(targets.keys())
     products = sorted(set(leaving_df[product_col]))
 
+    # normalizers ثابتة (إجمالي المستهدف لكل منتج) عشان نقارن عدد ومبلغ بمقياس واحد
+    norm_count = {p: sum(targets[c].get(p, {"count": 0})["count"] for c in remaining) or 1
+                  for p in products}
+    norm_amount = {p: sum(targets[c].get(p, {"amount": 0})["amount"] for c in remaining) or 1
+                   for p in products}
+
     assigned_count = {c: {p: 0 for p in products} for c in remaining}
     assigned_amount = {c: {p: 0.0 for p in products} for c in remaining}
-    group_owner = {}  # (product, id) -> current collector
-    group_info = {}   # (product, id) -> {"cnt":.., "amt":..}
+    group_owner, group_info = {}, {}
 
-    def deficit_score(c, p):
+    def dev(c, p):
         t = targets[c].get(p, {"count": 0, "amount": 0})
-        tc, ta = t["count"], t["amount"]
-        if tc == 0 and ta == 0:
-            return None
-        tot_c = sum(targets[x].get(p, {"count": 0})["count"] for x in remaining) or 1
-        tot_a = sum(targets[x].get(p, {"amount": 0})["amount"] for x in remaining) or 1
-        dc = (tc - assigned_count[c][p]) / tot_c
-        da = (ta - assigned_amount[c][p]) / tot_a
-        return dc + da
+        return (abs(t["count"] - assigned_count[c][p]) / norm_count[p]
+                + abs(t["amount"] - assigned_amount[c][p]) / norm_amount[p])
 
+    # ---- التوزيع الأولي (greedy) ----
     for product, sub in leaving_df.groupby(product_col):
         groups = (sub.groupby(id_col)
                      .agg(cnt=(acc_col, "count"), amt=(amt_col, "sum"))
                      .reset_index())
-        # ترتيب تنازلي حسب حجم المساهمة (LPT heuristic) لتوزيع أفضل
-        max_amt = groups["amt"].max() or 1
-        max_cnt = groups["cnt"].max() or 1
-        groups["size_score"] = groups["amt"] / max_amt + groups["cnt"] / max_cnt
-        groups = groups.sort_values("size_score", ascending=False)
+        groups = groups.sort_values("amt", ascending=False)
 
         for _, g in groups.iterrows():
-            scores = {c: deficit_score(c, product) for c in remaining}
-            scores = {c: s for c, s in scores.items() if s is not None}
-            best_c = max(scores, key=scores.get) if scores else min(
-                remaining, key=lambda c: assigned_count[c][product])
+            best_c, best_after = None, None
+            for c in remaining:
+                assigned_count[c][product] += g["cnt"]
+                assigned_amount[c][product] += g["amt"]
+                score = dev(c, product)
+                assigned_count[c][product] -= g["cnt"]
+                assigned_amount[c][product] -= g["amt"]
+                if best_after is None or score < best_after:
+                    best_after, best_c = score, c
 
             key = (product, g[id_col])
             group_owner[key] = best_c
@@ -104,54 +105,50 @@ def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
             assigned_count[best_c][product] += g["cnt"]
             assigned_amount[best_c][product] += g["amt"]
 
-    # ---- مرحلة التحسين: swap بين أكتر محصلين بعيدين عن المستهدف ----
-    def total_deviation():
-        dev = 0
-        for c in remaining:
-            for p in products:
-                t = targets[c].get(p, {"count": 0, "amount": 0})
-                dev += abs(t["count"] - assigned_count[c][p]) / (t["count"] or 1)
-                dev += abs(t["amount"] - assigned_amount[c][p]) / (t["amount"] or 1)
-        return dev
+    # ---- مرحلة التحسين: نمر على كل مجموعة ونشوف هل نقلها لمحصل تاني بيقلل الانحراف الكلي ----
+    for _ in range(max_passes):
+        improved_any = False
+        for key, owner in list(group_owner.items()):
+            product, cid = key
+            info = group_info[key]
 
-    for _ in range(refine_passes):
-        current_dev = total_deviation()
-        improved = False
-        # اختار المحصلين الأبعد عن مستهدفهم (فوق وتحت)
-        worst_over = max(remaining, key=lambda c: sum(
-            assigned_count[c][p] - targets[c].get(p, {"count": 0})["count"] for p in products))
-        worst_under = min(remaining, key=lambda c: sum(
-            assigned_count[c][p] - targets[c].get(p, {"count": 0})["count"] for p in products))
-        if worst_over == worst_under:
+            current_score = dev(owner, product)
+            best_c, best_gain = owner, 0.0
+
+            for c in remaining:
+                if c == owner:
+                    continue
+                before = dev(owner, product) + dev(c, product)
+
+                assigned_count[owner][product] -= info["cnt"]
+                assigned_amount[owner][product] -= info["amt"]
+                assigned_count[c][product] += info["cnt"]
+                assigned_amount[c][product] += info["amt"]
+
+                after = dev(owner, product) + dev(c, product)
+                gain = before - after
+
+                # رجّع الوضع الأصلي عشان نقيس المحصل اللي بعده
+                assigned_count[owner][product] += info["cnt"]
+                assigned_amount[owner][product] += info["amt"]
+                assigned_count[c][product] -= info["cnt"]
+                assigned_amount[c][product] -= info["amt"]
+
+                if gain > best_gain + 1e-9:
+                    best_gain, best_c = gain, c
+
+            if best_c != owner:
+                assigned_count[owner][product] -= info["cnt"]
+                assigned_amount[owner][product] -= info["amt"]
+                assigned_count[best_c][product] += info["cnt"]
+                assigned_amount[best_c][product] += info["amt"]
+                group_owner[key] = best_c
+                improved_any = True
+
+        if not improved_any:
             break
 
-        for product in products:
-            candidates = [k for k, v in group_owner.items() if v == worst_over and k[0] == product]
-            if not candidates:
-                continue
-            # جرب نقل أصغر ID-group من الأكثر عن هدفه للأقل
-            move_key = min(candidates, key=lambda k: group_info[k]["amt"])
-            info = group_info[move_key]
-
-            assigned_count[worst_over][product] -= info["cnt"]
-            assigned_amount[worst_over][product] -= info["amt"]
-            assigned_count[worst_under][product] += info["cnt"]
-            assigned_amount[worst_under][product] += info["amt"]
-
-            if total_deviation() < current_dev:
-                group_owner[move_key] = worst_under
-                improved = True
-                break
-            else:  # رجّع زي ما كان
-                assigned_count[worst_over][product] += info["cnt"]
-                assigned_amount[worst_over][product] -= info["cnt"] * 0  # no-op safeguard
-                assigned_amount[worst_over][product] += info["amt"]
-                assigned_count[worst_under][product] -= info["cnt"]
-                assigned_amount[worst_under][product] -= info["amt"]
-        if not improved:
-            break
-
-    # تطبيق التخصيص النهائي على الداتافريم
+    # ---- تطبيق التخصيص النهائي على الداتافريم ----
     for (product, cid), c in group_owner.items():
         mask = (df[id_col] == cid) & (df[product_col] == product) & (df[sp_col] == leaving_sp)
         df.loc[mask, sp_col] = c
