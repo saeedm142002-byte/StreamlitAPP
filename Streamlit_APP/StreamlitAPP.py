@@ -76,6 +76,10 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
 
 
 def assign_from_neglect(neglect_df, sheet2, new_sp_name):
+    """
+    ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
+    (عدد حسابات + مبلغ تقريبي لكل نوع منتج) وينقلهم للمحصل الجديد.
+    """
     assigned_rows = []
     shortage_report = []
     neglect_remaining = neglect_df.copy()
@@ -117,7 +121,6 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name):
     )
 
     return new_collector_df, assignment_summary, shortage_report
-
 
 def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                                   id_col="ID", acc_col="Account Number",
@@ -2622,22 +2625,26 @@ elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
     distribution_type = st.radio("نوع التوزيع", ["محصل هيمشي", "محصل جديد جاي"], horizontal=True)
 
+    # ---------------- سيناريو 1: محصل هيمشي ----------------
     if distribution_type == "محصل هيمشي":
         uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx"], key="portfolio_file")
         if uploaded_file:
             df = pd.read_excel(uploaded_file)
-            df = df.dropna(subset=["Account Number"])
+            df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
             overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
                           .agg(عدد_الحسابات=("Account Number", "count"),
                                إجمالي_المبلغ=("Amount", "sum"))
                           .reset_index())
             st.dataframe(overview, use_container_width=True)
+
             leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
             leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
             remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
+
             st.markdown("### ارفع ملف المستهدفات")
             st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
             targets_file = st.file_uploader("ارفع ملف المستهدف لكل محصل", type=["xlsx"], key="targets_file")
+
             if targets_file and st.button("نفذ التوزيع"):
                 targets_raw = pd.read_excel(targets_file)
                 targets_raw.columns = [c.strip() for c in targets_raw.columns]
@@ -2645,6 +2652,7 @@ elif page == "التوزيع":
                 if missing_cols:
                     st.error(f"الأعمدة دي ناقصة في ملف المستهدفات: {missing_cols}")
                     st.stop()
+
                 targets = {}
                 for _, r in targets_raw.iterrows():
                     sp = str(r["المحصل"]).strip()
@@ -2653,32 +2661,51 @@ elif page == "التوزيع":
                         "count": r["عدد الحسابات"] if pd.notna(r["عدد الحسابات"]) else 0,
                         "amount": r["المبلغ"] if pd.notna(r["المبلغ"]) else 0.0,
                     }
+
                 missing_sps = set(remaining_sps) - set(targets.keys())
                 if missing_sps:
                     st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
                     for sp in missing_sps:
                         targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
+
                 new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
+
                 st.success("تم التوزيع")
                 st.markdown("### النتيجة: كل محصل معاه كام")
                 st.dataframe(summary, use_container_width=True)
+
                 totals = (summary.groupby("Salesperson")[["عدد_الحسابات", "إجمالي_المبلغ"]]
                           .sum().reset_index())
                 st.dataframe(totals, use_container_width=True)
+
                 output = io.BytesIO()
                 new_df.to_excel(output, index=False)
                 st.download_button("تحميل الملف بعد التوزيع", output.getvalue(),
                                     file_name="portfolio_after_distribution.xlsx")
 
-    else:  # محصل جديد جاي
+    # ---------------- سيناريو 2: محصل جديد جاي ----------------
+    else:
+        st.markdown("### ارفع ملف المحفظة")
+        st.caption("للاطلاع على أرصدة المحصلين الحاليين، وعشان نجيب منه أسماء Sales Team")
+        portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
+
+        portfolio_df = None
+        if portfolio_file_new:
+            portfolio_df = pd.read_excel(portfolio_file_new)
+            portfolio_df = portfolio_df.dropna(subset=["Account Number"])
+            if "Sales Team" not in portfolio_df.columns:
+                st.error("عمود 'Sales Team' مش موجود في ملف المحفظة")
+                st.stop()
+
         st.markdown("### بيانات المحصل الجديد")
         new_sp_name = st.text_input("اسم المحصل الجديد").strip()
-        sales_teams = ["Team 1", "Team 2", "Team 3"]  # عدّل حسب أسماء الفرق الفعلية
-        new_sp_team = st.selectbox("Sales Team", sales_teams)
 
-        st.markdown("### ارفع ملف المحفظة")
-        st.caption("للاطلاع على أرصدة المحصلين الحاليين فقط (مش هيتم السحب منه)")
-        portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
+        if portfolio_df is not None:
+            sales_teams = sorted(portfolio_df["Sales Team"].dropna().unique())
+            new_sp_team = st.selectbox("Sales Team", sales_teams)
+        else:
+            st.info("ارفع ملف المحفظة الأول عشان تقدر تختار Sales Team")
+            new_sp_team = None
 
         st.markdown("### ارفع ملف الاهمال")
         st.caption("منه هيتم سحب الحسابات اللي هتتدي للمحصل الجديد")
@@ -2689,9 +2716,8 @@ elif page == "التوزيع":
         st.caption("Sheet2: المحصل (الحالي) | متبقي المديونية | عدد الحسابات | نوع المنتج")
         new_targets_file = st.file_uploader("ملف المستهدفات", type=["xlsx"], key="new_targets_file")
 
-        if portfolio_file_new and neglect_file and new_targets_file and new_sp_name and st.button("نفذ توزيع المحصل الجديد"):
-            portfolio_df = pd.read_excel(portfolio_file_new)
-            portfolio_df = portfolio_df.dropna(subset=["Account Number"])
+        if (portfolio_df is not None and neglect_file and new_targets_file
+                and new_sp_name and new_sp_team and st.button("نفذ توزيع المحصل الجديد")):
 
             neglect_df = pd.read_excel(neglect_file)
             neglect_df = neglect_df.dropna(subset=["Account Number"])
