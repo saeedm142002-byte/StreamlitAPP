@@ -58,100 +58,45 @@ def predict_text(text):
 
 def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                                   id_col="ID", acc_col="Account Number",
-                                  amt_col="Amount", product_col="نوع المتنج-التمويل",
-                                  max_passes=15):
+                                  amt_col="Amount", product_col="نوع المتنج-التمويل"):
+    """
+    targets: dict {salesperson: {product: {"count": x, "amount": y}}}
+    يوزع كل ID (بكل حساباته) على المحصل الأقرب لهدفه، منتج بمنتج.
+    يرجع df معدّل + جدول ملخص.
+    """
     df = df.copy()
     df[sp_col] = df[sp_col].astype(object)
     leaving_df = df[df[sp_col] == leaving_sp]
     remaining = list(targets.keys())
-    products = sorted(set(leaving_df[product_col]))
 
-    # normalizers ثابتة (إجمالي المستهدف لكل منتج) عشان نقارن عدد ومبلغ بمقياس واحد
-    norm_count = {p: sum(targets[c].get(p, {"count": 0})["count"] for c in remaining) or 1
-                  for p in products}
-    norm_amount = {p: sum(targets[c].get(p, {"amount": 0})["amount"] for c in remaining) or 1
-                   for p in products}
+    assigned_count = {c: {p: 0 for p in set(leaving_df[product_col])} for c in remaining}
+    assigned_amount = {c: {p: 0.0 for p in set(leaving_df[product_col])} for c in remaining}
 
-    assigned_count = {c: {p: 0 for p in products} for c in remaining}
-    assigned_amount = {c: {p: 0.0 for p in products} for c in remaining}
-    group_owner, group_info = {}, {}
-
-    def dev(c, p):
-        t = targets[c].get(p, {"count": 0, "amount": 0})
-        return (abs(t["count"] - assigned_count[c][p]) / norm_count[p]
-                + abs(t["amount"] - assigned_amount[c][p]) / norm_amount[p])
-
-    # ---- التوزيع الأولي (greedy) ----
     for product, sub in leaving_df.groupby(product_col):
         groups = (sub.groupby(id_col)
                      .agg(cnt=(acc_col, "count"), amt=(amt_col, "sum"))
-                     .reset_index())
-        groups = groups.sort_values("amt", ascending=False)
+                     .reset_index()
+                     .sort_values("amt", ascending=False))
 
         for _, g in groups.iterrows():
-            best_c, best_after = None, None
+            best_c, best_score = None, float("-inf")
             for c in remaining:
-                assigned_count[c][product] += g["cnt"]
-                assigned_amount[c][product] += g["amt"]
-                score = dev(c, product)
-                assigned_count[c][product] -= g["cnt"]
-                assigned_amount[c][product] -= g["amt"]
-                if best_after is None or score < best_after:
-                    best_after, best_c = score, c
+                t = targets[c].get(product, {"count": 0, "amount": 0})
+                tc, ta = t["count"], t["amount"]
+                if tc == 0 and ta == 0:
+                    continue
+                dc = (tc - assigned_count[c][product]) / tc if tc else 0
+                da = (ta - assigned_amount[c][product]) / ta if ta else 0
+                score = dc + da
+                if score > best_score:
+                    best_score, best_c = score, c
+            if best_c is None:  # محدش حاطط هدف لهذا المنتج -> يتوزع بالتساوي
+                best_c = min(remaining, key=lambda c: assigned_count[c][product])
 
-            key = (product, g[id_col])
-            group_owner[key] = best_c
-            group_info[key] = {"cnt": g["cnt"], "amt": g["amt"]}
+            mask = (df[id_col] == g[id_col]) & (df[product_col] == product) & (df[sp_col] == leaving_sp)
+            df.loc[mask, sp_col] = best_c
             assigned_count[best_c][product] += g["cnt"]
             assigned_amount[best_c][product] += g["amt"]
-
-    # ---- مرحلة التحسين: نمر على كل مجموعة ونشوف هل نقلها لمحصل تاني بيقلل الانحراف الكلي ----
-    for _ in range(max_passes):
-        improved_any = False
-        for key, owner in list(group_owner.items()):
-            product, cid = key
-            info = group_info[key]
-
-            current_score = dev(owner, product)
-            best_c, best_gain = owner, 0.0
-
-            for c in remaining:
-                if c == owner:
-                    continue
-                before = dev(owner, product) + dev(c, product)
-
-                assigned_count[owner][product] -= info["cnt"]
-                assigned_amount[owner][product] -= info["amt"]
-                assigned_count[c][product] += info["cnt"]
-                assigned_amount[c][product] += info["amt"]
-
-                after = dev(owner, product) + dev(c, product)
-                gain = before - after
-
-                # رجّع الوضع الأصلي عشان نقيس المحصل اللي بعده
-                assigned_count[owner][product] += info["cnt"]
-                assigned_amount[owner][product] += info["amt"]
-                assigned_count[c][product] -= info["cnt"]
-                assigned_amount[c][product] -= info["amt"]
-
-                if gain > best_gain + 1e-9:
-                    best_gain, best_c = gain, c
-
-            if best_c != owner:
-                assigned_count[owner][product] -= info["cnt"]
-                assigned_amount[owner][product] -= info["amt"]
-                assigned_count[best_c][product] += info["cnt"]
-                assigned_amount[best_c][product] += info["amt"]
-                group_owner[key] = best_c
-                improved_any = True
-
-        if not improved_any:
-            break
-
-    # ---- تطبيق التخصيص النهائي على الداتافريم ----
-    for (product, cid), c in group_owner.items():
-        mask = (df[id_col] == cid) & (df[product_col] == product) & (df[sp_col] == leaving_sp)
-        df.loc[mask, sp_col] = c
 
     summary = (df[df[sp_col].isin(remaining)]
                .groupby([sp_col, product_col])
@@ -2616,7 +2561,7 @@ elif page == "التوزيع":
 
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
-        df = df.dropna(subset=["Account Number"])
+        df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
 
         overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
                       .agg(عدد_الحسابات=("Account Number", "count"),
@@ -2626,9 +2571,10 @@ elif page == "التوزيع":
 
         leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
         leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
+        remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
 
         st.markdown("### ارفع ملف المستهدفات")
-        st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ — هيتوزع بس على المحصلين المذكورين هنا")
+        st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
         targets_file = st.file_uploader("ارفع ملف المستهدف لكل محصل", type=["xlsx"], key="targets_file")
 
         if targets_file and st.button("نفذ التوزيع"):
@@ -2640,7 +2586,7 @@ elif page == "التوزيع":
                 st.error(f"الأعمدة دي ناقصة في ملف المستهدفات: {missing_cols}")
                 st.stop()
 
-            # يبني قائمة المحصلين من الفايل بس - مفيش حد بيتضاف من برا
+            # تحويل الملف الطويل لديكشنري {محصل: {منتج: {count, amount}}}
             targets = {}
             for _, r in targets_raw.iterrows():
                 sp = str(r["المحصل"]).strip()
@@ -2650,8 +2596,11 @@ elif page == "التوزيع":
                     "amount": r["المبلغ"] if pd.notna(r["المبلغ"]) else 0.0,
                 }
 
-            selected_sps = list(targets.keys())
-            st.info(f"التوزيع هيتم بس على: {', '.join(selected_sps)}")
+            missing_sps = set(remaining_sps) - set(targets.keys())
+            if missing_sps:
+                st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
+                for sp in missing_sps:
+                    targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
 
             new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
 
