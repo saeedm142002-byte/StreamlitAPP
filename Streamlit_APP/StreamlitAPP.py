@@ -255,10 +255,32 @@ pages = [
 ]
 
 with st.sidebar:
+
+    # تلوين زرار الصفحة النشطة بالأزرق
+    st.markdown("""
+    <style>
+        section[data-testid="stSidebar"] button[kind="primary"] {
+            background-color: #1565C0 !important;
+            border-color: #1565C0 !important;
+            color: #ffffff !important;
+        }
+        section[data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #0D47A1 !important;
+            border-color: #0D47A1 !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown("### ❤️🦅 لوحة التحكم")
 
     for page_name, icon in pages:
-        if st.button(f"{icon} {page_name}", use_container_width=True):
+        is_active = (st.session_state.page == page_name)
+        if st.button(
+            f"{icon} {page_name}",
+            use_container_width=True,
+            key=f"nav_{page_name}",
+            type="primary" if is_active else "secondary"
+        ):
             st.session_state.page = page_name
             st.rerun()
 
@@ -268,7 +290,13 @@ with st.sidebar:
         st.markdown("### خيارات الإهمال")
 
         for sub in ["اهمال", "متابعة اهمال"]:
-            if st.button(sub, use_container_width=True):
+            is_active_sub = (st.session_state.sub_page == sub)
+            if st.button(
+                sub,
+                use_container_width=True,
+                key=f"subnav_{sub}",
+                type="primary" if is_active_sub else "secondary"
+            ):
                 st.session_state.sub_page = sub
                 st.rerun()
 
