@@ -55,6 +55,56 @@ def predict_text(text):
 
     return pred, round(confidence, 2)
 
+
+def read_any(uploaded_file):
+    """يقرأ Excel أو CSV حسب امتداد الملف."""
+    if uploaded_file.name.lower().endswith(".csv"):
+        return pd.read_csv(uploaded_file)
+    return pd.read_excel(uploaded_file)
+ 
+ 
+def match_payments_with_activity(payments_df: pd.DataFrame, activity_df: pd.DataFrame) -> pd.DataFrame:
+    required_payments_cols = {"Customer Account Number", "Collected By"}
+    required_activity_cols = {"Customer Account Number", "Collector"}
+ 
+    missing_p = required_payments_cols - set(payments_df.columns)
+    missing_a = required_activity_cols - set(activity_df.columns)
+    if missing_p:
+        raise ValueError(f"أعمدة ناقصة في ملف السدادات: {missing_p}")
+    if missing_a:
+        raise ValueError(f"أعمدة ناقصة في ملف النشاط الشهري: {missing_a}")
+ 
+    # تنضيف بسيط للمسافات وتوحيد النصوص عشان المطابقة تظبط
+    payments_df = payments_df.copy()
+    activity_df = activity_df.copy()
+ 
+    payments_df["Customer Account Number"] = payments_df["Customer Account Number"].astype(str).str.strip()
+    payments_df["Collected By"] = payments_df["Collected By"].astype(str).str.strip()
+ 
+    activity_df["Customer Account Number"] = activity_df["Customer Account Number"].astype(str).str.strip()
+    activity_df["Collector"] = activity_df["Collector"].astype(str).str.strip()
+ 
+    # حساب عدد مرات التواصل لكل (حساب + محصل) في النشاط الشهري
+    contact_counts = (
+        activity_df
+        .groupby(["Customer Account Number", "Collector"])
+        .size()
+        .reset_index(name="عدد مرات التواصل")
+    )
+ 
+    # ربط ملف السدادات بعدد مرات التواصل بنفس المحصل ونفس الحساب
+    result = payments_df.merge(
+        contact_counts,
+        left_on=["Customer Account Number", "Collected By"],
+        right_on=["Customer Account Number", "Collector"],
+        how="left",
+    )
+ 
+    result["عدد مرات التواصل"] = result["عدد مرات التواصل"].fillna(0).astype(int)
+    result = result.drop(columns=["Collector"])  # عمود مكرر بعد الـ merge
+ 
+    return result
+
 def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amount"):
     """يختار need_count حساب من pool_df بحيث يكون مجموع المبلغ أقرب ما يمكن لـ need_amount"""
     if need_count <= 0 or pool_df.empty:
@@ -200,7 +250,7 @@ pages = [
     ("النشاط", "⚡"),
     ("اخطاء الحالات", "❌"),
     ("التدوير", "🔄") , 
-    ("التوزيع", "⚖️👥")
+    ("السداد", "⚖️👥")
     
 ]
 
@@ -3472,5 +3522,56 @@ elif page == "التدوير":
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
 
-elif page == "الت":
-    st.subheader("الت")
+
+elif page == "السداد":
+    st.subheader("السداد")
+    st.write(
+        "ارفع ملف السدادات وملف النشاط الشهري، وهنجيبلك لكل عملية سداد "
+        "عدد مرات تواصل نفس المحصل مع نفس الحساب."
+    )
+ 
+    col1, col2 = st.columns(2)
+    with col1:
+        payments_file = st.file_uploader(
+            "📄 ملف السدادات (Customer Account Number, Collected By)",
+            type=["xlsx", "xls", "csv"],
+            key="payments_file",
+        )
+    with col2:
+        activity_file = st.file_uploader(
+            "📄 ملف النشاط الشهري (Customer Account Number, Collector)",
+            type=["xlsx", "xls", "csv"],
+            key="activity_file",
+        )
+ 
+    if payments_file and activity_file:
+        if st.button("🔍 مطابقة وحساب عدد مرات التواصل"):
+            try:
+                payments_df = read_any(payments_file)
+                activity_df = read_any(activity_file)
+ 
+                result_df = match_payments_with_activity(payments_df, activity_df)
+ 
+                st.success(f"تم بنجاح ✅ عدد الصفوف: {len(result_df)}")
+                st.dataframe(result_df, use_container_width=True)
+ 
+                # تحميل النتيجة كـ Excel
+                from io import BytesIO
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    result_df.to_excel(writer, index=False, sheet_name="النتيجة")
+                buffer.seek(0)
+ 
+                st.download_button(
+                    label="⬇️ تحميل النتيجة Excel",
+                    data=buffer,
+                    file_name="سدادات_مع_عدد_التواصل.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"حصل خطأ غير متوقع: {e}")
+    else:
+        st.info("لازم ترفع الملفين الاتنين عشان تقدر تعمل المطابقة.")
+ 
