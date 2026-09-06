@@ -671,16 +671,14 @@ if page == "الوعود القائمة و المكسورة":
         # تنظيف: استبعاد الصفوف اللي مفيهاش موظف مسجل
         base = base[base["Salesperson"].notna()]
 
-        # --- فلتر Sales Team (يدوي) ---
-        if selected_teams:
-            base = base[base["Sales Team"].isin(selected_teams)]
+        # --- فلتر Sales Team (يدوي - ياخد بالظبط اللي متحدد) ---
+        base = base[base["Sales Team"].isin(selected_teams)]
 
-        # --- فلتر Salesperson (يدوي) ---
-        if selected_salespersons:
-            base = base[base["Salesperson"].isin(selected_salespersons)]
+        # --- فلتر Salesperson (يدوي - ياخد بالظبط اللي متحدد) ---
+        base = base[base["Salesperson"].isin(selected_salespersons)]
 
-        # --- فلتر حالة المعالجة - التمويل (يدوي، NPL&Dpd60 فقط) ---
-        if portfolio_type_ == "NPL&Dpd60" and selected_status:
+        # --- فلتر حالة المعالجة - التمويل (يدوي، NPL&Dpd60 فقط - ياخد بالظبط اللي متحدد) ---
+        if portfolio_type_ == "NPL&Dpd60":
             if "(فارغ / غير محدد)" in selected_status:
                 mask = base["حالة المعالجة - التمويل"].isna()
                 other_selected = [s for s in selected_status if s != "(فارغ / غير محدد)"]
@@ -743,15 +741,15 @@ if page == "الوعود القائمة و المكسورة":
             with f_col1:
                 selected_teams = st.multiselect(
                     "فلتر حسب Sales Team",
-                    options=all_sales_teams, default=[],
-                    help="سيبها فاضية لعرض كل الـ Sales Team",
+                    options=all_sales_teams, default=all_sales_teams,
+                    help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
                     key="promises_team_filter"
                 )
             with f_col2:
                 selected_salespersons = st.multiselect(
                     "فلتر حسب Salesperson",
-                    options=all_salespersons, default=[],
-                    help="سيبها فاضية لعرض كل الموظفين",
+                    options=all_salespersons, default=all_salespersons,
+                    help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
                     key="promises_salesperson_filter"
                 )
             selected_status = []
@@ -759,8 +757,8 @@ if page == "الوعود القائمة و المكسورة":
                 with f_col3:
                     selected_status = st.multiselect(
                         "فلتر حسب حالة المعالجة - التمويل",
-                        options=status_options, default=[],
-                        help="سيبها فاضية لعرض كل الحالات",
+                        options=status_options, default=status_options,
+                        help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
                         key="promises_status_filter"
                     )
 
