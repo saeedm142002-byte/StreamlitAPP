@@ -1381,7 +1381,7 @@ elif page == "الاهمال":
         <div class="neglect-header">
             <h1>⚠️ الاهمال</h1>
             <p>رصد الحسابات المهملة اللي محدّش تابعها لفترة، وتحليل الأداء لكل مشرف وموظف</p>
-            <span class="header-badge">تحديث لحظي عند رفع الملف</span>
+            <span class="header-badge">حدد الفلترة ثم اضغط "عمل الاهمال"</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1487,10 +1487,62 @@ elif page == "الاهمال":
             return x.strip()
 
         # ============================================================
+        # قراءة الحالات الموجودة في الملف (بدون تنفيذ الفلترة الكاملة)
+        # ============================================================
+        @st.cache_data(show_spinner="جاري قراءة الحالات...")
+        def read_sub_states(file_bytes_):
+            df_raw = pd.read_excel(BytesIO(file_bytes_))
+            df_raw = df_raw.iloc[1:].reset_index(drop=True)
+            if "Sub State" not in df_raw.columns:
+                return []
+            vals = df_raw["Sub State"].dropna().astype(str).str.strip()
+            vals = vals[vals != ""]
+            return sorted(vals.unique().tolist())
+
+        # ============================================================
+        # قراءة قيم Sales Team / Salesperson / حالة المعالجة الموجودة
+        # فعليًا في الملف - عشان تُبنى منها فلاتر الاستبعاد اليدوية
+        # ============================================================
+        @st.cache_data(show_spinner="جاري قراءة بيانات الفلاتر...")
+        def read_filter_options(file_bytes_, portfolio_type_):
+            df_raw = pd.read_excel(BytesIO(file_bytes_))
+            df_raw = df_raw.iloc[1:].reset_index(drop=True)
+
+            def unique_clean(col):
+                if col not in df_raw.columns:
+                    return []
+                s = df_raw[col].astype(str).str.strip()
+                s = s.replace(["nan", "None", ""], pd.NA)
+                return sorted(s.dropna().unique().tolist())
+
+            teams = unique_clean("Sales Team")
+            salespersons = unique_clean("Salesperson")
+
+            statuses = []
+            status_col = "حالة المعالجة - التمويل"
+            if portfolio_type_ == "NPL&Dpd60" and status_col in df_raw.columns:
+                raw_status = df_raw[status_col].astype(str).str.strip()
+                has_empty = (
+                    df_raw[status_col].isna().any()
+                    or raw_status.isin(["nan", "None", ""]).any()
+                )
+                vals = sorted(set(
+                    v for v in raw_status.tolist() if v not in ("nan", "None", "")
+                ))
+                if has_empty:
+                    vals = ["بدون حالة (فاضي)"] + vals
+                statuses = vals
+
+            return teams, salespersons, statuses
+
+        # ============================================================
         # الدالة المعالجة الأساسية - Cached
         # ============================================================
         @st.cache_data(show_spinner="جاري معالجة الملف...")
-        def process_neglect(file_bytes, portfolio_type_, days_threshold_, selected_states_):
+        def process_neglect(
+            file_bytes, portfolio_type_, days_threshold_, selected_states_,
+            excluded_teams_, excluded_salespersons_, excluded_statuses_
+        ):
 
             selected_states_norm = {normalize_text(s) for s in selected_states_}
 
@@ -1511,7 +1563,7 @@ elif page == "الاهمال":
                     "معالجة مسار NPL&Dpd60"
                 )
 
-                text_cols = ["Sales Team", "Sub State", "حالة المعالجة - التمويل"]
+                text_cols = ["Sales Team", "Salesperson", "Sub State", "حالة المعالجة - التمويل"]
                 for col in text_cols:
                     if col in df.columns:
                         df[col] = df[col].astype(str).str.strip()
@@ -1520,7 +1572,13 @@ elif page == "الاهمال":
                     df["Follow up Last Date"], errors="coerce"
                 ).dt.normalize()
 
-                df = df[df["Sales Team"] != "Sara || Op"]
+                # --- استبعاد Sales Team (يدوي) ---
+                if excluded_teams_:
+                    df = df[~df["Sales Team"].isin(excluded_teams_)]
+
+                # --- استبعاد Salesperson (يدوي) ---
+                if excluded_salespersons_ and "Salesperson" in df.columns:
+                    df = df[~df["Salesperson"].isin(excluded_salespersons_)]
 
                 df["Payment"] = (
                     df["Payment"].astype(str).str.replace(",", "", regex=False).str.strip()
@@ -1542,6 +1600,15 @@ elif page == "الاهمال":
                 df = df[df["عدد أيام الإهمال"] >= days_threshold_]
                 df = df[df["Sub State"].apply(normalize_text).isin(selected_states_norm)]
 
+                # --- استبعاد حالة المعالجة - التمويل (يدوي) ---
+                status_col = "حالة المعالجة - التمويل"
+                if excluded_statuses_ and status_col in df.columns:
+                    def _norm_status(v):
+                        if pd.isna(v) or str(v).strip().lower() in ("nan", ""):
+                            return "بدون حالة (فاضي)"
+                        return str(v).strip()
+                    df = df[~df[status_col].apply(_norm_status).isin(excluded_statuses_)]
+
                 supervisor_col_ = "ملاحظات-التمويل"
                 require_columns(df, [supervisor_col_], "التحقق من عمود المشرف (NPL&Dpd60)")
 
@@ -1562,24 +1629,20 @@ elif page == "الاهمال":
                     df["Follow up Last Date"], errors="coerce"
                 ).dt.normalize()
 
-                allowed_sales_teams = [
-                    "SNB II Alsarhan II Naser",
-                    "SNB II Alsarhan II Tariq"
-                ]
-                df = df[df["Sales Team"].isin(allowed_sales_teams)]
+                # --- استبعاد Sales Team (يدوي) ---
+                if excluded_teams_:
+                    df = df[~df["Sales Team"].isin(excluded_teams_)]
 
-                excluded_salespersons = [
-                    "Closed payments II Alaa SNB",
-                    "Hold Companies II SNB2",
-                    "Abdullah Alsarhan",
-                    "Archive Companies II Alaa SNB"
-                ]
+                # تنظيف: استبعاد الصفوف اللي مفيهاش موظف مسجل (مش فلتر يدوي، تنضيف بيانات بس)
                 df = df[
-                    (~df["Salesperson"].isin(excluded_salespersons))
-                    & (df["Salesperson"].notna())
+                    (df["Salesperson"].notna())
                     & (df["Salesperson"].str.strip() != "")
                     & (df["Salesperson"].str.lower() != "nan")
                 ]
+
+                # --- استبعاد Salesperson (يدوي) ---
+                if excluded_salespersons_:
+                    df = df[~df["Salesperson"].isin(excluded_salespersons_)]
 
                 df["Payment"] = (
                     df["Payment"].astype(str).str.replace(",", "", regex=False).str.strip()
@@ -1608,19 +1671,6 @@ elif page == "الاهمال":
 
             return df.reset_index(drop=True), supervisor_col_
 
-        # ============================================================
-        # قراءة الحالات الموجودة في الملف (بدون تنفيذ الفلترة الكاملة)
-        # ============================================================
-        @st.cache_data(show_spinner="جاري قراءة الحالات...")
-        def read_sub_states(file_bytes_):
-            df_raw = pd.read_excel(BytesIO(file_bytes_))
-            df_raw = df_raw.iloc[1:].reset_index(drop=True)
-            if "Sub State" not in df_raw.columns:
-                return []
-            vals = df_raw["Sub State"].dropna().astype(str).str.strip()
-            vals = vals[vals != ""]
-            return sorted(vals.unique().tolist())
-
         if uploaded_file:
           try:
             file_bytes = uploaded_file.getvalue()
@@ -1632,10 +1682,14 @@ elif page == "الاهمال":
             )
 
             all_states = read_sub_states(file_bytes)
+            teams_options, salespersons_options, statuses_options = read_filter_options(
+                file_bytes, neglect_portfolio_type
+            )
 
             pool_key = f"neglect_pools_{neglect_portfolio_type}"
             sig_key = f"{pool_key}_sig"
-            run_key = f"neglect_run_{neglect_portfolio_type}"
+            result_key = f"neglect_result_{neglect_portfolio_type}"
+            result_sig_key = f"neglect_result_sig_{neglect_portfolio_type}"
             file_signature = (uploaded_file.name, len(file_bytes), neglect_portfolio_type)
 
             # تبني البوكسين أول مرة فقط، أو لو الملف/المسار اتغير
@@ -1661,9 +1715,45 @@ elif page == "الاهمال":
                     "neglect": sorted(neglect_states)
                 }
                 st.session_state[sig_key] = file_signature
-                st.session_state[run_key] = False
 
             pools = st.session_state[pool_key]
+
+            # ============================================================
+            # 🎛️ فلاتر الاستبعاد اليدوية (قبل عمل الاهمال)
+            # ============================================================
+            st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر استبعاد قبل التشغيل</div>', unsafe_allow_html=True)
+
+            show_status_filter = (neglect_portfolio_type == "NPL&Dpd60" and statuses_options)
+            if show_status_filter:
+                ef_col1, ef_col2, ef_col3 = st.columns(3)
+            else:
+                ef_col1, ef_col2 = st.columns(2)
+
+            with ef_col1:
+                excluded_teams = st.multiselect(
+                    "استبعاد Sales Team",
+                    options=teams_options, default=[],
+                    help="اختار اللي عايز تشيله من النتيجة - سيبها فاضية عشان محدش يتشال",
+                    key=f"neglect_excluded_teams_{neglect_portfolio_type}"
+                )
+            with ef_col2:
+                excluded_salespersons = st.multiselect(
+                    "استبعاد Salesperson",
+                    options=salespersons_options, default=[],
+                    help="اختار اللي عايز تشيله من النتيجة - سيبها فاضية عشان محدش يتشال",
+                    key=f"neglect_excluded_salespersons_{neglect_portfolio_type}"
+                )
+            excluded_statuses = []
+            if show_status_filter:
+                with ef_col3:
+                    excluded_statuses = st.multiselect(
+                        "استبعاد حالة المعالجة - التمويل",
+                        options=statuses_options, default=[],
+                        help="اختار اللي عايز تشيله من النتيجة - سيبها فاضية عشان محدش يتشال",
+                        key=f"neglect_excluded_statuses_{neglect_portfolio_type}"
+                    )
+
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="section-title">🗂️ اختيار حالات الإهمال</div>', unsafe_allow_html=True)
 
@@ -1690,7 +1780,6 @@ elif page == "الاهمال":
                     pools["not_neglect"].remove(pick_other)
                     pools["neglect"].append(pick_other)
                     pools["neglect"].sort()
-                    st.session_state[run_key] = False
                     st.rerun()
 
                 st.dataframe(
@@ -1720,7 +1809,6 @@ elif page == "الاهمال":
                     pools["neglect"].remove(pick_neglect)
                     pools["not_neglect"].append(pick_neglect)
                     pools["not_neglect"].sort()
-                    st.session_state[run_key] = False
                     st.rerun()
 
                 st.dataframe(
@@ -1730,63 +1818,47 @@ elif page == "الاهمال":
                 st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
+
             run_clicked = st.button(
                 "🚀 عمل الاهمال",
                 key=f"run_btn_{neglect_portfolio_type}",
                 type="primary",
                 disabled=not pools["neglect"]
             )
+
+            current_signature = (
+                uploaded_file.name, uploaded_file.size, neglect_portfolio_type,
+                neglect_days_threshold, tuple(sorted(pools["neglect"])),
+                tuple(sorted(excluded_teams)), tuple(sorted(excluded_salespersons)),
+                tuple(sorted(excluded_statuses))
+            )
+
             if run_clicked:
-                st.session_state[run_key] = True
+                df_result, supervisor_col_result = process_neglect(
+                    file_bytes, neglect_portfolio_type, neglect_days_threshold,
+                    tuple(sorted(pools["neglect"])),
+                    tuple(sorted(excluded_teams)), tuple(sorted(excluded_salespersons)),
+                    tuple(sorted(excluded_statuses))
+                )
+                st.session_state[result_key] = (df_result, supervisor_col_result)
+                st.session_state[result_sig_key] = current_signature
+
+            has_result = result_key in st.session_state
+            signature_matches = st.session_state.get(result_sig_key) == current_signature
 
             # ============================================================
             # التقرير + الداشبورد - يظهروا بس بعد "عمل الاهمال"
             # ============================================================
-            if st.session_state.get(run_key):
-
-                selected_states = tuple(sorted(pools["neglect"]))
-                df, supervisor_col = process_neglect(
-                    file_bytes, neglect_portfolio_type, neglect_days_threshold, selected_states
+            if not has_result:
+                st.markdown(
+                    '<div class="empty-state">🎯 حدد حالات الإهمال والفلاتر اللي عايزها فوق، وبعدين دوس زرار «عمل الاهمال» عشان يبدأ التحليل</div>',
+                    unsafe_allow_html=True
                 )
+            else:
+                if not signature_matches:
+                    st.info("⚠️ الفلاتر أو الحالات اتغيرت - دوس زرار «عمل الاهمال» تاني عشان النتائج تتحدث")
 
-                # ============================================================
-                # فلتر "حالة المعالجة - التمويل" (اختياري من المستخدم)
-                # ============================================================
-                status_col = "حالة المعالجة - التمويل"
-
-                if neglect_portfolio_type == "NPL&Dpd60" and status_col in df.columns:
-
-                    raw_statuses = df[status_col].unique().tolist()
-
-                    status_options = []
-                    for v in raw_statuses:
-                        if pd.isna(v) or str(v).strip().lower() in ("nan", ""):
-                            status_options.append("بدون حالة (فاضي)")
-                        else:
-                            status_options.append(str(v).strip())
-                    status_options = sorted(set(status_options))
-
-                    st.markdown('<div class="filter-panel"><div class="filter-panel-title">🔎 فلترة إضافية</div>', unsafe_allow_html=True)
-                    selected_statuses = st.multiselect(
-                        "فلترة حسب حالة المعالجة - التمويل",
-                        options=status_options,
-                        default=[],
-                        key=f"neglect_processing_status_filter_{neglect_portfolio_type}",
-                        help="سيب الاختيار فاضي عشان تعرض كل الحالات"
-                    )
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                    if selected_statuses:
-
-                        def status_mask(series):
-                            normalized = series.apply(
-                                lambda v: "بدون حالة (فاضي)"
-                                if (pd.isna(v) or str(v).strip().lower() in ("nan", ""))
-                                else str(v).strip()
-                            )
-                            return normalized.isin(selected_statuses)
-
-                        df = df[status_mask(df[status_col])].reset_index(drop=True)
+                df, supervisor_col = st.session_state[result_key]
 
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
