@@ -517,6 +517,12 @@ if page == "الوعود القائمة و المكسورة":
             transform: translateY(-1px);
         }
 
+        /* ===== زرار عمل الوعود ===== */
+        div[data-testid="stButton"] button {
+            border-radius: 12px !important;
+            font-weight: 800 !important;
+        }
+
         /* ===== حالة فارغة ===== */
         .empty-state {
             text-align: center;
@@ -554,7 +560,7 @@ if page == "الوعود القائمة و المكسورة":
     <div class="promises-header">
         <h1>🟢🔴 الوعود القائمة / الوعود المكسورة</h1>
         <p>تتبع الوعود بالسداد، معرفة المكسور منها والقائم، وتحليل الأداء لكل مشرف وموظف</p>
-        <span class="header-badge">تحديث لحظي عند رفع الملف</span>
+        <span class="header-badge">حدد الفلترة ثم اضغط "عمل الوعود"</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -609,10 +615,10 @@ if page == "الوعود القائمة و المكسورة":
     )
 
     # ============================================================
-    # الدالة المعالجة الأساسية - Cached
+    # 1) قراءة وتنظيف الملف فقط (بدون فلترة الوعود) - Cached
     # ============================================================
-    @st.cache_data(show_spinner="جاري معالجة الملف...")
-    def process_portfolio(file_bytes, portfolio_type_):
+    @st.cache_data(show_spinner="جاري قراءة الملف...")
+    def load_raw(file_bytes, portfolio_type_):
         try:
             df = pd.read_excel(BytesIO(file_bytes))
         except Exception as e:
@@ -645,27 +651,44 @@ if page == "الوعود القائمة و المكسورة":
         df["Follow up Due Date"] = pd.to_datetime(df["Follow up Due Date"], errors="coerce").dt.normalize()
         df["Follow up Last Date"] = pd.to_datetime(df["Follow up Last Date"], errors="coerce").dt.normalize()
 
+        return df
+
+    # ============================================================
+    # 2) تطبيق فلاتر الوعود (بعد ما المستخدم يحدد اختياراته) - Cached
+    # ============================================================
+    @st.cache_data(show_spinner="جاري عمل الوعود...")
+    def process_portfolio(df, portfolio_type_, selected_teams, selected_salespersons, selected_status):
         today = pd.Timestamp.today().normalize()
 
+        base = df.copy()
+
+        # فلترة الوعود الأساسية حسب المسار
         if portfolio_type_ == "NPL&Dpd60":
-            base = df.copy()
-            base = base[base["Sales Team"] != "Sara || Op"]
             base = base[base["Final State"].str.contains("واعد بالسداد", na=False)]
         else:
-            base = df.copy()
-            allowed_sales_teams = ["SNB II Alsarhan II Naser", "SNB II Alsarhan II Tariq"]
-            base = base[base["Sales Team"].isin(allowed_sales_teams)]
-            excluded_salespersons = [
-                "Closed payments II Alaa SNB", "Hold Companies II SNB2",
-                "Abdullah Alsarhan", "Archive Companies II Alaa SNB"
-            ]
-            base = base[
-                (~base["Salesperson"].isin(excluded_salespersons))
-                & (base["Salesperson"].notna())
-                & (base["Salesperson"].str.strip() != "")
-                & (base["Salesperson"].str.lower() != "nan")
-            ]
             base = base[base["Sub State"].str.contains("واعد بالسداد", na=False)]
+
+        # تنظيف: استبعاد الصفوف اللي مفيهاش موظف مسجل
+        base = base[base["Salesperson"].notna()]
+
+        # --- فلتر Sales Team (يدوي) ---
+        if selected_teams:
+            base = base[base["Sales Team"].isin(selected_teams)]
+
+        # --- فلتر Salesperson (يدوي) ---
+        if selected_salespersons:
+            base = base[base["Salesperson"].isin(selected_salespersons)]
+
+        # --- فلتر حالة المعالجة - التمويل (يدوي، NPL&Dpd60 فقط) ---
+        if portfolio_type_ == "NPL&Dpd60" and selected_status:
+            if "(فارغ / غير محدد)" in selected_status:
+                mask = base["حالة المعالجة - التمويل"].isna()
+                other_selected = [s for s in selected_status if s != "(فارغ / غير محدد)"]
+                if other_selected:
+                    mask = mask | base["حالة المعالجة - التمويل"].isin(other_selected)
+                base = base[mask]
+            else:
+                base = base[base["حالة المعالجة - التمويل"].isin(selected_status)]
 
         current = base.copy()
         current = current[current["Follow up Due Date"] == today]
@@ -691,356 +714,401 @@ if page == "الوعود القائمة و المكسورة":
     if portfolio_file:
         try:
             file_bytes = portfolio_file.getvalue()
-            current, broken = process_portfolio(file_bytes, portfolio_type)
+            df_raw = load_raw(file_bytes, portfolio_type)
+
+            # ==========================================
+            # 🎛️ لوحة الفلاتر اليدوية (قبل عمل الوعود)
+            # ==========================================
+            all_sales_teams = sorted(df_raw["Sales Team"].dropna().unique().tolist())
+            all_salespersons = sorted(df_raw["Salesperson"].dropna().unique().tolist())
+
+            status_options = []
+            if portfolio_type == "NPL&Dpd60":
+                require_columns(df_raw, ["حالة المعالجة - التمويل"], "فلتر حالة المعالجة - التمويل")
+                has_empty_status = df_raw["حالة المعالجة - التمويل"].isna().any()
+                status_options = sorted([
+                    str(x) for x in df_raw["حالة المعالجة - التمويل"].dropna().unique().tolist()
+                    if str(x).strip() != ""
+                ])
+                if has_empty_status:
+                    status_options = ["(فارغ / غير محدد)"] + status_options
+
+            st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ حدد الفلترة قبل عمل الوعود</div>', unsafe_allow_html=True)
 
             if portfolio_type == "NPL&Dpd60":
-                require_columns(current, ["حالة المعالجة - التمويل"], "فلتر حالة المعالجة - التمويل")
+                f_col1, f_col2, f_col3 = st.columns(3)
+            else:
+                f_col1, f_col2 = st.columns(2)
 
-                all_status = pd.concat([
-                    current["حالة المعالجة - التمويل"], broken["حالة المعالجة - التمويل"]
-                ]).dropna().unique().tolist()
-
-                has_empty = (
-                    current["حالة المعالجة - التمويل"].isna().any()
-                    or broken["حالة المعالجة - التمويل"].isna().any()
+            with f_col1:
+                selected_teams = st.multiselect(
+                    "فلتر حسب Sales Team",
+                    options=all_sales_teams, default=[],
+                    help="سيبها فاضية لعرض كل الـ Sales Team",
+                    key="promises_team_filter"
                 )
-
-                options = sorted([str(x) for x in all_status if str(x).strip() != ""])
-                if has_empty:
-                    options = ["(فارغ / غير محدد)"] + options
-
-                with st.container():
-                    st.markdown('<div class="filter-panel"><div class="filter-panel-title">🔎 فلترة إضافية</div>', unsafe_allow_html=True)
-                    selected_status = st.multiselect(
-                        "فلتر حسب حالة المعالجة - التمويل (اختياري)",
-                        options=options, default=[],
-                        help="اختار الحالة اللي عايزها. لو سبتها فاضية هيعرض كل الحالات."
-                    )
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                if selected_status:
-                    def apply_status_filter(df):
-                        if "(فارغ / غير محدد)" in selected_status:
-                            mask = df["حالة المعالجة - التمويل"].isna()
-                            other_selected = [s for s in selected_status if s != "(فارغ / غير محدد)"]
-                            if other_selected:
-                                mask = mask | df["حالة المعالجة - التمويل"].isin(other_selected)
-                            return df[mask]
-                        else:
-                            return df[df["حالة المعالجة - التمويل"].isin(selected_status)]
-
-                    current = apply_status_filter(current)
-                    broken = apply_status_filter(broken)
-
-            # ==========================================
-            # 🔢 بطاقات KPI
-            # ==========================================
-            st.markdown(f"""
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <div class="kpi-top">
-                        <div class="kpi-icon">✅</div>
-                    </div>
-                    <div class="kpi-label">الوعود القائمة</div>
-                    <div class="kpi-value">{len(current):,}</div>
-                    <div class="kpi-sub">حسابات يجب متابعتها اليوم</div>
-                </div>
-                <div class="kpi-card broken">
-                    <div class="kpi-top">
-                        <div class="kpi-icon">⚠️</div>
-                    </div>
-                    <div class="kpi-label">الوعود المكسورة</div>
-                    <div class="kpi-value">{len(broken):,}</div>
-                    <div class="kpi-sub">حسابات موعد متابعتها عدي</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ==========================================
-            # ملفات التحميل (Excel)
-            # ==========================================
-            output_current = BytesIO()
-            with pd.ExcelWriter(output_current, engine="openpyxl") as writer:
-                current.to_excel(writer, index=False)
-            output_current.seek(0)
-
-            output_broken = BytesIO()
-            with pd.ExcelWriter(output_broken, engine="openpyxl") as writer:
-                broken.to_excel(writer, index=False)
-            output_broken.seek(0)
-
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
-                st.download_button(
-                    "📥 تحميل الوعود القائمة", data=output_current,
-                    file_name="الوعود_القائمة.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-            with dl_col2:
-                st.download_button(
-                    "📥 تحميل الوعود المكسورة", data=output_broken,
-                    file_name="الوعود_المكسورة.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-
-            # ============================================================
-            # داشبورد الوعود
-            # ============================================================
-            st.markdown('<div class="section-title">📊 داشبورد الوعود</div>', unsafe_allow_html=True)
-
-            supervisor_col = "ملاحظات-التمويل" if portfolio_type == "NPL&Dpd60" else "Sales Team"
-            required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
-            require_columns(current, required_report_cols, "بناء قسم الداشبورد")
-
-            all_supervisors = sorted(
-                pd.concat([current[supervisor_col], broken[supervisor_col]]).dropna().unique().tolist()
-            )
-            all_salespersons = sorted(
-                pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
-            )
-
-            st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر الداشبورد</div>', unsafe_allow_html=True)
-            filter_col1, filter_col2 = st.columns(2)
-            with filter_col1:
-                selected_supervisors = st.multiselect(
-                    "فلترة حسب المشرف", options=all_supervisors, default=[],
-                    key="promises_supervisor_filter"
-                )
-            with filter_col2:
+            with f_col2:
                 selected_salespersons = st.multiselect(
-                    "فلترة حسب الموظف (Salesperson)", options=all_salespersons, default=[],
+                    "فلتر حسب Salesperson",
+                    options=all_salespersons, default=[],
+                    help="سيبها فاضية لعرض كل الموظفين",
                     key="promises_salesperson_filter"
                 )
+            selected_status = []
+            if portfolio_type == "NPL&Dpd60":
+                with f_col3:
+                    selected_status = st.multiselect(
+                        "فلتر حسب حالة المعالجة - التمويل",
+                        options=status_options, default=[],
+                        help="سيبها فاضية لعرض كل الحالات",
+                        key="promises_status_filter"
+                    )
+
             st.markdown('</div>', unsafe_allow_html=True)
 
-            def apply_dashboard_filters(d):
-                out = d
-                if selected_supervisors:
-                    out = out[out[supervisor_col].isin(selected_supervisors)]
-                if selected_salespersons:
-                    out = out[out["Salesperson"].isin(selected_salespersons)]
-                return out
+            generate_clicked = st.button("🚀 عمل الوعود", use_container_width=True, type="primary")
 
-            current_f = apply_dashboard_filters(current)
-            broken_f = apply_dashboard_filters(broken)
+            current_signature = (
+                portfolio_file.name, portfolio_file.size, portfolio_type,
+                tuple(sorted(selected_teams)), tuple(sorted(selected_salespersons)),
+                tuple(sorted(selected_status))
+            )
 
-            def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
-                base_cols = ["مبلغ المديونية", "عدد الحسابات"]
-                if extra_col:
-                    base_cols.append(extra_label)
-                out_cols = base_cols + ["الموظف", "المشرف"]
+            if generate_clicked:
+                current, broken = process_portfolio(
+                    df_raw, portfolio_type, selected_teams, selected_salespersons, selected_status
+                )
+                st.session_state["promises_current"] = current
+                st.session_state["promises_broken"] = broken
+                st.session_state["promises_signature"] = current_signature
 
-                if d.empty:
-                    return pd.DataFrame(columns=out_cols)
+            has_results = "promises_current" in st.session_state
+            signature_matches = st.session_state.get("promises_signature") == current_signature
 
-                rows = []
-                grand_amount = 0.0
-                grand_count = 0
-                grand_extra = 0.0
+            if not has_results:
+                st.markdown(
+                    '<div class="empty-state">🎯 حدد الفلترة اللي عايزها فوق، وبعدين دوس زرار «عمل الوعود» عشان يبدأ التحليل</div>',
+                    unsafe_allow_html=True
+                )
+                current, broken = None, None
+            elif not signature_matches:
+                st.info("⚠️ الفلاتر أو الملف اتغيروا - دوس زرار «عمل الوعود» تاني عشان النتائج تتحدث")
+                current = st.session_state["promises_current"]
+                broken = st.session_state["promises_broken"]
+            else:
+                current = st.session_state["promises_current"]
+                broken = st.session_state["promises_broken"]
 
-                for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
-                    sup_amount = 0.0
-                    sup_count = 0
-                    sup_extra = 0.0
+            if current is not None and broken is not None:
+                # ==========================================
+                # 🔢 بطاقات KPI
+                # ==========================================
+                st.markdown(f"""
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-top">
+                            <div class="kpi-icon">✅</div>
+                        </div>
+                        <div class="kpi-label">الوعود القائمة</div>
+                        <div class="kpi-value">{len(current):,}</div>
+                        <div class="kpi-sub">حسابات يجب متابعتها اليوم</div>
+                    </div>
+                    <div class="kpi-card broken">
+                        <div class="kpi-top">
+                            <div class="kpi-icon">⚠️</div>
+                        </div>
+                        <div class="kpi-label">الوعود المكسورة</div>
+                        <div class="kpi-value">{len(broken):,}</div>
+                        <div class="kpi-sub">حسابات موعد متابعتها عدي</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                    emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
-                    emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ==========================================
+                # ملفات التحميل (Excel)
+                # ==========================================
+                output_current = BytesIO()
+                with pd.ExcelWriter(output_current, engine="openpyxl") as writer:
+                    current.to_excel(writer, index=False)
+                output_current.seek(0)
+
+                output_broken = BytesIO()
+                with pd.ExcelWriter(output_broken, engine="openpyxl") as writer:
+                    broken.to_excel(writer, index=False)
+                output_broken.seek(0)
+
+                dl_col1, dl_col2 = st.columns(2)
+                with dl_col1:
+                    st.download_button(
+                        "📥 تحميل الوعود القائمة", data=output_current,
+                        file_name="الوعود_القائمة.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                with dl_col2:
+                    st.download_button(
+                        "📥 تحميل الوعود المكسورة", data=output_broken,
+                        file_name="الوعود_المكسورة.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+
+                # ============================================================
+                # داشبورد الوعود
+                # ============================================================
+                st.markdown('<div class="section-title">📊 داشبورد الوعود</div>', unsafe_allow_html=True)
+
+                supervisor_col = "ملاحظات-التمويل" if portfolio_type == "NPL&Dpd60" else "Sales Team"
+                required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
+                require_columns(current, required_report_cols, "بناء قسم الداشبورد")
+
+                all_supervisors = sorted(
+                    pd.concat([current[supervisor_col], broken[supervisor_col]]).dropna().unique().tolist()
+                )
+                all_dashboard_salespersons = sorted(
+                    pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
+                )
+
+                st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر الداشبورد</div>', unsafe_allow_html=True)
+                dash_col1, dash_col2 = st.columns(2)
+                with dash_col1:
+                    selected_supervisors = st.multiselect(
+                        "فلترة حسب المشرف", options=all_supervisors, default=[],
+                        key="promises_supervisor_filter"
+                    )
+                with dash_col2:
+                    selected_dashboard_salespersons = st.multiselect(
+                        "فلترة حسب الموظف (Salesperson)", options=all_dashboard_salespersons, default=[],
+                        key="promises_dashboard_salesperson_filter"
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                def apply_dashboard_filters(d):
+                    out = d
+                    if selected_supervisors:
+                        out = out[out[supervisor_col].isin(selected_supervisors)]
+                    if selected_dashboard_salespersons:
+                        out = out[out["Salesperson"].isin(selected_dashboard_salespersons)]
+                    return out
+
+                current_f = apply_dashboard_filters(current)
+                broken_f = apply_dashboard_filters(broken)
+
+                def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
+                    base_cols = ["مبلغ المديونية", "عدد الحسابات"]
                     if extra_col:
-                        if extra_agg == "sum":
-                            emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
-                        else:
-                            emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
+                        base_cols.append(extra_label)
+                    out_cols = base_cols + ["الموظف", "المشرف"]
 
-                    for salesperson in emp_amount.sort_values(ascending=False).index:
-                        amount_val = float(emp_amount.get(salesperson, 0))
-                        count_val = int(emp_count.get(salesperson, 0))
-                        row = {
-                            "مبلغ المديونية": amount_val, "عدد الحسابات": count_val,
-                            "الموظف": salesperson, "المشرف": supervisor,
+                    if d.empty:
+                        return pd.DataFrame(columns=out_cols)
+
+                    rows = []
+                    grand_amount = 0.0
+                    grand_count = 0
+                    grand_extra = 0.0
+
+                    for supervisor, sup_group in d.groupby(supervisor_col, dropna=False):
+                        sup_amount = 0.0
+                        sup_count = 0
+                        sup_extra = 0.0
+
+                        emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
+                        emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                        if extra_col:
+                            if extra_agg == "sum":
+                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
+                            else:
+                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
+
+                        for salesperson in emp_amount.sort_values(ascending=False).index:
+                            amount_val = float(emp_amount.get(salesperson, 0))
+                            count_val = int(emp_count.get(salesperson, 0))
+                            row = {
+                                "مبلغ المديونية": amount_val, "عدد الحسابات": count_val,
+                                "الموظف": salesperson, "المشرف": supervisor,
+                            }
+                            if extra_col:
+                                extra_val = float(emp_extra.get(salesperson, 0))
+                                row[extra_label] = extra_val
+                                sup_extra += extra_val
+                            rows.append(row)
+                            sup_amount += amount_val
+                            sup_count += count_val
+
+                        total_row = {
+                            "مبلغ المديونية": sup_amount, "عدد الحسابات": sup_count,
+                            "الموظف": f"{supervisor} إجمالي", "المشرف": supervisor,
                         }
                         if extra_col:
-                            extra_val = float(emp_extra.get(salesperson, 0))
-                            row[extra_label] = extra_val
-                            sup_extra += extra_val
-                        rows.append(row)
-                        sup_amount += amount_val
-                        sup_count += count_val
+                            total_row[extra_label] = (
+                                sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
+                            )
+                        rows.append(total_row)
 
-                    total_row = {
-                        "مبلغ المديونية": sup_amount, "عدد الحسابات": sup_count,
-                        "الموظف": f"{supervisor} إجمالي", "المشرف": supervisor,
+                        grand_amount += sup_amount
+                        grand_count += sup_count
+                        grand_extra += sup_extra
+
+                    grand_row = {
+                        "مبلغ المديونية": grand_amount, "عدد الحسابات": grand_count,
+                        "الموظف": "الاجمالي", "المشرف": "",
                     }
                     if extra_col:
-                        total_row[extra_label] = (
-                            sup_extra if extra_agg == "sum" else (sup_extra / max(sup_count, 1))
+                        grand_row[extra_label] = (
+                            grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
                         )
-                    rows.append(total_row)
+                    rows.append(grand_row)
 
-                    grand_amount += sup_amount
-                    grand_count += sup_count
-                    grand_extra += sup_extra
+                    return pd.DataFrame(rows)[out_cols]
 
-                grand_row = {
-                    "مبلغ المديونية": grand_amount, "عدد الحسابات": grand_count,
-                    "الموظف": "الاجمالي", "المشرف": "",
-                }
-                if extra_col:
-                    grand_row[extra_label] = (
-                        grand_extra if extra_agg == "sum" else (grand_extra / max(grand_count, 1))
+                def style_summary(d, extra_label=None):
+                    fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
+                    if extra_label:
+                        fmt[extra_label] = "{:,.0f}"
+
+                    def highlight_rows(row):
+                        is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
+                        if is_total:
+                            return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
+                        return [""] * len(row)
+
+                    return d.style.apply(highlight_rows, axis=1).format(fmt)
+
+                tab_current, tab_broken, tab_days, tab_raw = st.tabs([
+                    "📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"
+                ])
+
+                with tab_current:
+                    current_summary = build_pivot_style(current_f)
+                    if current_summary.empty:
+                        st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
+                    else:
+                        st.dataframe(style_summary(current_summary), use_container_width=True, hide_index=True)
+
+                with tab_broken:
+                    broken_summary = build_pivot_style(broken_f)
+                    if broken_summary.empty:
+                        st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
+                    else:
+                        st.dataframe(style_summary(broken_summary), use_container_width=True, hide_index=True)
+
+                with tab_days:
+                    require_columns(broken_f, ["عدد ايام ترحيل الوعد"], "تقرير عدد أيام ترحيل الوعد")
+                    days_summary = build_pivot_style(
+                        broken_f, extra_col="عدد ايام ترحيل الوعد",
+                        extra_label="عدد ايام ترحيل الوعد", extra_agg="sum"
                     )
-                rows.append(grand_row)
+                    if days_summary.empty:
+                        st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
+                    else:
+                        st.dataframe(
+                            style_summary(days_summary, extra_label="عدد ايام ترحيل الوعد"),
+                            use_container_width=True, hide_index=True
+                        )
 
-                return pd.DataFrame(rows)[out_cols]
+                with tab_raw:
+                    st.markdown("#### 🗂️ الوعود القائمة")
+                    st.dataframe(current_f, use_container_width=True, hide_index=True)
+                    st.markdown("#### 🗂️ الوعود المكسورة")
+                    st.dataframe(broken_f, use_container_width=True, hide_index=True)
 
-            def style_summary(d, extra_label=None):
-                fmt = {"مبلغ المديونية": "{:,.0f}", "عدد الحسابات": "{:,.0f}"}
-                if extra_label:
-                    fmt[extra_label] = "{:,.0f}"
+                # ---------------------------
+                # الشارتات
+                # ---------------------------
+                st.markdown('<div class="section-title">📈 الرسوم البيانية</div>', unsafe_allow_html=True)
 
-                def highlight_rows(row):
-                    is_total = (row["الموظف"] == "الاجمالي") or ("إجمالي" in str(row["الموظف"]))
-                    if is_total:
-                        return ["font-weight: bold; color: #000000; background-color: #eef2f7"] * len(row)
-                    return [""] * len(row)
+                SNB_GREEN = "#00693E"
+                SNB_GOLD = "#C9A227"
+                SNB_RED = "#A33A3A"
 
-                return d.style.apply(highlight_rows, axis=1).format(fmt)
+                # النص بيبقى أبيض في الوضع الداكن (Dark) وأسود في الوضع الفاتح (Light)
+                def get_theme_text_color():
+                    try:
+                        base = st.get_option("theme.base")
+                    except Exception:
+                        base = None
+                    return "#FFFFFF" if base == "dark" else "#111827"
 
-            tab_current, tab_broken, tab_days, tab_raw = st.tabs([
-                "📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"
-            ])
+                AXIS_TEXT_COLOR = get_theme_text_color()
+                GRID_COLOR = "#374151" if AXIS_TEXT_COLOR == "#FFFFFF" else "#f1f5f3"
+                LABEL_FONT = dict(size=14, family="Tajawal", color=AXIS_TEXT_COLOR)
 
-            with tab_current:
-                current_summary = build_pivot_style(current_f)
-                if current_summary.empty:
-                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
-                else:
-                    st.dataframe(style_summary(current_summary), use_container_width=True, hide_index=True)
-
-            with tab_broken:
-                broken_summary = build_pivot_style(broken_f)
-                if broken_summary.empty:
-                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
-                else:
-                    st.dataframe(style_summary(broken_summary), use_container_width=True, hide_index=True)
-
-            with tab_days:
-                require_columns(broken_f, ["عدد ايام ترحيل الوعد"], "تقرير عدد أيام ترحيل الوعد")
-                days_summary = build_pivot_style(
-                    broken_f, extra_col="عدد ايام ترحيل الوعد",
-                    extra_label="عدد ايام ترحيل الوعد", extra_agg="sum"
-                )
-                if days_summary.empty:
-                    st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
-                else:
-                    st.dataframe(
-                        style_summary(days_summary, extra_label="عدد ايام ترحيل الوعد"),
-                        use_container_width=True, hide_index=True
+                def style_fig(fig, angle=-20):
+                    fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
+                    fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
+                    fig.update_layout(
+                        height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
+                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="Tajawal"),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
+                    return fig
 
-            with tab_raw:
-                st.markdown("#### 🗂️ الوعود القائمة")
-                st.dataframe(current_f, use_container_width=True, hide_index=True)
-                st.markdown("#### 🗂️ الوعود المكسورة")
-                st.dataframe(broken_f, use_container_width=True, hide_index=True)
+                chart_col1, chart_col2 = st.columns(2)
 
-            # ---------------------------
-            # الشارتات
-            # ---------------------------
-            st.markdown('<div class="section-title">📈 الرسوم البيانية</div>', unsafe_allow_html=True)
-
-            SNB_GREEN = "#00693E"
-            SNB_GOLD = "#C9A227"
-            SNB_RED = "#A33A3A"
-
-            # النص بيبقى أبيض في الوضع الداكن (Dark) وأسود في الوضع الفاتح (Light)
-            def get_theme_text_color():
-                try:
-                    base = st.get_option("theme.base")
-                except Exception:
-                    base = None
-                return "#FFFFFF" if base == "dark" else "#111827"
-
-            AXIS_TEXT_COLOR = get_theme_text_color()
-            GRID_COLOR = "#374151" if AXIS_TEXT_COLOR == "#FFFFFF" else "#f1f5f3"
-            LABEL_FONT = dict(size=14, family="Tajawal", color=AXIS_TEXT_COLOR)
-
-            def style_fig(fig, angle=-20):
-                fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
-                fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
-                fig.update_layout(
-                    height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                    font=dict(family="Tajawal"),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                return fig
-
-            chart_col1, chart_col2 = st.columns(2)
-
-            with chart_col1:
-                st.markdown('<div class="chart-card"><div class="chart-card-title">مبلغ المديونية لكل مشرف (قائمة مقابل مكسورة)</div>', unsafe_allow_html=True)
-                sup_amount_current = (
-                    current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
-                    .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
-                )
-                sup_amount_current["النوع"] = "قائمة"
-                sup_amount_broken = (
-                    broken_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
-                    .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
-                )
-                sup_amount_broken["النوع"] = "مكسورة"
-                sup_amount_combined = pd.concat([sup_amount_current, sup_amount_broken], ignore_index=True)
-
-                if not sup_amount_combined.empty:
-                    fig1 = px.bar(
-                        sup_amount_combined, x="المشرف", y="مبلغ المديونية", color="النوع",
-                        barmode="group", text="مبلغ المديونية",
-                        color_discrete_map={"قائمة": SNB_GREEN, "مكسورة": SNB_RED},
-                        template="plotly_white"
+                with chart_col1:
+                    st.markdown('<div class="chart-card"><div class="chart-card-title">مبلغ المديونية لكل مشرف (قائمة مقابل مكسورة)</div>', unsafe_allow_html=True)
+                    sup_amount_current = (
+                        current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
                     )
-                    fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
-                    st.plotly_chart(style_fig(fig1), use_container_width=True)
+                    sup_amount_current["النوع"] = "قائمة"
+                    sup_amount_broken = (
+                        broken_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
+                    )
+                    sup_amount_broken["النوع"] = "مكسورة"
+                    sup_amount_combined = pd.concat([sup_amount_current, sup_amount_broken], ignore_index=True)
+
+                    if not sup_amount_combined.empty:
+                        fig1 = px.bar(
+                            sup_amount_combined, x="المشرف", y="مبلغ المديونية", color="النوع",
+                            barmode="group", text="مبلغ المديونية",
+                            color_discrete_map={"قائمة": SNB_GREEN, "مكسورة": SNB_RED},
+                            template="plotly_white"
+                        )
+                        fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside", textfont=LABEL_FONT)
+                        st.plotly_chart(style_fig(fig1), use_container_width=True)
+                    else:
+                        st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                with chart_col2:
+                    st.markdown('<div class="chart-card"><div class="chart-card-title">متوسط أيام ترحيل الوعد لكل مشرف</div>', unsafe_allow_html=True)
+                    days_by_sup = (
+                        broken_f.groupby(supervisor_col, dropna=False)["عدد ايام ترحيل الوعد"].mean()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", "عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
+                    )
+                    if not days_by_sup.empty:
+                        fig3 = px.bar(
+                            days_by_sup, x="المشرف", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
+                            color_discrete_sequence=[SNB_GOLD], template="plotly_white"
+                        )
+                        fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=LABEL_FONT)
+                        st.plotly_chart(style_fig(fig3), use_container_width=True)
+                    else:
+                        st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="chart-card"><div class="chart-card-title">أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)</div>', unsafe_allow_html=True)
+                emp_count_broken = (
+                    broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                    .reset_index(name="عدد الحسابات")
+                    .sort_values("عدد الحسابات", ascending=False).head(15)
+                )
+                if not emp_count_broken.empty:
+                    fig2 = px.bar(
+                        emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
+                        color_discrete_sequence=[SNB_RED], template="plotly_white"
+                    )
+                    fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=LABEL_FONT)
+                    st.plotly_chart(style_fig(fig2, angle=-30), use_container_width=True)
                 else:
                     st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-
-            with chart_col2:
-                st.markdown('<div class="chart-card"><div class="chart-card-title">متوسط أيام ترحيل الوعد لكل مشرف</div>', unsafe_allow_html=True)
-                days_by_sup = (
-                    broken_f.groupby(supervisor_col, dropna=False)["عدد ايام ترحيل الوعد"].mean()
-                    .reset_index().rename(columns={supervisor_col: "المشرف", "عدد ايام ترحيل الوعد": "متوسط ايام الترحيل"})
-                )
-                if not days_by_sup.empty:
-                    fig3 = px.bar(
-                        days_by_sup, x="المشرف", y="متوسط ايام الترحيل", text="متوسط ايام الترحيل",
-                        color_discrete_sequence=[SNB_GOLD], template="plotly_white"
-                    )
-                    fig3.update_traces(texttemplate="<b>%{text:.1f}</b>", textposition="outside", textfont=LABEL_FONT)
-                    st.plotly_chart(style_fig(fig3), use_container_width=True)
-                else:
-                    st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown('<div class="chart-card"><div class="chart-card-title">أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)</div>', unsafe_allow_html=True)
-            emp_count_broken = (
-                broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
-                .reset_index(name="عدد الحسابات")
-                .sort_values("عدد الحسابات", ascending=False).head(15)
-            )
-            if not emp_count_broken.empty:
-                fig2 = px.bar(
-                    emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
-                    color_discrete_sequence=[SNB_RED], template="plotly_white"
-                )
-                fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=LABEL_FONT)
-                st.plotly_chart(style_fig(fig2, angle=-30), use_container_width=True)
-            else:
-                st.markdown('<div class="empty-state">لا توجد بيانات لعرضها</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
 
         except KeyError as e:
             show_error(e)
