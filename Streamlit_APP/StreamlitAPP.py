@@ -657,7 +657,7 @@ if page == "الوعود القائمة و المكسورة":
     # 2) تطبيق فلاتر الوعود (بعد ما المستخدم يحدد اختياراته) - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري عمل الوعود...")
-    def process_portfolio(df, portfolio_type_, selected_teams, selected_salespersons, selected_status):
+    def process_portfolio(df, portfolio_type_, excluded_teams, excluded_salespersons, excluded_status):
         today = pd.Timestamp.today().normalize()
 
         base = df.copy()
@@ -671,22 +671,22 @@ if page == "الوعود القائمة و المكسورة":
         # تنظيف: استبعاد الصفوف اللي مفيهاش موظف مسجل
         base = base[base["Salesperson"].notna()]
 
-        # --- فلتر Sales Team (يدوي - ياخد بالظبط اللي متحدد) ---
-        base = base[base["Sales Team"].isin(selected_teams)]
+        # --- استبعاد Sales Team (يدوي - بيشيل اللي متحدد بس) ---
+        base = base[~base["Sales Team"].isin(excluded_teams)]
 
-        # --- فلتر Salesperson (يدوي - ياخد بالظبط اللي متحدد) ---
-        base = base[base["Salesperson"].isin(selected_salespersons)]
+        # --- استبعاد Salesperson (يدوي - بيشيل اللي متحدد بس) ---
+        base = base[~base["Salesperson"].isin(excluded_salespersons)]
 
-        # --- فلتر حالة المعالجة - التمويل (يدوي، NPL&Dpd60 فقط - ياخد بالظبط اللي متحدد) ---
-        if portfolio_type_ == "NPL&Dpd60":
-            if "(فارغ / غير محدد)" in selected_status:
+        # --- استبعاد حالة المعالجة - التمويل (يدوي، NPL&Dpd60 فقط - بيشيل اللي متحدد بس) ---
+        if portfolio_type_ == "NPL&Dpd60" and excluded_status:
+            if "(فارغ / غير محدد)" in excluded_status:
                 mask = base["حالة المعالجة - التمويل"].isna()
-                other_selected = [s for s in selected_status if s != "(فارغ / غير محدد)"]
-                if other_selected:
-                    mask = mask | base["حالة المعالجة - التمويل"].isin(other_selected)
-                base = base[mask]
+                other_excluded = [s for s in excluded_status if s != "(فارغ / غير محدد)"]
+                if other_excluded:
+                    mask = mask | base["حالة المعالجة - التمويل"].isin(other_excluded)
+                base = base[~mask]
             else:
-                base = base[base["حالة المعالجة - التمويل"].isin(selected_status)]
+                base = base[~base["حالة المعالجة - التمويل"].isin(excluded_status)]
 
         current = base.copy()
         current = current[current["Follow up Due Date"] == today]
@@ -739,26 +739,26 @@ if page == "الوعود القائمة و المكسورة":
                 f_col1, f_col2 = st.columns(2)
 
             with f_col1:
-                selected_teams = st.multiselect(
-                    "فلتر حسب Sales Team",
-                    options=all_sales_teams, default=all_sales_teams,
-                    help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
+                excluded_teams = st.multiselect(
+                    "استبعاد Sales Team",
+                    options=all_sales_teams, default=[],
+                    help="اختار الـ Sales Team اللي عايز تشيلها من النتيجة - سيبها فاضية عشان محدش يتشال",
                     key="promises_team_filter"
                 )
             with f_col2:
-                selected_salespersons = st.multiselect(
-                    "فلتر حسب Salesperson",
-                    options=all_salespersons, default=all_salespersons,
-                    help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
+                excluded_salespersons = st.multiselect(
+                    "استبعاد Salesperson",
+                    options=all_salespersons, default=[],
+                    help="اختار الموظفين اللي عايز تشيلهم من النتيجة - سيبها فاضية عشان محدش يتشال",
                     key="promises_salesperson_filter"
                 )
-            selected_status = []
+            excluded_status = []
             if portfolio_type == "NPL&Dpd60":
                 with f_col3:
-                    selected_status = st.multiselect(
-                        "فلتر حسب حالة المعالجة - التمويل",
-                        options=status_options, default=status_options,
-                        help="النتيجة هتاخد بالظبط اللي محدد هنا - شيل اللي مش عايزه",
+                    excluded_status = st.multiselect(
+                        "استبعاد حالة المعالجة - التمويل",
+                        options=status_options, default=[],
+                        help="اختار الحالات اللي عايز تشيلها من النتيجة - سيبها فاضية عشان محدش يتشال",
                         key="promises_status_filter"
                     )
 
@@ -768,13 +768,13 @@ if page == "الوعود القائمة و المكسورة":
 
             current_signature = (
                 portfolio_file.name, portfolio_file.size, portfolio_type,
-                tuple(sorted(selected_teams)), tuple(sorted(selected_salespersons)),
-                tuple(sorted(selected_status))
+                tuple(sorted(excluded_teams)), tuple(sorted(excluded_salespersons)),
+                tuple(sorted(excluded_status))
             )
 
             if generate_clicked:
                 current, broken = process_portfolio(
-                    df_raw, portfolio_type, selected_teams, selected_salespersons, selected_status
+                    df_raw, portfolio_type, excluded_teams, excluded_salespersons, excluded_status
                 )
                 st.session_state["promises_current"] = current
                 st.session_state["promises_broken"] = broken
