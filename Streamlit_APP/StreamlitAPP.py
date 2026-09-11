@@ -3742,7 +3742,7 @@ elif page == "التدوير":
                         total_p = (df_rotate["نوع المنتج"] == prod).sum()
                         base_p = total_p // n
                         rem_p = total_p % n
-                        for i, for i, c in enumerate(selected_collectors):
+                        for i, c in enumerate(selected_collectors):
                             target_prod_count[c][prod] = base_p + (1 if i < rem_p else 0)
             else:
                 target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
