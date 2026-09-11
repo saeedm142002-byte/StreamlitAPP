@@ -3227,7 +3227,7 @@ elif page == "التدوير":
         step = len(items_sorted) / cap
         return [items_sorted[int(i * step)] for i in range(cap)]
 
-def refine_assignment(groups, assignment, current_count, current_debt,
+    def refine_assignment(groups, assignment, current_count, current_debt,
                            target_count, target_debt, collectors,
                            current_prod_count=None, target_prod_count=None,
                            max_passes=80, pool_cap=300):
@@ -3599,81 +3599,81 @@ def refine_assignment(groups, assignment, current_count, current_debt,
     # ============================================================
     # 7. التشغيل
     # ============================================================
-@st.cache_data(show_spinner="جاري التوزيع القوي مع توازن المنتجات...")
-    def run_rotation(df_bytes, collectors, target_count, target_debt, 
-                     target_prod_count=None, has_product=False):
-        df_rot = pd.read_pickle(BytesIO(df_bytes))
-        collectors = list(collectors)
-
-        groups = []
-        for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
-            product = None
-            if has_product and "نوع المنتج" in g.columns:
-                product = g["نوع المنتج"].mode().iloc[0] if not g["نوع المنتج"].mode().empty else g["نوع المنتج"].iloc[0]
-
-            groups.append({
-                "id": id_val,
-                "debt": float(g["متبقي المديونية"].sum()),
-                "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
-                "product": product,
-                "n_accounts": len(g)
-            })
-
-        groups.sort(key=lambda x: x["debt"], reverse=True)
-
-        current_count = {c: 0 for c in collectors}
-        current_debt = {c: 0.0 for c in collectors}
-        current_prod_count = {c: {} for c in collectors} if has_product else None
-
-        assignment = {}
-        unassignable = []
-
-        for grp in groups:
-            candidates = [c for c in collectors if c not in grp["forbidden"]]
-            if not candidates:
-                unassignable.append(str(grp["id"]))
-                continue
-
-            def score(c):
-                # أولوية عالية لتساوي المنتج
-                prod_score = 0.0
-                if has_product and grp["product"] and target_prod_count:
+    @st.cache_data(show_spinner="جاري التوزيع القوي مع توازن المنتجات...")
+        def run_rotation(df_bytes, collectors, target_count, target_debt, 
+                         target_prod_count=None, has_product=False):
+            df_rot = pd.read_pickle(BytesIO(df_bytes))
+            collectors = list(collectors)
+    
+            groups = []
+            for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
+                product = None
+                if has_product and "نوع المنتج" in g.columns:
+                    product = g["نوع المنتج"].mode().iloc[0] if not g["نوع المنتج"].mode().empty else g["نوع المنتج"].iloc[0]
+    
+                groups.append({
+                    "id": id_val,
+                    "debt": float(g["متبقي المديونية"].sum()),
+                    "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
+                    "product": product,
+                    "n_accounts": len(g)
+                })
+    
+            groups.sort(key=lambda x: x["debt"], reverse=True)
+    
+            current_count = {c: 0 for c in collectors}
+            current_debt = {c: 0.0 for c in collectors}
+            current_prod_count = {c: {} for c in collectors} if has_product else None
+    
+            assignment = {}
+            unassignable = []
+    
+            for grp in groups:
+                candidates = [c for c in collectors if c not in grp["forbidden"]]
+                if not candidates:
+                    unassignable.append(str(grp["id"]))
+                    continue
+    
+                def score(c):
+                    # أولوية عالية لتساوي المنتج
+                    prod_score = 0.0
+                    if has_product and grp["product"] and target_prod_count:
+                        prod = grp["product"]
+                        target_p = target_prod_count.get(c, {}).get(prod, 0)
+                        current_p = current_prod_count[c].get(prod, 0)
+                        tp = max(target_p, 1)
+                        prod_score = (target_p - current_p) / tp * 3.0   # وزن عالي جدًا
+    
+                    tc = max(target_count.get(c, 0), 1)
+                    td = max(target_debt.get(c, 0.0), 1.0)
+                    count_score = (target_count.get(c, 0) - current_count[c]) / tc
+                    debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
+    
+                    return prod_score + count_score * 1.1 + debt_score * 1.2
+    
+                best = max(candidates, key=score)
+                assignment[grp["id"]] = best
+                current_count[best] += 1
+                current_debt[best] += grp["debt"]
+    
+                if has_product and grp["product"]:
                     prod = grp["product"]
-                    target_p = target_prod_count.get(c, {}).get(prod, 0)
-                    current_p = current_prod_count[c].get(prod, 0)
-                    tp = max(target_p, 1)
-                    prod_score = (target_p - current_p) / tp * 3.0   # وزن عالي جدًا
-
-                tc = max(target_count.get(c, 0), 1)
-                td = max(target_debt.get(c, 0.0), 1.0)
-                count_score = (target_count.get(c, 0) - current_count[c]) / tc
-                debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
-
-                return prod_score + count_score * 1.1 + debt_score * 1.2
-
-            best = max(candidates, key=score)
-            assignment[grp["id"]] = best
-            current_count[best] += 1
-            current_debt[best] += grp["debt"]
-
-            if has_product and grp["product"]:
-                prod = grp["product"]
-                current_prod_count[best][prod] = current_prod_count[best].get(prod, 0) + 1
-
-        if unassignable:
-            raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
-
-        # تحسين قوي
-        refine_assignment(
-            groups, assignment, current_count, current_debt,
-            target_count, target_debt, collectors,
-            current_prod_count=current_prod_count,
-            target_prod_count=target_prod_count,
-            max_passes=80,
-            pool_cap=300
-        )
-
-        return assignment, current_count, current_debt
+                    current_prod_count[best][prod] = current_prod_count[best].get(prod, 0) + 1
+    
+            if unassignable:
+                raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
+    
+            # تحسين قوي
+            refine_assignment(
+                groups, assignment, current_count, current_debt,
+                target_count, target_debt, collectors,
+                current_prod_count=current_prod_count,
+                target_prod_count=target_prod_count,
+                max_passes=80,
+                pool_cap=300
+            )
+    
+            return assignment, current_count, current_debt
     if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
 
         try:
