@@ -3085,6 +3085,7 @@ elif page == "التدوير":
             overflow: hidden;
         }
         .kpi-card.ok { border-left-color: #00693E; }
+        .kpi-card.info { border-left-color: #C9A227; }
         .kpi-card::before {
             content: "";
             position: absolute;
@@ -3100,6 +3101,7 @@ elif page == "التدوير":
             background: #e5f0f8;
         }
         .kpi-card.ok .kpi-icon { background: #e7f4ec; }
+        .kpi-card.info .kpi-icon { background: #fbf1d9; }
         .kpi-label {
             font-size: 13px;
             color: #6b7280;
@@ -3212,6 +3214,17 @@ elif page == "التدوير":
             font-weight: 700;
             margin-bottom: 14px;
         }
+
+        /* ===== صندوق معلومات ===== */
+        .info-box {
+            background: #fbf6e9;
+            border: 1px solid #efe0ad;
+            border-radius: 14px;
+            padding: 14px 18px;
+            color: #6b5410;
+            font-weight: 700;
+            margin-bottom: 14px;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -3286,6 +3299,11 @@ elif page == "التدوير":
 
         بتكرر الاتنين على شكل "passes" لحد ما محدش يقدر يحسن أكتر أو
         نوصل للحد الأقصى لعدد المحاولات.
+
+        ملحوظة: current_count / current_debt ممكن تدخل الدالة ومعاها بالفعل
+        قيمة ابتدائية غير صفرية (مثلاً عدد ومديونية العملاء اللي عليهم سداد
+        واستبعدناهم من التدوير لكنهم فضلوا عند نفس المحصل) — والدالة بتحسب
+        على أساسها عادي من غير أي تغيير في منطقها.
         """
 
         def pen(count_val, target_c, debt_val, target_d):
@@ -3404,9 +3422,37 @@ elif page == "التدوير":
         return passes_done
 
     st.markdown("""
-    الملف المطلوب لازم يحتوي على 4 أعمدة:
-    **رقم الهوية** — **اسم المحصل القديم** — **متبقي المديونية** — **رقم الحساب**
+    الملف المطلوب لازم يحتوي على 5 أعمدة:
+    **رقم الهوية** — **اسم المحصل القديم** — **متبقي المديونية** — **رقم الحساب** — **السداد**
+
+    عمود **السداد** ده عمود رقمي (مبلغ السداد)، أي قيمة أكبر من صفر معناها إن على الحساب ده سداد.
     """)
+
+    # ============================================================
+    # ⚙️ اختيار: هل الحسابات اللي عليها سداد تدخل في التدوير ولا تفضل زي ما هي؟
+    # ============================================================
+    keep_choice = st.radio(
+        "الحسابات اللي عليها سداد (مبلغ السداد أكبر من صفر) — تتعامل معاها إزاي؟",
+        [
+            "✅ أيوه، ادخلهم في التدوير عادي زي باقي الحسابات",
+            "🚫 لأ، سيبهم عند نفس المحصل القديم واستبعدهم من التدوير",
+        ],
+        index=0,
+        key="rotation_keep_paid_choice",
+    )
+    keep_paid_in_rotation = keep_choice.startswith("✅")
+
+    if not keep_paid_in_rotation:
+        st.markdown("""
+        <div class="info-box">
+        ℹ️ ملحوظة: لو أي حساب من حسابات العميل (نفس رقم الهوية) عليه سداد،
+        كل حسابات العميل ده هتفضل عند نفس المحصل القديم ومش هتدخل التدوير.
+        وهيتم تلقائيًا حساب عدد الحسابات ومتبقي المديونية اللي اتشالت من كل محصل،
+        وتقليل عدد العملاء الجداد اللي هيتدوروا عليه بنفس القيمة، بحيث
+        (الحسابات المستبعدة بسبب السداد + الحسابات اللي اتدورت) تساوي إجمالي
+        عملاء المحصل الأصليين قدر الإمكان.
+        </div>
+        """, unsafe_allow_html=True)
 
     rotation_file = st.file_uploader(
         "رفع ملف المحفظة",
@@ -3415,14 +3461,14 @@ elif page == "التدوير":
     )
 
     REQUIRED_ROTATION_COLS = [
-        "رقم الهوية", "اسم المحصل القديم", "متبقي المديونية", "رقم الحساب"
+        "رقم الهوية", "اسم المحصل القديم", "متبقي المديونية", "رقم الحساب", "السداد"
     ]
 
     # ============================================================
     # الدالة الأساسية لإعادة التوزيع - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة على المحصلين...")
-    def rotate_portfolio(file_bytes):
+    def rotate_portfolio(file_bytes, keep_paid_in_rotation):
         try:
             df = pd.read_excel(BytesIO(file_bytes))
         except Exception as e:
@@ -3440,6 +3486,11 @@ elif page == "التدوير":
         )
         df["متبقي المديونية"] = pd.to_numeric(df["متبقي المديونية"], errors="coerce").fillna(0.0)
 
+        df["السداد"] = (
+            df["السداد"].astype(str).str.replace(",", "", regex=False).str.strip()
+        )
+        df["السداد"] = pd.to_numeric(df["السداد"], errors="coerce").fillna(0.0)
+
         collectors = sorted([c for c in df["اسم المحصل القديم"].unique().tolist() if c and c.lower() != "nan"])
         if len(collectors) < 2:
             raise KeyError(
@@ -3448,17 +3499,45 @@ elif page == "التدوير":
             )
 
         # ------------------------------------------------------
-        # الأهداف الأصلية لكل محصل:
+        # الأهداف الأصلية لكل محصل (بتحسب على كل الحسابات، سداد أو مش سداد):
         # عدد العملاء (IDs مميزة) + إجمالي متبقي المديونية (على مستوى الحسابات)
         # ------------------------------------------------------
         target_count = df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
         target_debt = df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
 
         # ------------------------------------------------------
+        # تحديد العملاء اللي عليهم سداد (لو أي حساب من حساباته عليه سداد،
+        # كل حسابات العميل تتعتبر "عليها سداد" وتفضل عند نفس المحصل)
+        # ------------------------------------------------------
+        if keep_paid_in_rotation:
+            paid_ids = set()
+        else:
+            paid_ids = set(df.loc[df["السداد"] > 0, "رقم الهوية"].unique().tolist())
+
+        # حساب عدد/مديونية العملاء المستبعدين بسبب السداد لكل محصل (للتقرير
+        # ولاستخدامها كنقطة بداية لعملية التوزيع بدل الصفر)
+        if paid_ids:
+            kept_df = df[df["رقم الهوية"].isin(paid_ids)]
+            kept_count_by_collector = (
+                kept_df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique()
+                .reindex(collectors, fill_value=0).to_dict()
+            )
+            kept_debt_by_collector = (
+                kept_df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum()
+                .reindex(collectors, fill_value=0.0).to_dict()
+            )
+        else:
+            kept_count_by_collector = {c: 0 for c in collectors}
+            kept_debt_by_collector = {c: 0.0 for c in collectors}
+
+        # ------------------------------------------------------
         # تجميع الصفوف حسب رقم الهوية — كل عميل ينتقل ككتلة واحدة
+        # (بنستبعد من هنا العملاء اللي عليهم سداد لو مطلوب استبعادهم)
         # ------------------------------------------------------
         groups = []
         for id_val, g in df.groupby("رقم الهوية", sort=False):
+            if id_val in paid_ids:
+                continue
             groups.append({
                 "id": id_val,
                 "debt": float(g["متبقي المديونية"].sum()),
@@ -3468,8 +3547,11 @@ elif page == "التدوير":
         # المجموعات الأكبر (من حيث المديونية) الأول، لتوزيع أفضل
         groups.sort(key=lambda x: x["debt"], reverse=True)
 
-        current_count = {c: 0 for c in collectors}
-        current_debt = {c: 0.0 for c in collectors}
+        # نبدأ العد والمديونية الحالية بقيمة العملاء المستبعدين (سداد) بدل الصفر،
+        # عشان خوارزمية التوزيع تاخد بالها إن المحصل ده أصلاً معاه عدد/مديونية
+        # محجوزة، فتوزع عليه حسابات جديدة أقل بنفس القيمة دي.
+        current_count = dict(kept_count_by_collector)
+        current_debt = dict(kept_debt_by_collector)
         assignment = {}
         unassignable = []
 
@@ -3508,15 +3590,25 @@ elif page == "التدوير":
 
         df["المحصل الجديد"] = df["رقم الهوية"].map(assignment)
 
+        # العملاء المستبعدين بسبب السداد يفضلوا عند نفس المحصل القديم
+        if paid_ids:
+            mask_kept = df["رقم الهوية"].isin(paid_ids)
+            df.loc[mask_kept, "المحصل الجديد"] = df.loc[mask_kept, "اسم المحصل القديم"]
+
+        df["له سداد"] = np.where(df["السداد"] > 0, "نعم", "لا")
+        df["مستبعد من التدوير (سداد)"] = np.where(df["رقم الهوية"].isin(paid_ids), "نعم", "لا")
+
         # جدول مقارنة قبل / بعد لكل محصل
         summary_rows = []
         for c in collectors:
             summary_rows.append({
                 "المحصل": c,
                 "عدد العملاء (قديم)": target_count.get(c, 0),
+                "عدد العملاء المستبعدين (سداد)": kept_count_by_collector.get(c, 0),
                 "عدد العملاء (جديد)": current_count.get(c, 0),
                 "فرق العدد": current_count.get(c, 0) - target_count.get(c, 0),
                 "متبقي المديونية (قديم)": target_debt.get(c, 0.0),
+                "متبقي المديونية المستبعدة (سداد)": kept_debt_by_collector.get(c, 0.0),
                 "متبقي المديونية (جديد)": current_debt.get(c, 0.0),
                 "فرق المديونية": current_debt.get(c, 0.0) - target_debt.get(c, 0.0),
             })
@@ -3527,36 +3619,70 @@ elif page == "التدوير":
     if rotation_file:
         try:
             file_bytes = rotation_file.getvalue()
-            result_df, summary_df = rotate_portfolio(file_bytes)
+            result_df, summary_df = rotate_portfolio(file_bytes, keep_paid_in_rotation)
 
             # ------------------------------------------------------
             # تحقق نهائي (Sanity check) من الشرطين الأساسيين
+            # (بنستبعد من فحص "احتفظ بنفس المحصل" العملاء اللي استبعدناهم
+            # عمدًا بسبب السداد، لأن فضلهم عند نفس المحصل ده مطلوب أصلاً)
             # ------------------------------------------------------
+            rotated_mask = result_df["مستبعد من التدوير (سداد)"] == "لا"
             same_collector_violations = int(
-                (result_df["المحصل الجديد"] == result_df["اسم المحصل القديم"]).sum()
+                (
+                    result_df.loc[rotated_mask, "المحصل الجديد"]
+                    == result_df.loc[rotated_mask, "اسم المحصل القديم"]
+                ).sum()
             )
             split_id_violations = int(
                 result_df.groupby("رقم الهوية")["المحصل الجديد"].nunique().gt(1).sum()
             )
 
             total_clients = result_df["رقم الهوية"].nunique()
+            excluded_clients = result_df.loc[
+                result_df["مستبعد من التدوير (سداد)"] == "نعم", "رقم الهوية"
+            ].nunique()
+            rotated_clients = total_clients - excluded_clients
+            excluded_debt = result_df.loc[
+                result_df["مستبعد من التدوير (سداد)"] == "نعم", "متبقي المديونية"
+            ].sum()
 
             # ==========================================
-            # 🔢 بطاقات KPI
+            # 🔢 بطاقات KPI — صف أول: أرقام عامة
             # ==========================================
             st.markdown(f"""
             <div class="kpi-grid-3">
                 <div class="kpi-card ok">
+                    <div class="kpi-icon">🔄</div>
+                    <div class="kpi-label">عدد العملاء اللي اتدوروا فعليًا</div>
+                    <div class="kpi-value">{rotated_clients:,}</div>
+                    <div class="kpi-sub">من إجمالي {total_clients:,} عميل</div>
+                </div>
+                <div class="kpi-card info">
+                    <div class="kpi-icon">🧾</div>
+                    <div class="kpi-label">عملاء مستبعدين من التدوير (عليهم سداد)</div>
+                    <div class="kpi-value">{excluded_clients:,}</div>
+                    <div class="kpi-sub">فضلوا عند نفس المحصل القديم</div>
+                </div>
+                <div class="kpi-card info">
+                    <div class="kpi-icon">💰</div>
+                    <div class="kpi-label">متبقي مديونية المستبعدين (سداد)</div>
+                    <div class="kpi-value">{excluded_debt:,.0f}</div>
+                    <div class="kpi-sub">اتحسبت ضمن نفس المحصل القديم</div>
+                </div>
+            </div>
+            <br>
+            <div class="kpi-grid-3">
+                <div class="kpi-card">
                     <div class="kpi-icon">👥</div>
-                    <div class="kpi-label">عدد العملاء اللي اتدوروا</div>
+                    <div class="kpi-label">إجمالي عدد العملاء</div>
                     <div class="kpi-value">{total_clients:,}</div>
                     <div class="kpi-sub">على {len(result_df):,} حساب</div>
                 </div>
                 <div class="kpi-card {'ok' if same_collector_violations == 0 else ''}">
                     <div class="kpi-icon">{'✅' if same_collector_violations == 0 else '⚠️'}</div>
-                    <div class="kpi-label">صفوف احتفظت بنفس المحصل</div>
+                    <div class="kpi-label">صفوف اتدورت واحتفظت بنفس المحصل</div>
                     <div class="kpi-value">{same_collector_violations:,}</div>
-                    <div class="kpi-sub">لازم تكون صفر دايمًا</div>
+                    <div class="kpi-sub">لازم تكون صفر دايمًا (غير المستبعدين بالسداد)</div>
                 </div>
                 <div class="kpi-card {'ok' if split_id_violations == 0 else ''}">
                     <div class="kpi-icon">{'✅' if split_id_violations == 0 else '⚠️'}</div>
@@ -3570,12 +3696,22 @@ elif page == "التدوير":
             st.markdown("<br>", unsafe_allow_html=True)
 
             if same_collector_violations == 0 and split_id_violations == 0:
-                st.markdown(
-                    '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
-                    'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل. '
-                    'وتم كمان تشغيل مرحلة تحسين محلي لتقليل الفروق في العدد والمديونية قدر الإمكان.</div>',
-                    unsafe_allow_html=True
-                )
+                if excluded_clients > 0:
+                    st.markdown(
+                        '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
+                        'مفيش أي عميل (من غير المستبعدين بسبب السداد) احتفظ بمحصله القديم، '
+                        'ومفيش أي هوية اتوزعت على أكتر من محصل. وتم كمان تقليل عدد/مديونية '
+                        'الحسابات الجديدة لكل محصل بنفس قيمة الحسابات اللي عليها سداد واستبعدناها، '
+                        'بحيث (المستبعدين + المتدورين) تساوي إجمالي عملاء المحصل الأصليين قدر الإمكان.</div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(
+                        '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
+                        'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل. '
+                        'وتم كمان تشغيل مرحلة تحسين محلي لتقليل الفروق في العدد والمديونية قدر الإمكان.</div>',
+                        unsafe_allow_html=True
+                    )
 
             # ==========================================
             # تحميل النتيجة
@@ -3601,8 +3737,14 @@ elif page == "التدوير":
 
             def style_summary(d):
                 fmt = {
-                    "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العدد": "{:+,.0f}",
-                    "متبقي المديونية (قديم)": "{:,.0f}", "متبقي المديونية (جديد)": "{:,.0f}", "فرق المديونية": "{:+,.0f}",
+                    "عدد العملاء (قديم)": "{:,.0f}",
+                    "عدد العملاء المستبعدين (سداد)": "{:,.0f}",
+                    "عدد العملاء (جديد)": "{:,.0f}",
+                    "فرق العدد": "{:+,.0f}",
+                    "متبقي المديونية (قديم)": "{:,.0f}",
+                    "متبقي المديونية المستبعدة (سداد)": "{:,.0f}",
+                    "متبقي المديونية (جديد)": "{:,.0f}",
+                    "فرق المديونية": "{:+,.0f}",
                 }
                 return d.style.format(fmt)
 
