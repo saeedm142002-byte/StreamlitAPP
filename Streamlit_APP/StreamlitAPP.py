@@ -3186,8 +3186,8 @@ elif page == "التدوير":
     st.markdown("""
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
-        <p>إعادة توزيع العملاء على المحصلين — أنت تختار الأعمدة والمحصلين والحالات بنفسك</p>
-        <span class="header-badge">توزيع مرن + Cache ذكي + جداول تفصيلية</span>
+        <p>إعادة توزيع العملاء مع توازن نهائي في العدد والمديونية (وحسب المنتج إن وجد)</p>
+        <span class="header-badge">توازن ذكي + حماية السداد + Cache</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3315,15 +3315,11 @@ elif page == "التدوير":
         return passes_done
 
     # ============================================================
-    # 1. رفع الملف + session_state
+    # 1. رفع الملف
     # ============================================================
     st.markdown('<div class="section-title">1️⃣ رفع ملف المحفظة</div>', unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader(
-        "ارفع ملف المحفظة (Excel)",
-        type=["xlsx", "xls"],
-        key="rotation_uploader"
-    )
+    uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx", "xls"], key="rotation_uploader")
 
     if uploaded_file is not None:
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
@@ -3347,7 +3343,7 @@ elif page == "التدوير":
     all_columns = df_raw.columns.tolist()
 
     # ============================================================
-    # 2. اختيار الأعمدة + تأكيد
+    # 2. اختيار الأعمدة
     # ============================================================
     st.markdown('<div class="section-title">2️⃣ تحديد أسماء الأعمدة</div>', unsafe_allow_html=True)
 
@@ -3364,18 +3360,9 @@ elif page == "التدوير":
         col_product = st.selectbox("نوع المنتج (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_product")
         col_npl = st.selectbox("NPL أو DPD60 (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_npl")
 
-    required_selected = all([
-        col_id != "— اختر —",
-        col_account != "— اختر —",
-        col_debt != "— اختر —",
-        col_status != "— اختر —",
-        col_collector != "— اختر —",
-        col_payment != "— اختر —"
-    ])
+    required_selected = all(x != "— اختر —" for x in [col_id, col_account, col_debt, col_status, col_collector, col_payment])
 
-    confirm_cols = st.button("✅ تأكيد الأعمدة", type="primary", disabled=not required_selected)
-
-    if confirm_cols and required_selected:
+    if st.button("✅ تأكيد الأعمدة", type="primary", disabled=not required_selected):
         rename_map = {
             col_id: "رقم الهوية",
             col_account: "رقم الحساب",
@@ -3390,21 +3377,14 @@ elif page == "التدوير":
             rename_map[col_npl] = "NPL_DPD"
 
         df = df_raw.rename(columns=rename_map).copy()
-
         df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
         df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.strip()
         df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
         df["الحالة"] = df["الحالة"].astype(str).str.strip()
         df["السداد"] = df["السداد"].astype(str).str.strip()
-
-        df["متبقي المديونية"] = (
-            df["متبقي المديونية"].astype(str)
-            .str.replace(",", "", regex=False)
-            .str.replace(" ", "", regex=False)
-            .str.strip()
-        )
-        df["متبقي المديونية"] = pd.to_numeric(df["متبقي المديونية"], errors="coerce").fillna(0.0)
-
+        df["متبقي المديونية"] = pd.to_numeric(
+            df["متبقي المديونية"].astype(str).str.replace(",", "").str.replace(" ", ""), errors="coerce"
+        ).fillna(0.0)
         if "NPL_DPD" in df.columns:
             df["NPL_DPD"] = df["NPL_DPD"].astype(str).str.strip()
 
@@ -3421,86 +3401,71 @@ elif page == "التدوير":
     has_npl = "NPL_DPD" in df.columns
 
     # ============================================================
-    # 3. اختيار المحصلين (بدون default)
+    # 3. اختيار المحصلين
     # ============================================================
-    st.markdown('<div class="section-title">3️⃣ اختيار المحصلين اللي هيتدور بينهم</div>', unsafe_allow_html=True)
-
-    all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique().tolist() if c and str(c).lower() != "nan"])
-
-    selected_collectors = st.multiselect(
-        "اختار المحصلين (لازم اتنين على الأقل)",
-        options=all_collectors,
-        default=[],
-        key="selected_collectors"
-    )
+    st.markdown('<div class="section-title">3️⃣ اختيار المحصلين</div>', unsafe_allow_html=True)
+    all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique() if c and str(c).lower() != "nan"])
+    selected_collectors = st.multiselect("اختار المحصلين (لازم اتنين على الأقل)", options=all_collectors, default=[], key="selected_collectors")
 
     if len(selected_collectors) < 2:
-        st.warning("لازم تختار محصلين اثنين على الأقل عشان تقدر تكمل.")
+        st.warning("لازم تختار محصلين اثنين على الأقل.")
         st.stop()
 
     # ============================================================
-    # 4. اختيار الحالات (بدون default)
+    # 4. اختيار حالات التدوير
     # ============================================================
     st.markdown('<div class="section-title">4️⃣ اختيار الحالات اللي هتتدور</div>', unsafe_allow_html=True)
-
     df_scoped = df[df["اسم المحصل القديم"].isin(selected_collectors)]
-    all_statuses = sorted([s for s in df_scoped["الحالة"].unique().tolist() if s and str(s).lower() != "nan"])
-
-    selected_statuses = st.multiselect(
-        "اختار الحالات",
-        options=all_statuses,
-        default=[],
-        key="selected_statuses"
-    )
+    all_statuses = sorted([s for s in df_scoped["الحالة"].unique() if s and str(s).lower() != "nan"])
+    selected_statuses = st.multiselect("اختار الحالات اللي هتتدور", options=all_statuses, default=[], key="selected_statuses")
 
     if not selected_statuses:
         st.warning("لازم تختار حالة واحدة على الأقل.")
         st.stop()
 
     # ============================================================
-    # 5. خيار السداد
+    # 5. خيار السداد (حماية)
     # ============================================================
-    st.markdown('<div class="section-title">5️⃣ التعامل مع السداد</div>', unsafe_allow_html=True)
-
-    payment_option = st.radio(
-        "هل ندور الحالات اللي فيها سداد؟",
+    st.markdown('<div class="section-title">5️⃣ حماية حالات السداد</div>', unsafe_allow_html=True)
+    protect_payment = st.radio(
+        "هل تحمي حالات السداد من التدوير؟",
         options=[
-            "دور كل الحالات المختارة (بما فيها اللي فيها سداد)",
-            "ماتدورش الحالات اللي فيها سداد (سيب اللي فيها سداد زي ما هي)"
+            "نعم، سيب حالات السداد زي ما هي (متتغيرش محصلها)",
+            "لا، دور كل الحالات المختارة بما فيها السداد"
         ],
         index=0,
-        key="payment_option"
+        key="protect_payment"
     )
-    exclude_payment = payment_option.startswith("ماتدورش")
+    exclude_payment = protect_payment.startswith("نعم")
 
-    # بناء الداتا اللي هتتدور
+    # بناء df_rotate (اللي هيتحرك)
     mask = (
         df["اسم المحصل القديم"].isin(selected_collectors) &
         df["الحالة"].isin(selected_statuses)
     )
     if exclude_payment:
-        has_payment = df["السداد"].astype(str).str.strip().str.lower()
-        has_payment = ~has_payment.isin(["", "nan", "none", "0", "0.0", "لا", "no", "false"])
-        mask = mask & (~has_payment)
+        has_pay = ~df["السداد"].astype(str).str.strip().str.lower().isin(
+            ["", "nan", "none", "0", "0.0", "لا", "no", "false"]
+        )
+        mask = mask & (~has_pay)
 
     df_rotate = df[mask].copy()
     df_keep = df[~mask].copy()
 
     if df_rotate.empty:
-        st.error("مفيش أي صفوف متبقية بعد الفلترة. راجع اختياراتك.")
+        st.error("مفيش صفوف هتتدور بعد الفلترة.")
         st.stop()
 
     st.markdown(f"""
     <div class="info-box">
-        ✅ عدد الصفوف اللي هتتدور: <b>{len(df_rotate):,}</b><br>
-        📌 عدد الهويات المميزة: <b>{df_rotate['رقم الهوية'].nunique():,}</b><br>
-        📌 المحصلين المختارين: <b>{len(selected_collectors)}</b><br>
-        📌 الحالات: <b>{' | '.join(selected_statuses)}</b>
+        ✅ الصفوف اللي هتتدور: <b>{len(df_rotate):,}</b><br>
+        📌 الهويات: <b>{df_rotate['رقم الهوية'].nunique():,}</b><br>
+        📌 المحصلين: <b>{len(selected_collectors)}</b> | الحالات: <b>{' | '.join(selected_statuses)}</b>
     </div>
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # 6. نوع التوزيع + خيارات التساوي
+    # 6. نوع التوزيع
     # ============================================================
     st.markdown('<div class="section-title">6️⃣ نوع التوزيع</div>', unsafe_allow_html=True)
 
@@ -3508,75 +3473,56 @@ elif page == "التدوير":
         "أسلوب التدوير:",
         options=[
             "تدوير بالتساوي",
-            "تدوير بدون تساوي (يحافظ على نفس أعداد كل محصل قدر الإمكان)"
+            "تدوير بدون تساوي (يحافظ على الأعداد الأصلية قدر الإمكان)"
         ],
         index=0,
         key="rotation_mode"
     )
     equalize = rotation_mode.startswith("تدوير بالتساوي")
 
-    equalize_whole_portfolio = False
+    equalize_whole = False
     equalize_statuses = selected_statuses
 
     if equalize:
         equalize_sub = st.radio(
             "نوع التساوي:",
             options=[
-                "تدوير بالتساوي على المحفظة كلها (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التساوي",
-                "تدوير بالتساوي زي الوضع الحالي (على الجزء المتدور بس)"
+                "تساوي على المحفظة النهائية (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التوازن",
+                "تساوي عادي على الجزء المتدور بس"
             ],
-            index=1,
+            index=0,
             key="equalize_sub"
         )
-        equalize_whole_portfolio = equalize_sub.startswith("تدوير بالتساوي على المحفظة كلها")
+        equalize_whole = equalize_sub.startswith("تساوي على المحفظة النهائية")
 
-        if equalize_whole_portfolio:
-            st.markdown("**اختار الحالات اللي هيتبيني عليها التساوي (المحفظة الكاملة للمحصلين المختارين):**")
+        if equalize_whole:
+            st.markdown("**الحالات اللي هيتبيني عليها حساب التوازن النهائي:**")
             equalize_statuses = st.multiselect(
-                "الحالات لحساب التساوي",
+                "اختار الحالات",
                 options=all_statuses,
                 default=selected_statuses,
                 key="equalize_statuses"
             )
             if not equalize_statuses:
-                st.warning("لازم تختار حالة واحدة على الأقل لحساب التساوي.")
+                st.warning("لازم تختار حالة واحدة على الأقل.")
                 st.stop()
 
     # ============================================================
-    # 7. تشغيل التدوير
+    # 7. التشغيل
     # ============================================================
-    @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة...")
-    def run_rotation(df_rotate_bytes, collectors, equalize, equalize_whole,
-                     target_count_dict, target_debt_dict):
-        df_rotate = pd.read_pickle(BytesIO(df_rotate_bytes))
+    @st.cache_data(show_spinner="جاري إعادة التوزيع...")
+    def run_rotation(df_bytes, collectors, target_count, target_debt):
+        df_rot = pd.read_pickle(BytesIO(df_bytes))
         collectors = list(collectors)
 
         groups = []
-        for id_val, g in df_rotate.groupby("رقم الهوية", sort=False):
-            debt = float(g["متبقي المديونية"].sum())
-            forbidden = set(g["اسم المحصل القديم"].unique().tolist())
+        for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
             groups.append({
                 "id": id_val,
-                "debt": debt,
-                "forbidden": forbidden,
+                "debt": float(g["متبقي المديونية"].sum()),
+                "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
             })
         groups.sort(key=lambda x: x["debt"], reverse=True)
-
-        if equalize:
-            total_clients = len(groups)
-            total_debt = sum(g["debt"] for g in groups)
-            n_col = len(collectors)
-            base_count = total_clients // n_col
-            rem_count = total_clients % n_col
-            target_count = {c: base_count + (1 if i < rem_count else 0) for i, c in enumerate(collectors)}
-            avg_debt = total_debt / total_clients if total_clients else 0
-            target_debt = {c: target_count[c] * avg_debt for c in collectors}
-        else:
-            target_count = dict(target_count_dict)
-            target_debt = dict(target_debt_dict)
-            for c in collectors:
-                target_count.setdefault(c, 0)
-                target_debt.setdefault(c, 0.0)
 
         current_count = {c: 0 for c in collectors}
         current_debt = {c: 0.0 for c in collectors}
@@ -3601,254 +3547,214 @@ elif page == "التدوير":
             current_debt[best] += grp["debt"]
 
         if unassignable:
-            raise KeyError("STEP::تعذر إيجاد محصل بديل لبعض العملاء::MISSING::" + "|".join(unassignable[:30]))
+            raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
 
-        refine_assignment(groups, assignment, current_count, current_debt,
-                          target_count, target_debt, collectors)
-
+        refine_assignment(groups, assignment, current_count, current_debt, target_count, target_debt, collectors)
         return assignment, current_count, current_debt
 
-    run_btn = st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True)
+    if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
 
-    if not run_btn:
-        st.stop()
+        try:
+            # ---------- حساب الأهداف ----------
+            if equalize and equalize_whole:
+                # الكون = المحصلين المختارين + الحالات المختارة للتوازن
+                universe = df[
+                    df["اسم المحصل القديم"].isin(selected_collectors) &
+                    df["الحالة"].isin(equalize_statuses)
+                ].copy()
 
-    try:
-        # ---------- حساب الأهداف ----------
-        if equalize and equalize_whole_portfolio:
-            # الكون = المحصلين المختارين + الحالات المختارة للتساوي
-            universe_mask = (
-                df["اسم المحصل القديم"].isin(selected_collectors) &
-                df["الحالة"].isin(equalize_statuses)
-            )
-            df_universe = df[universe_mask].copy()
+                total_accounts = len(universe)
+                total_debt = universe["متبقي المديونية"].sum()
+                n = len(selected_collectors)
 
-            total_clients = df_universe["رقم الهوية"].nunique()
-            total_debt = df_universe["متبقي المديونية"].sum()
-            n_col = len(selected_collectors)
+                ideal_accounts = total_accounts / n
+                ideal_debt = total_debt / n
 
-            ideal_count = total_clients / n_col
-            ideal_debt = total_debt / n_col
+                # الجزء الثابت (مش هيتدور) لكل محصل
+                fixed_accounts = {}
+                fixed_debt = {}
+                for c in selected_collectors:
+                    fixed_mask = (
+                        (df["اسم المحصل القديم"] == c) &
+                        df["الحالة"].isin(equalize_statuses) &
+                        (~df.index.isin(df_rotate.index))
+                    )
+                    fixed_accounts[c] = fixed_mask.sum()
+                    fixed_debt[c] = df.loc[fixed_mask, "متبقي المديونية"].sum()
 
-            # الجزء الثابت (مش هيتدور) لكل محصل داخل الكون
-            fixed_count = {}
-            fixed_debt = {}
-            for c in selected_collectors:
-                # الصفوف اللي هتفضل مع المحصل ده (مش داخلة في df_rotate)
-                fixed_mask = (
-                    (df["اسم المحصل القديم"] == c) &
-                    df["الحالة"].isin(equalize_statuses) &
-                    (~df.index.isin(df_rotate.index))
-                )
-                fixed_count[c] = df.loc[fixed_mask, "رقم الهوية"].nunique()
-                fixed_debt[c] = df.loc[fixed_mask, "متبقي المديونية"].sum()
+                # الهدف للجزء المتحرك = المثالي - الثابت
+                target_count = {c: max(0, round(ideal_accounts - fixed_accounts[c])) for c in selected_collectors}
+                target_debt = {c: max(0.0, ideal_debt - fixed_debt[c]) for c in selected_collectors}
 
-            # الهدف للجزء اللي هيتدور = المثالي − الثابت
-            target_count = {}
-            target_debt = {}
-            for c in selected_collectors:
-                target_count[c] = max(0, round(ideal_count - fixed_count[c]))
-                target_debt[c] = max(0.0, ideal_debt - fixed_debt[c])
+                # تصحيح بسيط للـ rounding
+                diff = df_rotate["رقم الهوية"].nunique() - sum(target_count.values())
+                if diff != 0:
+                    ordered = sorted(target_count, key=target_count.get, reverse=True)
+                    for i in range(abs(diff)):
+                        c = ordered[i % len(ordered)]
+                        target_count[c] = max(0, target_count[c] + (1 if diff > 0 else -1))
 
-            # لو المجموع مش متطابق بسبب الـ rounding نعدل خفيف
-            diff = len(df_rotate["رقم الهوية"].unique()) - sum(target_count.values())
-            if diff != 0:
-                # نوزع الفرق على أكبر هدف
-                sorted_c = sorted(target_count.keys(), key=lambda x: target_count[x], reverse=True)
-                for i in range(abs(diff)):
-                    c = sorted_c[i % len(sorted_c)]
-                    target_count[c] += 1 if diff > 0 else -1
-                    target_count[c] = max(0, target_count[c])
+            elif equalize:
+                # تساوي عادي على الجزء المتدور
+                total_c = df_rotate["رقم الهوية"].nunique()
+                total_d = df_rotate["متبقي المديونية"].sum()
+                n = len(selected_collectors)
+                base = total_c // n
+                rem = total_c % n
+                target_count = {c: base + (1 if i < rem else 0) for i, c in enumerate(selected_collectors)}
+                avg_d = total_d / total_c if total_c else 0
+                target_debt = {c: target_count[c] * avg_d for c in selected_collectors}
+            else:
+                # بدون تساوي
+                target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
+                target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
+                for c in selected_collectors:
+                    target_count.setdefault(c, 0)
+                    target_debt.setdefault(c, 0.0)
 
-        elif equalize:
-            # التساوي العادي على الجزء المتدور بس
-            target_count = {}
-            target_debt = {}
-        else:
-            # بدون تساوي → نحافظ على الأعداد الأصلية للجزء المتدور
-            target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
-            target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
-
-        # ---------- تشغيل ----------
-        buffer = BytesIO()
-        df_rotate.to_pickle(buffer)
-        df_bytes = buffer.getvalue()
-
-        assignment, current_count, current_debt = run_rotation(
-            df_bytes,
-            tuple(selected_collectors),
-            equalize,
-            equalize_whole_portfolio,
-            target_count,
-            target_debt
-        )
-
-        # تطبيق التوزيع
-        df_rotate = df_rotate.copy()
-        df_rotate["المحصل الجديد"] = df_rotate["رقم الهوية"].map(assignment)
-
-        if not df_keep.empty:
-            df_keep = df_keep.copy()
-            df_keep["المحصل الجديد"] = df_keep["اسم المحصل القديم"]
-
-        result_df = pd.concat([df_rotate, df_keep], ignore_index=True)
-
-        # ===== KPI =====
-        same_collector_violations = int((df_rotate["المحصل الجديد"] == df_rotate["اسم المحصل القديم"]).sum())
-        split_id_violations = int(df_rotate.groupby("رقم الهوية")["المحصل الجديد"].nunique().gt(1).sum())
-        total_clients = df_rotate["رقم الهوية"].nunique()
-
-        st.markdown(f"""
-        <div class="kpi-grid-3">
-            <div class="kpi-card ok">
-                <div class="kpi-icon">👥</div>
-                <div class="kpi-label">عدد العملاء اللي اتدوروا</div>
-                <div class="kpi-value">{total_clients:,}</div>
-                <div class="kpi-sub">على {len(df_rotate):,} حساب</div>
-            </div>
-            <div class="kpi-card {'ok' if same_collector_violations == 0 else ''}">
-                <div class="kpi-icon">{'✅' if same_collector_violations == 0 else '⚠️'}</div>
-                <div class="kpi-label">صفوف احتفظت بنفس المحصل</div>
-                <div class="kpi-value">{same_collector_violations:,}</div>
-                <div class="kpi-sub">لازم تكون صفر</div>
-            </div>
-            <div class="kpi-card {'ok' if split_id_violations == 0 else ''}">
-                <div class="kpi-icon">{'✅' if split_id_violations == 0 else '⚠️'}</div>
-                <div class="kpi-label">هويات اتوزعت على أكتر من محصل</div>
-                <div class="kpi-value">{split_id_violations:,}</div>
-                <div class="kpi-sub">لازم تكون صفر</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if same_collector_violations == 0 and split_id_violations == 0:
-            mode_txt = "بالتساوي على المحفظة كلها" if (equalize and equalize_whole_portfolio) else ("بالتساوي" if equalize else "بدون تساوي")
-            st.markdown(
-                f'<div class="success-box">✅ التوزيع سليم بالكامل ({mode_txt}). مفيش أي عميل احتفظ بمحصله القديم.</div>',
-                unsafe_allow_html=True
+            # تشغيل
+            buf = BytesIO()
+            df_rotate.to_pickle(buf)
+            assignment, current_count, current_debt = run_rotation(
+                buf.getvalue(), tuple(selected_collectors), target_count, target_debt
             )
 
-        # ===== تحميل =====
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            result_df.to_excel(writer, index=False, sheet_name="التدوير الكامل")
-            df_rotate.to_excel(writer, index=False, sheet_name="الجزء اللي اتدور")
-        output.seek(0)
+            df_rotate = df_rotate.copy()
+            df_rotate["المحصل الجديد"] = df_rotate["رقم الهوية"].map(assignment)
 
-        st.download_button(
-            "📥 تحميل ملف التدوير",
-            data=output,
-            file_name="التدوير.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            if not df_keep.empty:
+                df_keep = df_keep.copy()
+                df_keep["المحصل الجديد"] = df_keep["اسم المحصل القديم"]
 
-        # ============================================================
-        # الجداول التفصيلية
-        # ============================================================
-        st.markdown('<div class="section-title">📊 ملخص النتائج بعد التدوير</div>', unsafe_allow_html=True)
+            result_df = pd.concat([df_rotate, df_keep], ignore_index=True)
 
-        # ---------- جدول 1: أساسي ----------
-        st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
+            # KPI
+            same_viol = int((df_rotate["المحصل الجديد"] == df_rotate["اسم المحصل القديم"]).sum())
+            split_viol = int(df_rotate.groupby("رقم الهوية")["المحصل الجديد"].nunique().gt(1).sum())
+            total_cli = df_rotate["رقم الهوية"].nunique()
 
-        summary_basic = []
-        for c in selected_collectors:
-            old_mask = df_rotate["اسم المحصل القديم"] == c
-            new_mask = df_rotate["المحصل الجديد"] == c
+            st.markdown(f"""
+            <div class="kpi-grid-3">
+                <div class="kpi-card ok">
+                    <div class="kpi-icon">👥</div>
+                    <div class="kpi-label">عدد العملاء اللي اتدوروا</div>
+                    <div class="kpi-value">{total_cli:,}</div>
+                    <div class="kpi-sub">على {len(df_rotate):,} حساب</div>
+                </div>
+                <div class="kpi-card {'ok' if same_viol == 0 else ''}">
+                    <div class="kpi-icon">{'✅' if same_viol == 0 else '⚠️'}</div>
+                    <div class="kpi-label">صفوف احتفظت بنفس المحصل</div>
+                    <div class="kpi-value">{same_viol:,}</div>
+                    <div class="kpi-sub">لازم تكون صفر</div>
+                </div>
+                <div class="kpi-card {'ok' if split_viol == 0 else ''}">
+                    <div class="kpi-icon">{'✅' if split_viol == 0 else '⚠️'}</div>
+                    <div class="kpi-label">هويات اتوزعت على أكتر من محصل</div>
+                    <div class="kpi-value">{split_viol:,}</div>
+                    <div class="kpi-sub">لازم تكون صفر</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            summary_basic.append({
-                "المحصل": c,
-                "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
-                "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                "عدد الحسابات (قديم)": int(old_mask.sum()),
-                "عدد الحسابات (جديد)": int(new_mask.sum()),
-                "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
-                "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-                "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
-                "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-            })
+            if same_viol == 0 and split_viol == 0:
+                mode_txt = "تساوي على المحفظة النهائية" if (equalize and equalize_whole) else ("بالتساوي" if equalize else "بدون تساوي")
+                st.markdown(f'<div class="success-box">✅ التوزيع سليم ({mode_txt})</div>', unsafe_allow_html=True)
 
-        summary_basic_df = pd.DataFrame(summary_basic)
+            # تحميل
+            out = BytesIO()
+            with pd.ExcelWriter(out, engine="openpyxl") as writer:
+                result_df.to_excel(writer, index=False, sheet_name="التدوير الكامل")
+                df_rotate.to_excel(writer, index=False, sheet_name="الجزء المتدور")
+            out.seek(0)
+            st.download_button("📥 تحميل ملف التدوير", data=out, file_name="التدوير.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-        def style_num(d):
-            fmt = {
-                "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العملاء": "{:+,.0f}",
-                "عدد الحسابات (قديم)": "{:,.0f}", "عدد الحسابات (جديد)": "{:,.0f}", "فرق الحسابات": "{:+,.0f}",
-                "متبقي المديونية (قديم)": "{:,.0f}", "متبقي المديونية (جديد)": "{:,.0f}", "فرق المديونية": "{:+,.0f}",
-            }
-            return d.style.format(fmt)
+            # ====================== الجداول ======================
+            st.markdown('<div class="section-title">📊 ملخص النتائج</div>', unsafe_allow_html=True)
 
-        st.dataframe(style_num(summary_basic_df), use_container_width=True, hide_index=True)
+            def style_num(d):
+                fmt = {col: "{:,.0f}" if "مديونية" not in col else "{:,.0f}" for col in d.columns if col != "المحصل" and col != "نوع المنتج" and col != "NPL / DPD60"}
+                for col in d.columns:
+                    if "فرق" in col:
+                        fmt[col] = "{:+,.0f}"
+                return d.style.format(fmt)
 
-        # ---------- جدول 2: + نوع المنتج ----------
-        if has_product:
-            st.markdown("### 2️⃣ نفس الملخص + تفصيل حسب نوع المنتج")
-
-            product_rows = []
+            # جدول 1: أساسي
+            st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
+            rows = []
             for c in selected_collectors:
-                for prod in sorted(df_rotate["نوع المنتج"].dropna().unique()):
-                    old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["نوع المنتج"] == prod)
-                    new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["نوع المنتج"] == prod)
-                    if old_mask.sum() == 0 and new_mask.sum() == 0:
-                        continue
-                    product_rows.append({
-                        "المحصل": c,
-                        "نوع المنتج": prod,
-                        "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
-                        "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد الحسابات (قديم)": int(old_mask.sum()),
-                        "عدد الحسابات (جديد)": int(new_mask.sum()),
-                        "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
-                        "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-                        "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
-                        "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-                    })
+                old_m = df_rotate["اسم المحصل القديم"] == c
+                new_m = df_rotate["المحصل الجديد"] == c
+                rows.append({
+                    "المحصل": c,
+                    "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                    "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
+                    "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                    "عدد الحسابات (قديم)": int(old_m.sum()),
+                    "عدد الحسابات (جديد)": int(new_m.sum()),
+                    "فرق الحسابات": int(new_m.sum() - old_m.sum()),
+                    "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                    "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
+                    "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                })
+            st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
-            if product_rows:
-                st.dataframe(style_num(pd.DataFrame(product_rows)), use_container_width=True, hide_index=True)
-            else:
-                st.info("مفيش بيانات نوع منتج متاحة.")
+            # جدول 2: حسب المنتج
+            if has_product:
+                st.markdown("### 2️⃣ تفصيل حسب نوع المنتج")
+                rows = []
+                for c in selected_collectors:
+                    for prod in sorted(df_rotate["نوع المنتج"].dropna().unique()):
+                        old_m = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["نوع المنتج"] == prod)
+                        new_m = (df_rotate["المحصل الجديد"] == c) & (df_rotate["نوع المنتج"] == prod)
+                        if old_m.sum() == 0 and new_m.sum() == 0:
+                            continue
+                        rows.append({
+                            "المحصل": c,
+                            "نوع المنتج": prod,
+                            "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
+                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد الحسابات (قديم)": int(old_m.sum()),
+                            "عدد الحسابات (جديد)": int(new_m.sum()),
+                            "فرق الحسابات": int(new_m.sum() - old_m.sum()),
+                            "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                            "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
+                            "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                        })
+                if rows:
+                    st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
-        # ---------- جدول 3: + NPL/DPD ----------
-        if has_npl:
-            st.markdown("### 3️⃣ نفس الملخص + تفصيل حسب NPL / DPD60")
+            # جدول 3: حسب NPL
+            if has_npl:
+                st.markdown("### 3️⃣ تفصيل حسب NPL / DPD60")
+                rows = []
+                for c in selected_collectors:
+                    for val in sorted(df_rotate["NPL_DPD"].dropna().unique()):
+                        old_m = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == val)
+                        new_m = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == val)
+                        if old_m.sum() == 0 and new_m.sum() == 0:
+                            continue
+                        rows.append({
+                            "المحصل": c,
+                            "NPL / DPD60": val,
+                            "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
+                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد الحسابات (قديم)": int(old_m.sum()),
+                            "عدد الحسابات (جديد)": int(new_m.sum()),
+                            "فرق الحسابات": int(new_m.sum() - old_m.sum()),
+                            "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                            "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
+                            "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                        })
+                if rows:
+                    st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
-            npl_rows = []
-            for c in selected_collectors:
-                for npl_val in sorted(df_rotate["NPL_DPD"].dropna().unique()):
-                    old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == npl_val)
-                    new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == npl_val)
-                    if old_mask.sum() == 0 and new_mask.sum() == 0:
-                        continue
-                    npl_rows.append({
-                        "المحصل": c,
-                        "NPL / DPD60": npl_val,
-                        "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
-                        "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد الحسابات (قديم)": int(old_mask.sum()),
-                        "عدد الحسابات (جديد)": int(new_mask.sum()),
-                        "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
-                        "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-                        "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
-                        "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
-                    })
+            with st.expander("🗂️ الجزء اللي اتدور"):
+                st.dataframe(df_rotate, use_container_width=True, hide_index=True)
+            with st.expander("📋 الملف الكامل"):
+                st.dataframe(result_df, use_container_width=True, hide_index=True)
 
-            if npl_rows:
-                st.dataframe(style_num(pd.DataFrame(npl_rows)), use_container_width=True, hide_index=True)
-            else:
-                st.info("مفيش بيانات NPL/DPD متاحة.")
-
-        # باقي البيانات
-        with st.expander("🗂️ عرض الجزء اللي اتدور"):
-            st.dataframe(df_rotate, use_container_width=True, hide_index=True)
-
-        with st.expander("📋 عرض الملف الكامل بعد التدوير"):
-            st.dataframe(result_df, use_container_width=True, hide_index=True)
-
-    except Exception as e:
-        show_error(e)
+        except Exception as e:
+            show_error(e)
