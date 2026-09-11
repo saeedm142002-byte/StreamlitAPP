@@ -3004,196 +3004,60 @@ elif page == "التدوير":
     import traceback
     from io import BytesIO
 
-    # ============================================================
-    # 🎨 تصميم
-    # ============================================================
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
-        html, body, [class*="css"] {
-            font-family: 'Tajawal', sans-serif;
-        }
-        .main .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 3rem;
-        }
+        html, body, [class*="css"] { font-family: 'Tajawal', sans-serif; }
+        .main .block-container { padding-top: 1.2rem; padding-bottom: 3rem; }
         .rotation-header {
-            position: relative;
-            overflow: hidden;
+            position: relative; overflow: hidden;
             background: linear-gradient(120deg, #0d2d4a 0%, #155a8a 50%, #1c76b3 100%);
-            padding: 32px 34px;
-            border-radius: 20px;
-            margin-bottom: 26px;
+            padding: 32px 34px; border-radius: 20px; margin-bottom: 26px;
             box-shadow: 0 10px 30px rgba(21,90,138,0.28);
         }
-        .rotation-header::after {
-            content: "";
-            position: absolute;
-            top: -60px; left: -40px;
-            width: 220px; height: 220px;
-            background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%);
-            border-radius: 50%;
-        }
-        .rotation-header h1 {
-            color: #fff;
-            margin: 0;
-            font-size: 27px;
-            font-weight: 800;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .rotation-header p {
-            color: #d3e9f7;
-            margin: 8px 0 0 0;
-            font-size: 14.5px;
-            font-weight: 500;
-        }
+        .rotation-header h1 { color: #fff; margin: 0; font-size: 27px; font-weight: 800; }
+        .rotation-header p { color: #d3e9f7; margin: 8px 0 0 0; font-size: 14.5px; }
         .header-badge {
-            display: inline-block;
-            background: rgba(255,255,255,0.14);
-            color: #fff;
-            font-size: 12px;
-            font-weight: 700;
-            padding: 4px 12px;
-            border-radius: 999px;
-            margin-top: 12px;
-            border: 1px solid rgba(255,255,255,0.25);
+            display: inline-block; background: rgba(255,255,255,0.14); color: #fff;
+            font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;
+            margin-top: 12px; border: 1px solid rgba(255,255,255,0.25);
         }
-        .kpi-grid-3 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 6px;
-        }
+        .kpi-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 6px; }
         .kpi-card {
-            position: relative;
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 20px 22px;
-            box-shadow: 0 6px 20px rgba(17,24,39,0.07);
-            border: 1px solid #eef1ef;
-            border-left: 6px solid #155a8a;
-            overflow: hidden;
+            position: relative; background: #ffffff; border-radius: 18px; padding: 20px 22px;
+            box-shadow: 0 6px 20px rgba(17,24,39,0.07); border: 1px solid #eef1ef;
+            border-left: 6px solid #155a8a; overflow: hidden;
         }
         .kpi-card.ok { border-left-color: #00693E; }
-        .kpi-card::before {
-            content: "";
-            position: absolute;
-            top: 0; right: 0;
-            width: 90px; height: 90px;
-            background: radial-gradient(circle, rgba(21,90,138,0.10) 0%, rgba(21,90,138,0) 70%);
-        }
-        .kpi-icon {
-            width: 40px; height: 40px;
-            border-radius: 12px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 19px;
-            background: #e5f0f8;
-        }
+        .kpi-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 19px; background: #e5f0f8; }
         .kpi-card.ok .kpi-icon { background: #e7f4ec; }
-        .kpi-label {
-            font-size: 13px;
-            color: #6b7280;
-            font-weight: 700;
-            margin-top: 12px;
-        }
-        .kpi-value {
-            font-size: 30px;
-            font-weight: 800;
-            color: #0f172a;
-            margin-top: 2px;
-        }
-        .kpi-sub {
-            font-size: 12px;
-            color: #9aa4b2;
-            font-weight: 600;
-            margin-top: 4px;
-        }
+        .kpi-label { font-size: 13px; color: #6b7280; font-weight: 700; margin-top: 12px; }
+        .kpi-value { font-size: 30px; font-weight: 800; color: #0f172a; margin-top: 2px; }
+        .kpi-sub { font-size: 12px; color: #9aa4b2; font-weight: 600; margin-top: 4px; }
         .section-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            display: flex; align-items: center; gap: 10px;
             background: linear-gradient(90deg, #f1f7fb 0%, #ffffff 100%);
-            border-radius: 12px;
-            padding: 12px 18px;
-            margin: 26px 0 14px 0;
-            border-right: 5px solid #155a8a;
-            font-weight: 800;
-            font-size: 16.5px;
-            color: #0d2d4a;
+            border-radius: 12px; padding: 12px 18px; margin: 26px 0 14px 0;
+            border-right: 5px solid #155a8a; font-weight: 800; font-size: 16.5px; color: #0d2d4a;
         }
-        div[data-testid="stFileUploader"] {
-            border: 2px dashed #155a8a44;
-            border-radius: 16px;
-            padding: 8px;
-            background: #f8fbfd;
-        }
-        div[data-testid="stDownloadButton"] button {
-            border-radius: 12px !important;
-            font-weight: 700 !important;
-            border: 1px solid #d8e6f0 !important;
-        }
-        .empty-state {
-            text-align: center;
-            padding: 26px 10px;
-            color: #9aa4b2;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        .error-box {
-            background: #fdecea;
-            border: 1px solid #f5c2c0;
-            border-radius: 14px;
-            padding: 18px 20px;
-            color: #7a1f1a;
-            font-weight: 600;
-            line-height: 2;
-        }
-        .error-box code {
-            background: #fbe0de;
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-weight: 700;
-        }
-        .error-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin-bottom: 6px;
-        }
-        .success-box {
-            background: #eaf6ef;
-            border: 1px solid #c9e9d5;
-            border-radius: 14px;
-            padding: 14px 18px;
-            color: #0f3d2e;
-            font-weight: 700;
-            margin-bottom: 14px;
-        }
-        .info-box {
-            background: #eef6fc;
-            border: 1px solid #c5dff0;
-            border-radius: 14px;
-            padding: 14px 18px;
-            color: #0d3a5c;
-            font-weight: 600;
-            margin-bottom: 14px;
-            line-height: 1.8;
-        }
+        div[data-testid="stFileUploader"] { border: 2px dashed #155a8a44; border-radius: 16px; padding: 8px; background: #f8fbfd; }
+        .empty-state { text-align: center; padding: 26px 10px; color: #9aa4b2; font-weight: 600; font-size: 14px; }
+        .error-box { background: #fdecea; border: 1px solid #f5c2c0; border-radius: 14px; padding: 18px 20px; color: #7a1f1a; font-weight: 600; line-height: 2; }
+        .error-box code { background: #fbe0de; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+        .error-title { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
+        .success-box { background: #eaf6ef; border: 1px solid #c9e9d5; border-radius: 14px; padding: 14px 18px; color: #0f3d2e; font-weight: 700; margin-bottom: 14px; }
+        .info-box { background: #eef6fc; border: 1px solid #c5dff0; border-radius: 14px; padding: 14px 18px; color: #0d3a5c; font-weight: 600; margin-bottom: 14px; line-height: 1.8; }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
-        <p>إعادة توزيع العملاء مع توازن قوي في عدد الحسابات والمديونية لكل منتج</p>
-        <span class="header-badge">توازن قوي حسب المنتج + حماية السداد + Cache</span>
+        <p>إعادة توزيع العملاء مع أولوية قوية لتساوي عدد الحسابات بين المحصلين</p>
+        <span class="header-badge">أولوية: عدد الحسابات ← ثم المديونية</span>
     </div>
     """, unsafe_allow_html=True)
 
-    # ============================================================
-    # أدوات مساعدة
-    # ============================================================
     def show_error(exc):
         msg = str(exc)
         if msg.startswith("STEP::"):
@@ -3229,26 +3093,14 @@ elif page == "التدوير":
 
     def refine_assignment(groups, assignment, current_count, current_debt,
                            target_count, target_debt, collectors,
-                           current_prod_count=None, target_prod_count=None,
-                           max_passes=80, pool_cap=300):
-        has_prod = current_prod_count is not None and target_prod_count is not None
-
-        def pen_total(count_val, target_c, debt_val, target_d):
+                           max_passes=70, pool_cap=250):
+        def pen(count_val, target_c, debt_val, target_d):
+            # أولوية عالية جدًا لعدد الحسابات
             tc = max(target_c, 1)
             td = max(target_d, 1.0)
             pc = abs(count_val - target_c) / tc
             pdv = abs(debt_val - target_d) / td
-            return (pc ** 1.6) * 1.5 + (pdv ** 1.5)
-
-        def pen_prod(c):
-            if not has_prod:
-                return 0.0
-            total = 0.0
-            for prod, target in target_prod_count.get(c, {}).items():
-                current = current_prod_count.get(c, {}).get(prod, 0)
-                tc = max(target, 1)
-                total += (abs(current - target) / tc) ** 1.8 * 2.5
-            return total
+            return (pc ** 1.7) * 3.0 + (pdv ** 1.3)   # وزن الحسابات أعلى بكتير
 
         groups_by_collector = {c: [] for c in collectors}
         for g in groups:
@@ -3258,49 +3110,23 @@ elif page == "التدوير":
 
         improved = True
         passes = 0
-
         while improved and passes < max_passes:
             improved = False
             passes += 1
 
-            # ---------- Move ----------
-            sorted_groups = sorted(groups, key=lambda x: x["debt"], reverse=True)
-            for g in sorted_groups:
+            # Move
+            for g in sorted(groups, key=lambda x: x["debt"], reverse=True):
                 gid = g["id"]
                 c_old = assignment[gid]
-                prod = g.get("product")
-
-                best_c = None
-                best_delta = -1e-9
+                best_c, best_delta = None, -1e-9
 
                 for c_new in collectors:
                     if c_new == c_old or c_new in g["forbidden"]:
                         continue
-
-                    if has_prod and prod:
-                        current_prod_count[c_old][prod] = current_prod_count[c_old].get(prod, 0) - 1
-                        current_prod_count[c_new][prod] = current_prod_count[c_new].get(prod, 0) + 1
-
-                    new_pen = (
-                        pen_total(current_count[c_old]-1, target_count.get(c_old, 0),
-                                  current_debt[c_old]-g["debt"], target_debt.get(c_old, 0.0)) +
-                        pen_total(current_count[c_new]+1, target_count.get(c_new, 0),
-                                  current_debt[c_new]+g["debt"], target_debt.get(c_new, 0.0)) +
-                        pen_prod(c_old) + pen_prod(c_new)
-                    )
-
-                    if has_prod and prod:
-                        current_prod_count[c_old][prod] += 1
-                        current_prod_count[c_new][prod] -= 1
-
-                    old_pen = (
-                        pen_total(current_count[c_old], target_count.get(c_old, 0),
-                                  current_debt[c_old], target_debt.get(c_old, 0.0)) +
-                        pen_total(current_count[c_new], target_count.get(c_new, 0),
-                                  current_debt[c_new], target_debt.get(c_new, 0.0)) +
-                        pen_prod(c_old) + pen_prod(c_new)
-                    )
-
+                    old_pen = (pen(current_count[c_old], target_count.get(c_old, 0), current_debt[c_old], target_debt.get(c_old, 0.0)) +
+                               pen(current_count[c_new], target_count.get(c_new, 0), current_debt[c_new], target_debt.get(c_new, 0.0)))
+                    new_pen = (pen(current_count[c_old]-1, target_count.get(c_old, 0), current_debt[c_old]-g["debt"], target_debt.get(c_old, 0.0)) +
+                               pen(current_count[c_new]+1, target_count.get(c_new, 0), current_debt[c_new]+g["debt"], target_debt.get(c_new, 0.0)))
                     delta = new_pen - old_pen
                     if delta < best_delta:
                         best_delta = delta
@@ -3312,65 +3138,30 @@ elif page == "التدوير":
                     current_count[best_c] += 1
                     current_debt[best_c] += g["debt"]
                     assignment[gid] = best_c
-
-                    if has_prod and prod:
-                        current_prod_count[c_old][prod] = current_prod_count[c_old].get(prod, 0) - 1
-                        current_prod_count[best_c][prod] = current_prod_count[best_c].get(prod, 0) + 1
-
                     groups_by_collector[c_old].remove(g)
                     groups_by_collector[best_c].append(g)
                     improved = True
 
-            # ---------- Swap ----------
+            # Swap
             for i, c1 in enumerate(collectors):
                 for c2 in collectors[i+1:]:
                     list1 = [g for g in groups_by_collector[c1] if c2 not in g["forbidden"]]
                     list2 = [g for g in groups_by_collector[c2] if c1 not in g["forbidden"]]
                     if not list1 or not list2:
                         continue
-
                     list1 = _sample_by_debt(list1, pool_cap)
                     list2 = _sample_by_debt(list2, pool_cap)
 
-                    old_pen = (
-                        pen_total(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
-                        pen_total(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0)) +
-                        pen_prod(c1) + pen_prod(c2)
-                    )
-
-                    best_pair = None
-                    best_delta = -1e-9
+                    old_pen = (pen(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
+                               pen(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0)))
+                    best_pair, best_delta = None, -1e-9
 
                     for g1 in list1:
                         for g2 in list2:
-                            prod1 = g1.get("product")
-                            prod2 = g2.get("product")
-
-                            if has_prod:
-                                if prod1:
-                                    current_prod_count[c1][prod1] = current_prod_count[c1].get(prod1, 0) - 1
-                                    current_prod_count[c2][prod1] = current_prod_count[c2].get(prod1, 0) + 1
-                                if prod2:
-                                    current_prod_count[c2][prod2] = current_prod_count[c2].get(prod2, 0) - 1
-                                    current_prod_count[c1][prod2] = current_prod_count[c1].get(prod2, 0) + 1
-
                             new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
                             new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
-
-                            new_pen = (
-                                pen_total(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
-                                pen_total(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)) +
-                                pen_prod(c1) + pen_prod(c2)
-                            )
-
-                            if has_prod:
-                                if prod1:
-                                    current_prod_count[c1][prod1] += 1
-                                    current_prod_count[c2][prod1] -= 1
-                                if prod2:
-                                    current_prod_count[c2][prod2] += 1
-                                    current_prod_count[c1][prod2] -= 1
-
+                            new_pen = (pen(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
+                                       pen(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)))
                             delta = new_pen - old_pen
                             if delta < best_delta:
                                 best_delta = delta
@@ -3378,35 +3169,21 @@ elif page == "التدوير":
 
                     if best_pair:
                         g1, g2 = best_pair
-                        prod1 = g1.get("product")
-                        prod2 = g2.get("product")
-
                         assignment[g1["id"]] = c2
                         assignment[g2["id"]] = c1
                         current_debt[c1] += (g2["debt"] - g1["debt"])
                         current_debt[c2] += (g1["debt"] - g2["debt"])
-
-                        if has_prod:
-                            if prod1:
-                                current_prod_count[c1][prod1] = current_prod_count[c1].get(prod1, 0) - 1
-                                current_prod_count[c2][prod1] = current_prod_count[c2].get(prod1, 0) + 1
-                            if prod2:
-                                current_prod_count[c2][prod2] = current_prod_count[c2].get(prod2, 0) - 1
-                                current_prod_count[c1][prod2] = current_prod_count[c1].get(prod2, 0) + 1
-
                         groups_by_collector[c1].remove(g1)
                         groups_by_collector[c1].append(g2)
                         groups_by_collector[c2].remove(g2)
                         groups_by_collector[c2].append(g1)
                         improved = True
-
         return passes
 
     # ============================================================
     # 1. رفع الملف
     # ============================================================
     st.markdown('<div class="section-title">1️⃣ رفع ملف المحفظة</div>', unsafe_allow_html=True)
-
     uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx", "xls"], key="rotation_uploader")
 
     if uploaded_file is not None:
@@ -3434,7 +3211,6 @@ elif page == "التدوير":
     # 2. اختيار الأعمدة
     # ============================================================
     st.markdown('<div class="section-title">2️⃣ تحديد أسماء الأعمدة</div>', unsafe_allow_html=True)
-
     col1, col2, col3 = st.columns(3)
     with col1:
         col_id = st.selectbox("رقم الهوية *", options=["— اختر —"] + all_columns, key="col_id")
@@ -3452,12 +3228,8 @@ elif page == "التدوير":
 
     if st.button("✅ تأكيد الأعمدة", type="primary", disabled=not required_selected):
         rename_map = {
-            col_id: "رقم الهوية",
-            col_account: "رقم الحساب",
-            col_debt: "متبقي المديونية",
-            col_status: "الحالة",
-            col_collector: "اسم المحصل القديم",
-            col_payment: "السداد",
+            col_id: "رقم الهوية", col_account: "رقم الحساب", col_debt: "متبقي المديونية",
+            col_status: "الحالة", col_collector: "اسم المحصل القديم", col_payment: "السداد",
         }
         if col_product != "— لا يوجد —":
             rename_map[col_product] = "نوع المنتج"
@@ -3470,9 +3242,7 @@ elif page == "التدوير":
         df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
         df["الحالة"] = df["الحالة"].astype(str).str.strip()
         df["السداد"] = df["السداد"].astype(str).str.strip()
-        df["متبقي المديونية"] = pd.to_numeric(
-            df["متبقي المديونية"].astype(str).str.replace(",", "").str.replace(" ", ""), errors="coerce"
-        ).fillna(0.0)
+        df["متبقي المديونية"] = pd.to_numeric(df["متبقي المديونية"].astype(str).str.replace(",", "").str.replace(" ", ""), errors="coerce").fillna(0.0)
         if "NPL_DPD" in df.columns:
             df["NPL_DPD"] = df["NPL_DPD"].astype(str).str.strip()
 
@@ -3494,51 +3264,39 @@ elif page == "التدوير":
     st.markdown('<div class="section-title">3️⃣ اختيار المحصلين</div>', unsafe_allow_html=True)
     all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique() if c and str(c).lower() != "nan"])
     selected_collectors = st.multiselect("اختار المحصلين (لازم اتنين على الأقل)", options=all_collectors, default=[], key="selected_collectors")
-
     if len(selected_collectors) < 2:
         st.warning("لازم تختار محصلين اثنين على الأقل.")
         st.stop()
 
     # ============================================================
-    # 4. اختيار حالات التدوير
+    # 4. اختيار الحالات
     # ============================================================
     st.markdown('<div class="section-title">4️⃣ اختيار الحالات اللي هتتدور</div>', unsafe_allow_html=True)
     df_scoped = df[df["اسم المحصل القديم"].isin(selected_collectors)]
     all_statuses = sorted([s for s in df_scoped["الحالة"].unique() if s and str(s).lower() != "nan"])
     selected_statuses = st.multiselect("اختار الحالات اللي هتتدور", options=all_statuses, default=[], key="selected_statuses")
-
     if not selected_statuses:
         st.warning("لازم تختار حالة واحدة على الأقل.")
         st.stop()
 
     # ============================================================
-    # 5. خيار السداد (حماية)
+    # 5. حماية السداد
     # ============================================================
     st.markdown('<div class="section-title">5️⃣ حماية حالات السداد</div>', unsafe_allow_html=True)
     protect_payment = st.radio(
         "هل تحمي حالات السداد من التدوير؟",
-        options=[
-            "نعم، سيب حالات السداد زي ما هي (متتغيرش محصلها)",
-            "لا، دور كل الحالات المختارة بما فيها السداد"
-        ],
-        index=0,
-        key="protect_payment"
+        options=["نعم، سيب حالات السداد زي ما هي", "لا، دور كل الحالات المختارة"],
+        index=0, key="protect_payment"
     )
     exclude_payment = protect_payment.startswith("نعم")
 
-    mask = (
-        df["اسم المحصل القديم"].isin(selected_collectors) &
-        df["الحالة"].isin(selected_statuses)
-    )
+    mask = (df["اسم المحصل القديم"].isin(selected_collectors) & df["الحالة"].isin(selected_statuses))
     if exclude_payment:
-        has_pay = ~df["السداد"].astype(str).str.strip().str.lower().isin(
-            ["", "nan", "none", "0", "0.0", "لا", "no", "false"]
-        )
+        has_pay = ~df["السداد"].astype(str).str.strip().str.lower().isin(["", "nan", "none", "0", "0.0", "لا", "no", "false"])
         mask = mask & (~has_pay)
 
     df_rotate = df[mask].copy()
     df_keep = df[~mask].copy()
-
     if df_rotate.empty:
         st.error("مفيش صفوف هتتدور بعد الفلترة.")
         st.stop()
@@ -3547,82 +3305,41 @@ elif page == "التدوير":
     <div class="info-box">
         ✅ الصفوف اللي هتتدور: <b>{len(df_rotate):,}</b><br>
         📌 الهويات: <b>{df_rotate['رقم الهوية'].nunique():,}</b><br>
-        📌 المحصلين: <b>{len(selected_collectors)}</b> | الحالات: <b>{' | '.join(selected_statuses)}</b>
+        📌 المحصلين: <b>{len(selected_collectors)}</b>
     </div>
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # 6. نوع التوزيع
+    # التشغيل
     # ============================================================
-    st.markdown('<div class="section-title">6️⃣ نوع التوزيع</div>', unsafe_allow_html=True)
-
-    rotation_mode = st.radio(
-        "أسلوب التدوير:",
-        options=[
-            "تدوير بالتساوي",
-            "تدوير بدون تساوي (يحافظ على الأعداد الأصلية قدر الإمكان)"
-        ],
-        index=0,
-        key="rotation_mode"
-    )
-    equalize = rotation_mode.startswith("تدوير بالتساوي")
-
-    equalize_whole = False
-    equalize_statuses = selected_statuses
-
-    if equalize:
-        equalize_sub = st.radio(
-            "نوع التساوي:",
-            options=[
-                "تساوي على المحفظة النهائية (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التوازن",
-                "تساوي عادي على الجزء المتدور بس"
-            ],
-            index=0,
-            key="equalize_sub"
-        )
-        equalize_whole = equalize_sub.startswith("تساوي على المحفظة النهائية")
-
-        if equalize_whole:
-            st.markdown("**الحالات اللي هيتبيني عليها حساب التوازن النهائي:**")
-            equalize_statuses = st.multiselect(
-                "اختار الحالات",
-                options=all_statuses,
-                default=selected_statuses,
-                key="equalize_statuses"
-            )
-            if not equalize_statuses:
-                st.warning("لازم تختار حالة واحدة على الأقل.")
-                st.stop()
-
-    # ============================================================
-    # 7. التشغيل
-    # ============================================================
-    @st.cache_data(show_spinner="جاري التوزيع القوي مع توازن المنتجات...")
-    def run_rotation(df_bytes, collectors, target_count, target_debt, 
-                     target_prod_count=None, has_product=False):
+    @st.cache_data(show_spinner="جاري التوزيع مع أولوية تساوي عدد الحسابات...")
+    def run_rotation(df_bytes, collectors):
         df_rot = pd.read_pickle(BytesIO(df_bytes))
         collectors = list(collectors)
 
         groups = []
         for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
-            product = None
-            if has_product and "نوع المنتج" in g.columns:
-                product = g["نوع المنتج"].mode().iloc[0] if not g["نوع المنتج"].mode().empty else g["نوع المنتج"].iloc[0]
-
             groups.append({
                 "id": id_val,
                 "debt": float(g["متبقي المديونية"].sum()),
                 "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
-                "product": product,
-                "n_accounts": len(g)
             })
-
         groups.sort(key=lambda x: x["debt"], reverse=True)
+
+        # أهداف متساوية في عدد الحسابات
+        total_clients = len(groups)
+        n = len(collectors)
+        base = total_clients // n
+        rem = total_clients % n
+        target_count = {c: base + (1 if i < rem else 0) for i, c in enumerate(collectors)}
+
+        # المديونية تقريبية
+        total_debt = sum(g["debt"] for g in groups)
+        avg_debt = total_debt / total_clients if total_clients else 0
+        target_debt = {c: target_count[c] * avg_debt for c in collectors}
 
         current_count = {c: 0 for c in collectors}
         current_debt = {c: 0.0 for c in collectors}
-        current_prod_count = {c: {} for c in collectors} if has_product else None
-
         assignment = {}
         unassignable = []
 
@@ -3633,134 +3350,32 @@ elif page == "التدوير":
                 continue
 
             def score(c):
-                prod_score = 0.0
-                if has_product and grp["product"] and target_prod_count:
-                    prod = grp["product"]
-                    target_p = target_prod_count.get(c, {}).get(prod, 0)
-                    current_p = current_prod_count[c].get(prod, 0)
-                    tp = max(target_p, 1)
-                    prod_score = (target_p - current_p) / tp * 3.0
-
+                # أولوية عالية جدًا لعدد الحسابات
                 tc = max(target_count.get(c, 0), 1)
                 td = max(target_debt.get(c, 0.0), 1.0)
                 count_score = (target_count.get(c, 0) - current_count[c]) / tc
-                debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
-
-                return prod_score + count_score * 1.1 + debt_score * 1.2
+                debt_score = (target_debt.get(c, 0.0) - current_debt[c]) / td
+                return count_score * 3.5 + debt_score * 1.0
 
             best = max(candidates, key=score)
             assignment[grp["id"]] = best
             current_count[best] += 1
             current_debt[best] += grp["debt"]
 
-            if has_product and grp["product"]:
-                prod = grp["product"]
-                current_prod_count[best][prod] = current_prod_count[best].get(prod, 0) + 1
-
         if unassignable:
             raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
 
-        refine_assignment(
-            groups, assignment, current_count, current_debt,
-            target_count, target_debt, collectors,
-            current_prod_count=current_prod_count,
-            target_prod_count=target_prod_count,
-            max_passes=80,
-            pool_cap=300
-        )
+        refine_assignment(groups, assignment, current_count, current_debt,
+                          target_count, target_debt, collectors,
+                          max_passes=70, pool_cap=250)
 
         return assignment, current_count, current_debt
 
     if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
-
         try:
-            target_prod_count = None
-
-            if equalize and equalize_whole:
-                universe = df[
-                    df["اسم المحصل القديم"].isin(selected_collectors) &
-                    df["الحالة"].isin(equalize_statuses)
-                ].copy()
-
-                n = len(selected_collectors)
-                total_accounts = len(universe)
-                total_debt = universe["متبقي المديونية"].sum()
-
-                ideal_accounts = total_accounts / n
-                ideal_debt = total_debt / n
-
-                fixed_accounts = {}
-                fixed_debt = {}
-                fixed_prod = {c: {} for c in selected_collectors}
-
-                for c in selected_collectors:
-                    fixed_mask = (
-                        (df["اسم المحصل القديم"] == c) &
-                        df["الحالة"].isin(equalize_statuses) &
-                        (~df.index.isin(df_rotate.index))
-                    )
-                    fixed_accounts[c] = int(fixed_mask.sum())
-                    fixed_debt[c] = df.loc[fixed_mask, "متبقي المديونية"].sum()
-
-                    if has_product:
-                        for prod, cnt in df.loc[fixed_mask].groupby("نوع المنتج").size().items():
-                            fixed_prod[c][prod] = int(cnt)
-
-                target_count = {c: max(0, round(ideal_accounts - fixed_accounts[c])) for c in selected_collectors}
-                target_debt = {c: max(0.0, ideal_debt - fixed_debt[c]) for c in selected_collectors}
-
-                if has_product:
-                    all_products = universe["نوع المنتج"].dropna().unique()
-                    target_prod_count = {c: {} for c in selected_collectors}
-                    for prod in all_products:
-                        total_prod = (universe["نوع المنتج"] == prod).sum()
-                        ideal_prod = total_prod / n
-                        for c in selected_collectors:
-                            fixed_p = fixed_prod[c].get(prod, 0)
-                            target_prod_count[c][prod] = max(0, round(ideal_prod - fixed_p))
-
-                diff = df_rotate["رقم الهوية"].nunique() - sum(target_count.values())
-                if diff != 0:
-                    ordered = sorted(target_count, key=target_count.get, reverse=True)
-                    for i in range(abs(diff)):
-                        c = ordered[i % len(ordered)]
-                        target_count[c] = max(0, target_count[c] + (1 if diff > 0 else -1))
-
-            elif equalize:
-                total_c = df_rotate["رقم الهوية"].nunique()
-                total_d = df_rotate["متبقي المديونية"].sum()
-                n = len(selected_collectors)
-                base = total_c // n
-                rem = total_c % n
-                target_count = {c: base + (1 if i < rem else 0) for i, c in enumerate(selected_collectors)}
-                avg_d = total_d / total_c if total_c else 0
-                target_debt = {c: target_count[c] * avg_d for c in selected_collectors}
-
-                if has_product:
-                    target_prod_count = {c: {} for c in selected_collectors}
-                    for prod in df_rotate["نوع المنتج"].dropna().unique():
-                        total_p = (df_rotate["نوع المنتج"] == prod).sum()
-                        base_p = total_p // n
-                        rem_p = total_p % n
-                        for i, c in enumerate(selected_collectors):
-                            target_prod_count[c][prod] = base_p + (1 if i < rem_p else 0)
-            else:
-                target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
-                target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
-                for c in selected_collectors:
-                    target_count.setdefault(c, 0)
-                    target_debt.setdefault(c, 0.0)
-
             buf = BytesIO()
             df_rotate.to_pickle(buf)
-            assignment, current_count, current_debt = run_rotation(
-                buf.getvalue(),
-                tuple(selected_collectors),
-                target_count,
-                target_debt,
-                target_prod_count=target_prod_count,
-                has_product=has_product
-            )
+            assignment, current_count, current_debt = run_rotation(buf.getvalue(), tuple(selected_collectors))
 
             df_rotate = df_rotate.copy()
             df_rotate["المحصل الجديد"] = df_rotate["رقم الهوية"].map(assignment)
@@ -3799,8 +3414,7 @@ elif page == "التدوير":
             """, unsafe_allow_html=True)
 
             if same_viol == 0 and split_viol == 0:
-                mode_txt = "تساوي على المحفظة النهائية" if (equalize and equalize_whole) else ("بالتساوي" if equalize else "بدون تساوي")
-                st.markdown(f'<div class="success-box">✅ التوزيع سليم ({mode_txt})</div>', unsafe_allow_html=True)
+                st.markdown('<div class="success-box">✅ التوزيع سليم - تم تساوي عدد الحسابات بأولوية عالية</div>', unsafe_allow_html=True)
 
             out = BytesIO()
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
@@ -3819,7 +3433,7 @@ elif page == "التدوير":
                         fmt[col] = "{:+,.0f}"
                 return d.style.format(fmt)
 
-            st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
+            st.markdown("### عدد العملاء + عدد الحسابات + متبقي المديونية")
             rows = []
             for c in selected_collectors:
                 old_m = df_rotate["اسم المحصل القديم"] == c
@@ -3839,45 +3453,15 @@ elif page == "التدوير":
             st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
             if has_product:
-                st.markdown("### 2️⃣ تفصيل حسب نوع المنتج")
+                st.markdown("### تفصيل حسب نوع المنتج")
                 rows = []
                 for c in selected_collectors:
                     for prod in sorted(df_rotate["نوع المنتج"].dropna().unique()):
                         old_m = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["نوع المنتج"] == prod)
                         new_m = (df_rotate["المحصل الجديد"] == c) & (df_rotate["نوع المنتج"] == prod)
-                        if old_m.sum() == 0 and new_m.sum() == 0:
-                            continue
+                        if old_m.sum() == 0 and new_m.sum() == 0: continue
                         rows.append({
-                            "المحصل": c,
-                            "نوع المنتج": prod,
-                            "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
-                            "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
-                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
-                            "عدد الحسابات (قديم)": int(old_m.sum()),
-                            "عدد الحسابات (جديد)": int(new_m.sum()),
-                            "فرق الحسابات": int(new_m.sum() - old_m.sum()),
-                            "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
-                            "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
-                            "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
-                        })
-                if rows:
-                    st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
-
-            if has_npl:
-                st.markdown("### 3️⃣ تفصيل حسب NPL / DPD60")
-                rows = []
-                for c in selected_collectors:
-                    for val in sorted(df_rotate["NPL_DPD"].dropna().unique()):
-                        old_m = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == val)
-                        new_m = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == val)
-                        if old_m.sum() == 0 and new_m.sum() == 0:
-                            continue
-                        rows.append({
-                            "المحصل": c,
-                            "NPL / DPD60": val,
-                            "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
-                            "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
-                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "المحصل": c, "نوع المنتج": prod,
                             "عدد الحسابات (قديم)": int(old_m.sum()),
                             "عدد الحسابات (جديد)": int(new_m.sum()),
                             "فرق الحسابات": int(new_m.sum() - old_m.sum()),
