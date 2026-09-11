@@ -3516,13 +3516,13 @@ elif page == "التدوير":
     equalize = rotation_mode.startswith("تدوير بالتساوي")
 
     equalize_whole_portfolio = False
-    equalize_statuses = selected_statuses  # default
+    equalize_statuses = selected_statuses
 
     if equalize:
         equalize_sub = st.radio(
             "نوع التساوي:",
             options=[
-                "تدوير بالتساوي على المحفظة كلها (المحصولين المختارين) + اختيار الحالات اللي هتتساوي عليها",
+                "تدوير بالتساوي على المحفظة كلها (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التساوي",
                 "تدوير بالتساوي زي الوضع الحالي (على الجزء المتدور بس)"
             ],
             index=1,
@@ -3531,23 +3531,23 @@ elif page == "التدوير":
         equalize_whole_portfolio = equalize_sub.startswith("تدوير بالتساوي على المحفظة كلها")
 
         if equalize_whole_portfolio:
-            st.markdown("**اختار الحالات اللي هتتساوي عليها المحفظة كلها:**")
+            st.markdown("**اختار الحالات اللي هيتبيني عليها التساوي (المحفظة الكاملة للمحصلين المختارين):**")
             equalize_statuses = st.multiselect(
-                "الحالات للتساوي على المحفظة",
+                "الحالات لحساب التساوي",
                 options=all_statuses,
                 default=selected_statuses,
                 key="equalize_statuses"
             )
             if not equalize_statuses:
-                st.warning("لازم تختار حالة واحدة على الأقل للتساوي.")
+                st.warning("لازم تختار حالة واحدة على الأقل لحساب التساوي.")
                 st.stop()
 
     # ============================================================
     # 7. تشغيل التدوير
     # ============================================================
     @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة...")
-    def run_rotation(df_rotate_bytes, collectors, equalize, equalize_whole, 
-                     target_count_dict, target_debt_dict, equalize_statuses_tuple):
+    def run_rotation(df_rotate_bytes, collectors, equalize, equalize_whole,
+                     target_count_dict, target_debt_dict):
         df_rotate = pd.read_pickle(BytesIO(df_rotate_bytes))
         collectors = list(collectors)
 
@@ -3614,14 +3614,62 @@ elif page == "التدوير":
         st.stop()
 
     try:
-        # تجهيز الأهداف
-        if not equalize:
-            target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
-            target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
-        else:
+        # ---------- حساب الأهداف ----------
+        if equalize and equalize_whole_portfolio:
+            # الكون = المحصلين المختارين + الحالات المختارة للتساوي
+            universe_mask = (
+                df["اسم المحصل القديم"].isin(selected_collectors) &
+                df["الحالة"].isin(equalize_statuses)
+            )
+            df_universe = df[universe_mask].copy()
+
+            total_clients = df_universe["رقم الهوية"].nunique()
+            total_debt = df_universe["متبقي المديونية"].sum()
+            n_col = len(selected_collectors)
+
+            ideal_count = total_clients / n_col
+            ideal_debt = total_debt / n_col
+
+            # الجزء الثابت (مش هيتدور) لكل محصل داخل الكون
+            fixed_count = {}
+            fixed_debt = {}
+            for c in selected_collectors:
+                # الصفوف اللي هتفضل مع المحصل ده (مش داخلة في df_rotate)
+                fixed_mask = (
+                    (df["اسم المحصل القديم"] == c) &
+                    df["الحالة"].isin(equalize_statuses) &
+                    (~df.index.isin(df_rotate.index))
+                )
+                fixed_count[c] = df.loc[fixed_mask, "رقم الهوية"].nunique()
+                fixed_debt[c] = df.loc[fixed_mask, "متبقي المديونية"].sum()
+
+            # الهدف للجزء اللي هيتدور = المثالي − الثابت
             target_count = {}
             target_debt = {}
+            for c in selected_collectors:
+                target_count[c] = max(0, round(ideal_count - fixed_count[c]))
+                target_debt[c] = max(0.0, ideal_debt - fixed_debt[c])
 
+            # لو المجموع مش متطابق بسبب الـ rounding نعدل خفيف
+            diff = len(df_rotate["رقم الهوية"].unique()) - sum(target_count.values())
+            if diff != 0:
+                # نوزع الفرق على أكبر هدف
+                sorted_c = sorted(target_count.keys(), key=lambda x: target_count[x], reverse=True)
+                for i in range(abs(diff)):
+                    c = sorted_c[i % len(sorted_c)]
+                    target_count[c] += 1 if diff > 0 else -1
+                    target_count[c] = max(0, target_count[c])
+
+        elif equalize:
+            # التساوي العادي على الجزء المتدور بس
+            target_count = {}
+            target_debt = {}
+        else:
+            # بدون تساوي → نحافظ على الأعداد الأصلية للجزء المتدور
+            target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
+            target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
+
+        # ---------- تشغيل ----------
         buffer = BytesIO()
         df_rotate.to_pickle(buffer)
         df_bytes = buffer.getvalue()
@@ -3632,8 +3680,7 @@ elif page == "التدوير":
             equalize,
             equalize_whole_portfolio,
             target_count,
-            target_debt,
-            tuple(equalize_statuses)
+            target_debt
         )
 
         # تطبيق التوزيع
@@ -3677,7 +3724,7 @@ elif page == "التدوير":
         st.markdown("<br>", unsafe_allow_html=True)
 
         if same_collector_violations == 0 and split_id_violations == 0:
-            mode_txt = "بالتساوي" if equalize else "بدون تساوي"
+            mode_txt = "بالتساوي على المحفظة كلها" if (equalize and equalize_whole_portfolio) else ("بالتساوي" if equalize else "بدون تساوي")
             st.markdown(
                 f'<div class="success-box">✅ التوزيع سليم بالكامل ({mode_txt}). مفيش أي عميل احتفظ بمحصله القديم.</div>',
                 unsafe_allow_html=True
@@ -3699,7 +3746,7 @@ elif page == "التدوير":
         )
 
         # ============================================================
-        # الجداول التفصيلية (بدل الرسوم)
+        # الجداول التفصيلية
         # ============================================================
         st.markdown('<div class="section-title">📊 ملخص النتائج بعد التدوير</div>', unsafe_allow_html=True)
 
@@ -3716,9 +3763,9 @@ elif page == "التدوير":
                 "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
                 "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
                 "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                "عدد الحسابات (قديم)": old_mask.sum(),
-                "عدد الحسابات (جديد)": new_mask.sum(),
-                "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                "عدد الحسابات (قديم)": int(old_mask.sum()),
+                "عدد الحسابات (جديد)": int(new_mask.sum()),
+                "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
                 "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
                 "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
                 "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
@@ -3726,7 +3773,7 @@ elif page == "التدوير":
 
         summary_basic_df = pd.DataFrame(summary_basic)
 
-        def style_basic(d):
+        def style_num(d):
             fmt = {
                 "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العملاء": "{:+,.0f}",
                 "عدد الحسابات (قديم)": "{:,.0f}", "عدد الحسابات (جديد)": "{:,.0f}", "فرق الحسابات": "{:+,.0f}",
@@ -3734,7 +3781,7 @@ elif page == "التدوير":
             }
             return d.style.format(fmt)
 
-        st.dataframe(style_basic(summary_basic_df), use_container_width=True, hide_index=True)
+        st.dataframe(style_num(summary_basic_df), use_container_width=True, hide_index=True)
 
         # ---------- جدول 2: + نوع المنتج ----------
         if has_product:
@@ -3742,7 +3789,7 @@ elif page == "التدوير":
 
             product_rows = []
             for c in selected_collectors:
-                for prod in df_rotate["نوع المنتج"].dropna().unique():
+                for prod in sorted(df_rotate["نوع المنتج"].dropna().unique()):
                     old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["نوع المنتج"] == prod)
                     new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["نوع المنتج"] == prod)
                     if old_mask.sum() == 0 and new_mask.sum() == 0:
@@ -3753,19 +3800,18 @@ elif page == "التدوير":
                         "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
                         "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
                         "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد الحسابات (قديم)": old_mask.sum(),
-                        "عدد الحسابات (جديد)": new_mask.sum(),
-                        "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                        "عدد الحسابات (قديم)": int(old_mask.sum()),
+                        "عدد الحسابات (جديد)": int(new_mask.sum()),
+                        "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
                         "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
                         "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
                         "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
                     })
 
             if product_rows:
-                product_df = pd.DataFrame(product_rows)
-                st.dataframe(style_basic(product_df), use_container_width=True, hide_index=True)
+                st.dataframe(style_num(pd.DataFrame(product_rows)), use_container_width=True, hide_index=True)
             else:
-                st.info("مفيش بيانات نوع منتج متاحة للعرض.")
+                st.info("مفيش بيانات نوع منتج متاحة.")
 
         # ---------- جدول 3: + NPL/DPD ----------
         if has_npl:
@@ -3773,7 +3819,7 @@ elif page == "التدوير":
 
             npl_rows = []
             for c in selected_collectors:
-                for npl_val in df_rotate["NPL_DPD"].dropna().unique():
+                for npl_val in sorted(df_rotate["NPL_DPD"].dropna().unique()):
                     old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == npl_val)
                     new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == npl_val)
                     if old_mask.sum() == 0 and new_mask.sum() == 0:
@@ -3784,22 +3830,21 @@ elif page == "التدوير":
                         "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
                         "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
                         "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
-                        "عدد الحسابات (قديم)": old_mask.sum(),
-                        "عدد الحسابات (جديد)": new_mask.sum(),
-                        "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                        "عدد الحسابات (قديم)": int(old_mask.sum()),
+                        "عدد الحسابات (جديد)": int(new_mask.sum()),
+                        "فرق الحسابات": int(new_mask.sum() - old_mask.sum()),
                         "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
                         "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
                         "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
                     })
 
             if npl_rows:
-                npl_df = pd.DataFrame(npl_rows)
-                st.dataframe(style_basic(npl_df), use_container_width=True, hide_index=True)
+                st.dataframe(style_num(pd.DataFrame(npl_rows)), use_container_width=True, hide_index=True)
             else:
-                st.info("مفيش بيانات NPL/DPD متاحة للعرض.")
+                st.info("مفيش بيانات NPL/DPD متاحة.")
 
         # باقي البيانات
-        with st.expander("🗂️ عرض الجزء اللي اتدور (البيانات التفصيلية)"):
+        with st.expander("🗂️ عرض الجزء اللي اتدور"):
             st.dataframe(df_rotate, use_container_width=True, hide_index=True)
 
         with st.expander("📋 عرض الملف الكامل بعد التدوير"):
@@ -3807,4 +3852,3 @@ elif page == "التدوير":
 
     except Exception as e:
         show_error(e)
-
