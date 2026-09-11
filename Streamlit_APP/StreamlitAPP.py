@@ -3186,8 +3186,8 @@ elif page == "التدوير":
     st.markdown("""
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
-        <p>إعادة توزيع العملاء مع توازن نهائي في العدد والمديونية (وحسب المنتج إن وجد)</p>
-        <span class="header-badge">توازن ذكي + حماية السداد + Cache</span>
+        <p>إعادة توزيع العملاء مع توازن قوي في عدد الحسابات والمديونية لكل منتج</p>
+        <span class="header-badge">توازن قوي حسب المنتج + حماية السداد + Cache</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3247,7 +3247,6 @@ elif page == "التدوير":
             for prod, target in target_prod_count.get(c, {}).items():
                 current = current_prod_count.get(c, {}).get(prod, 0)
                 tc = max(target, 1)
-                # عقوبة قوية جدًا على اختلاف عدد الحسابات لكل منتج
                 total += (abs(current - target) / tc) ** 1.8 * 2.5
             return total
 
@@ -3264,7 +3263,7 @@ elif page == "التدوير":
             improved = False
             passes += 1
 
-            # ---------- Move (أولوية للمنتج) ----------
+            # ---------- Move ----------
             sorted_groups = sorted(groups, key=lambda x: x["debt"], reverse=True)
             for g in sorted_groups:
                 gid = g["id"]
@@ -3278,7 +3277,6 @@ elif page == "التدوير":
                     if c_new == c_old or c_new in g["forbidden"]:
                         continue
 
-                    # تحديث مؤقت
                     if has_prod and prod:
                         current_prod_count[c_old][prod] = current_prod_count[c_old].get(prod, 0) - 1
                         current_prod_count[c_new][prod] = current_prod_count[c_new].get(prod, 0) + 1
@@ -3403,277 +3401,276 @@ elif page == "التدوير":
                         improved = True
 
         return passes
-        # ============================================================
-        # 1. رفع الملف
-        # ============================================================
-        st.markdown('<div class="section-title">1️⃣ رفع ملف المحفظة</div>', unsafe_allow_html=True)
-    
-        uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx", "xls"], key="rotation_uploader")
-    
-        if uploaded_file is not None:
-            file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-            if st.session_state.get("rotation_file_id") != file_id:
-                try:
-                    df_raw = pd.read_excel(BytesIO(uploaded_file.getvalue()))
-                    df_raw.columns = [str(c).strip() for c in df_raw.columns]
-                    st.session_state["rotation_df_raw"] = df_raw
-                    st.session_state["rotation_file_id"] = file_id
-                    st.session_state["columns_confirmed"] = False
-                    st.session_state.pop("rotation_mapped_df", None)
-                except Exception as e:
-                    st.error(f"مش قادر أقرأ الملف: {e}")
-                    st.stop()
-        else:
-            if "rotation_df_raw" not in st.session_state:
-                st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان نبدأ</div>', unsafe_allow_html=True)
+
+    # ============================================================
+    # 1. رفع الملف
+    # ============================================================
+    st.markdown('<div class="section-title">1️⃣ رفع ملف المحفظة</div>', unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx", "xls"], key="rotation_uploader")
+
+    if uploaded_file is not None:
+        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        if st.session_state.get("rotation_file_id") != file_id:
+            try:
+                df_raw = pd.read_excel(BytesIO(uploaded_file.getvalue()))
+                df_raw.columns = [str(c).strip() for c in df_raw.columns]
+                st.session_state["rotation_df_raw"] = df_raw
+                st.session_state["rotation_file_id"] = file_id
+                st.session_state["columns_confirmed"] = False
+                st.session_state.pop("rotation_mapped_df", None)
+            except Exception as e:
+                st.error(f"مش قادر أقرأ الملف: {e}")
                 st.stop()
-    
-        df_raw = st.session_state["rotation_df_raw"]
-        all_columns = df_raw.columns.tolist()
-    
-        # ============================================================
-        # 2. اختيار الأعمدة
-        # ============================================================
-        st.markdown('<div class="section-title">2️⃣ تحديد أسماء الأعمدة</div>', unsafe_allow_html=True)
-    
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            col_id = st.selectbox("رقم الهوية *", options=["— اختر —"] + all_columns, key="col_id")
-            col_account = st.selectbox("رقم الحساب *", options=["— اختر —"] + all_columns, key="col_account")
-            col_debt = st.selectbox("متبقي المديونية *", options=["— اختر —"] + all_columns, key="col_debt")
-        with col2:
-            col_status = st.selectbox("الحالة *", options=["— اختر —"] + all_columns, key="col_status")
-            col_collector = st.selectbox("اسم المحصل القديم *", options=["— اختر —"] + all_columns, key="col_collector")
-            col_payment = st.selectbox("السداد *", options=["— اختر —"] + all_columns, key="col_payment")
-        with col3:
-            col_product = st.selectbox("نوع المنتج (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_product")
-            col_npl = st.selectbox("NPL أو DPD60 (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_npl")
-    
-        required_selected = all(x != "— اختر —" for x in [col_id, col_account, col_debt, col_status, col_collector, col_payment])
-    
-        if st.button("✅ تأكيد الأعمدة", type="primary", disabled=not required_selected):
-            rename_map = {
-                col_id: "رقم الهوية",
-                col_account: "رقم الحساب",
-                col_debt: "متبقي المديونية",
-                col_status: "الحالة",
-                col_collector: "اسم المحصل القديم",
-                col_payment: "السداد",
-            }
-            if col_product != "— لا يوجد —":
-                rename_map[col_product] = "نوع المنتج"
-            if col_npl != "— لا يوجد —":
-                rename_map[col_npl] = "NPL_DPD"
-    
-            df = df_raw.rename(columns=rename_map).copy()
-            df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
-            df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.strip()
-            df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
-            df["الحالة"] = df["الحالة"].astype(str).str.strip()
-            df["السداد"] = df["السداد"].astype(str).str.strip()
-            df["متبقي المديونية"] = pd.to_numeric(
-                df["متبقي المديونية"].astype(str).str.replace(",", "").str.replace(" ", ""), errors="coerce"
-            ).fillna(0.0)
-            if "NPL_DPD" in df.columns:
-                df["NPL_DPD"] = df["NPL_DPD"].astype(str).str.strip()
-    
-            st.session_state["rotation_mapped_df"] = df
-            st.session_state["columns_confirmed"] = True
-            st.success("تم تأكيد الأعمدة بنجاح ✅")
-    
-        if not st.session_state.get("columns_confirmed", False):
-            st.info("👆 اختار كل الأعمدة المطلوبة بعدين اضغط **تأكيد الأعمدة**")
+    else:
+        if "rotation_df_raw" not in st.session_state:
+            st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان نبدأ</div>', unsafe_allow_html=True)
             st.stop()
-    
-        df = st.session_state["rotation_mapped_df"]
-        has_product = "نوع المنتج" in df.columns
-        has_npl = "NPL_DPD" in df.columns
-    
-        # ============================================================
-        # 3. اختيار المحصلين
-        # ============================================================
-        st.markdown('<div class="section-title">3️⃣ اختيار المحصلين</div>', unsafe_allow_html=True)
-        all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique() if c and str(c).lower() != "nan"])
-        selected_collectors = st.multiselect("اختار المحصلين (لازم اتنين على الأقل)", options=all_collectors, default=[], key="selected_collectors")
-    
-        if len(selected_collectors) < 2:
-            st.warning("لازم تختار محصلين اثنين على الأقل.")
-            st.stop()
-    
-        # ============================================================
-        # 4. اختيار حالات التدوير
-        # ============================================================
-        st.markdown('<div class="section-title">4️⃣ اختيار الحالات اللي هتتدور</div>', unsafe_allow_html=True)
-        df_scoped = df[df["اسم المحصل القديم"].isin(selected_collectors)]
-        all_statuses = sorted([s for s in df_scoped["الحالة"].unique() if s and str(s).lower() != "nan"])
-        selected_statuses = st.multiselect("اختار الحالات اللي هتتدور", options=all_statuses, default=[], key="selected_statuses")
-    
-        if not selected_statuses:
-            st.warning("لازم تختار حالة واحدة على الأقل.")
-            st.stop()
-    
-        # ============================================================
-        # 5. خيار السداد (حماية)
-        # ============================================================
-        st.markdown('<div class="section-title">5️⃣ حماية حالات السداد</div>', unsafe_allow_html=True)
-        protect_payment = st.radio(
-            "هل تحمي حالات السداد من التدوير؟",
+
+    df_raw = st.session_state["rotation_df_raw"]
+    all_columns = df_raw.columns.tolist()
+
+    # ============================================================
+    # 2. اختيار الأعمدة
+    # ============================================================
+    st.markdown('<div class="section-title">2️⃣ تحديد أسماء الأعمدة</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        col_id = st.selectbox("رقم الهوية *", options=["— اختر —"] + all_columns, key="col_id")
+        col_account = st.selectbox("رقم الحساب *", options=["— اختر —"] + all_columns, key="col_account")
+        col_debt = st.selectbox("متبقي المديونية *", options=["— اختر —"] + all_columns, key="col_debt")
+    with col2:
+        col_status = st.selectbox("الحالة *", options=["— اختر —"] + all_columns, key="col_status")
+        col_collector = st.selectbox("اسم المحصل القديم *", options=["— اختر —"] + all_columns, key="col_collector")
+        col_payment = st.selectbox("السداد *", options=["— اختر —"] + all_columns, key="col_payment")
+    with col3:
+        col_product = st.selectbox("نوع المنتج (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_product")
+        col_npl = st.selectbox("NPL أو DPD60 (اختياري)", options=["— لا يوجد —"] + all_columns, key="col_npl")
+
+    required_selected = all(x != "— اختر —" for x in [col_id, col_account, col_debt, col_status, col_collector, col_payment])
+
+    if st.button("✅ تأكيد الأعمدة", type="primary", disabled=not required_selected):
+        rename_map = {
+            col_id: "رقم الهوية",
+            col_account: "رقم الحساب",
+            col_debt: "متبقي المديونية",
+            col_status: "الحالة",
+            col_collector: "اسم المحصل القديم",
+            col_payment: "السداد",
+        }
+        if col_product != "— لا يوجد —":
+            rename_map[col_product] = "نوع المنتج"
+        if col_npl != "— لا يوجد —":
+            rename_map[col_npl] = "NPL_DPD"
+
+        df = df_raw.rename(columns=rename_map).copy()
+        df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
+        df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.strip()
+        df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
+        df["الحالة"] = df["الحالة"].astype(str).str.strip()
+        df["السداد"] = df["السداد"].astype(str).str.strip()
+        df["متبقي المديونية"] = pd.to_numeric(
+            df["متبقي المديونية"].astype(str).str.replace(",", "").str.replace(" ", ""), errors="coerce"
+        ).fillna(0.0)
+        if "NPL_DPD" in df.columns:
+            df["NPL_DPD"] = df["NPL_DPD"].astype(str).str.strip()
+
+        st.session_state["rotation_mapped_df"] = df
+        st.session_state["columns_confirmed"] = True
+        st.success("تم تأكيد الأعمدة بنجاح ✅")
+
+    if not st.session_state.get("columns_confirmed", False):
+        st.info("👆 اختار كل الأعمدة المطلوبة بعدين اضغط **تأكيد الأعمدة**")
+        st.stop()
+
+    df = st.session_state["rotation_mapped_df"]
+    has_product = "نوع المنتج" in df.columns
+    has_npl = "NPL_DPD" in df.columns
+
+    # ============================================================
+    # 3. اختيار المحصلين
+    # ============================================================
+    st.markdown('<div class="section-title">3️⃣ اختيار المحصلين</div>', unsafe_allow_html=True)
+    all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique() if c and str(c).lower() != "nan"])
+    selected_collectors = st.multiselect("اختار المحصلين (لازم اتنين على الأقل)", options=all_collectors, default=[], key="selected_collectors")
+
+    if len(selected_collectors) < 2:
+        st.warning("لازم تختار محصلين اثنين على الأقل.")
+        st.stop()
+
+    # ============================================================
+    # 4. اختيار حالات التدوير
+    # ============================================================
+    st.markdown('<div class="section-title">4️⃣ اختيار الحالات اللي هتتدور</div>', unsafe_allow_html=True)
+    df_scoped = df[df["اسم المحصل القديم"].isin(selected_collectors)]
+    all_statuses = sorted([s for s in df_scoped["الحالة"].unique() if s and str(s).lower() != "nan"])
+    selected_statuses = st.multiselect("اختار الحالات اللي هتتدور", options=all_statuses, default=[], key="selected_statuses")
+
+    if not selected_statuses:
+        st.warning("لازم تختار حالة واحدة على الأقل.")
+        st.stop()
+
+    # ============================================================
+    # 5. خيار السداد (حماية)
+    # ============================================================
+    st.markdown('<div class="section-title">5️⃣ حماية حالات السداد</div>', unsafe_allow_html=True)
+    protect_payment = st.radio(
+        "هل تحمي حالات السداد من التدوير؟",
+        options=[
+            "نعم، سيب حالات السداد زي ما هي (متتغيرش محصلها)",
+            "لا، دور كل الحالات المختارة بما فيها السداد"
+        ],
+        index=0,
+        key="protect_payment"
+    )
+    exclude_payment = protect_payment.startswith("نعم")
+
+    mask = (
+        df["اسم المحصل القديم"].isin(selected_collectors) &
+        df["الحالة"].isin(selected_statuses)
+    )
+    if exclude_payment:
+        has_pay = ~df["السداد"].astype(str).str.strip().str.lower().isin(
+            ["", "nan", "none", "0", "0.0", "لا", "no", "false"]
+        )
+        mask = mask & (~has_pay)
+
+    df_rotate = df[mask].copy()
+    df_keep = df[~mask].copy()
+
+    if df_rotate.empty:
+        st.error("مفيش صفوف هتتدور بعد الفلترة.")
+        st.stop()
+
+    st.markdown(f"""
+    <div class="info-box">
+        ✅ الصفوف اللي هتتدور: <b>{len(df_rotate):,}</b><br>
+        📌 الهويات: <b>{df_rotate['رقم الهوية'].nunique():,}</b><br>
+        📌 المحصلين: <b>{len(selected_collectors)}</b> | الحالات: <b>{' | '.join(selected_statuses)}</b>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============================================================
+    # 6. نوع التوزيع
+    # ============================================================
+    st.markdown('<div class="section-title">6️⃣ نوع التوزيع</div>', unsafe_allow_html=True)
+
+    rotation_mode = st.radio(
+        "أسلوب التدوير:",
+        options=[
+            "تدوير بالتساوي",
+            "تدوير بدون تساوي (يحافظ على الأعداد الأصلية قدر الإمكان)"
+        ],
+        index=0,
+        key="rotation_mode"
+    )
+    equalize = rotation_mode.startswith("تدوير بالتساوي")
+
+    equalize_whole = False
+    equalize_statuses = selected_statuses
+
+    if equalize:
+        equalize_sub = st.radio(
+            "نوع التساوي:",
             options=[
-                "نعم، سيب حالات السداد زي ما هي (متتغيرش محصلها)",
-                "لا، دور كل الحالات المختارة بما فيها السداد"
+                "تساوي على المحفظة النهائية (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التوازن",
+                "تساوي عادي على الجزء المتدور بس"
             ],
             index=0,
-            key="protect_payment"
+            key="equalize_sub"
         )
-        exclude_payment = protect_payment.startswith("نعم")
-    
-        # بناء df_rotate
-        mask = (
-            df["اسم المحصل القديم"].isin(selected_collectors) &
-            df["الحالة"].isin(selected_statuses)
-        )
-        if exclude_payment:
-            has_pay = ~df["السداد"].astype(str).str.strip().str.lower().isin(
-                ["", "nan", "none", "0", "0.0", "لا", "no", "false"]
+        equalize_whole = equalize_sub.startswith("تساوي على المحفظة النهائية")
+
+        if equalize_whole:
+            st.markdown("**الحالات اللي هيتبيني عليها حساب التوازن النهائي:**")
+            equalize_statuses = st.multiselect(
+                "اختار الحالات",
+                options=all_statuses,
+                default=selected_statuses,
+                key="equalize_statuses"
             )
-            mask = mask & (~has_pay)
-    
-        df_rotate = df[mask].copy()
-        df_keep = df[~mask].copy()
-    
-        if df_rotate.empty:
-            st.error("مفيش صفوف هتتدور بعد الفلترة.")
-            st.stop()
-    
-        st.markdown(f"""
-        <div class="info-box">
-            ✅ الصفوف اللي هتتدور: <b>{len(df_rotate):,}</b><br>
-            📌 الهويات: <b>{df_rotate['رقم الهوية'].nunique():,}</b><br>
-            📌 المحصلين: <b>{len(selected_collectors)}</b> | الحالات: <b>{' | '.join(selected_statuses)}</b>
-        </div>
-        """, unsafe_allow_html=True)
-    
-        # ============================================================
-        # 6. نوع التوزيع
-        # ============================================================
-        st.markdown('<div class="section-title">6️⃣ نوع التوزيع</div>', unsafe_allow_html=True)
-    
-        rotation_mode = st.radio(
-            "أسلوب التدوير:",
-            options=[
-                "تدوير بالتساوي",
-                "تدوير بدون تساوي (يحافظ على الأعداد الأصلية قدر الإمكان)"
-            ],
-            index=0,
-            key="rotation_mode"
-        )
-        equalize = rotation_mode.startswith("تدوير بالتساوي")
-    
-        equalize_whole = False
-        equalize_statuses = selected_statuses
-    
-        if equalize:
-            equalize_sub = st.radio(
-                "نوع التساوي:",
-                options=[
-                    "تساوي على المحفظة النهائية (بين المحصلين المختارين) + اختيار الحالات اللي هيتبيني عليها التوازن",
-                    "تساوي عادي على الجزء المتدور بس"
-                ],
-                index=0,
-                key="equalize_sub"
-            )
-            equalize_whole = equalize_sub.startswith("تساوي على المحفظة النهائية")
-    
-            if equalize_whole:
-                st.markdown("**الحالات اللي هيتبيني عليها حساب التوازن النهائي:**")
-                equalize_statuses = st.multiselect(
-                    "اختار الحالات",
-                    options=all_statuses,
-                    default=selected_statuses,
-                    key="equalize_statuses"
-                )
-                if not equalize_statuses:
-                    st.warning("لازم تختار حالة واحدة على الأقل.")
-                    st.stop()
+            if not equalize_statuses:
+                st.warning("لازم تختار حالة واحدة على الأقل.")
+                st.stop()
 
     # ============================================================
     # 7. التشغيل
     # ============================================================
     @st.cache_data(show_spinner="جاري التوزيع القوي مع توازن المنتجات...")
-        def run_rotation(df_bytes, collectors, target_count, target_debt, 
-                         target_prod_count=None, has_product=False):
-            df_rot = pd.read_pickle(BytesIO(df_bytes))
-            collectors = list(collectors)
-    
-            groups = []
-            for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
-                product = None
-                if has_product and "نوع المنتج" in g.columns:
-                    product = g["نوع المنتج"].mode().iloc[0] if not g["نوع المنتج"].mode().empty else g["نوع المنتج"].iloc[0]
-    
-                groups.append({
-                    "id": id_val,
-                    "debt": float(g["متبقي المديونية"].sum()),
-                    "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
-                    "product": product,
-                    "n_accounts": len(g)
-                })
-    
-            groups.sort(key=lambda x: x["debt"], reverse=True)
-    
-            current_count = {c: 0 for c in collectors}
-            current_debt = {c: 0.0 for c in collectors}
-            current_prod_count = {c: {} for c in collectors} if has_product else None
-    
-            assignment = {}
-            unassignable = []
-    
-            for grp in groups:
-                candidates = [c for c in collectors if c not in grp["forbidden"]]
-                if not candidates:
-                    unassignable.append(str(grp["id"]))
-                    continue
-    
-                def score(c):
-                    # أولوية عالية لتساوي المنتج
-                    prod_score = 0.0
-                    if has_product and grp["product"] and target_prod_count:
-                        prod = grp["product"]
-                        target_p = target_prod_count.get(c, {}).get(prod, 0)
-                        current_p = current_prod_count[c].get(prod, 0)
-                        tp = max(target_p, 1)
-                        prod_score = (target_p - current_p) / tp * 3.0   # وزن عالي جدًا
-    
-                    tc = max(target_count.get(c, 0), 1)
-                    td = max(target_debt.get(c, 0.0), 1.0)
-                    count_score = (target_count.get(c, 0) - current_count[c]) / tc
-                    debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
-    
-                    return prod_score + count_score * 1.1 + debt_score * 1.2
-    
-                best = max(candidates, key=score)
-                assignment[grp["id"]] = best
-                current_count[best] += 1
-                current_debt[best] += grp["debt"]
-    
-                if has_product and grp["product"]:
+    def run_rotation(df_bytes, collectors, target_count, target_debt, 
+                     target_prod_count=None, has_product=False):
+        df_rot = pd.read_pickle(BytesIO(df_bytes))
+        collectors = list(collectors)
+
+        groups = []
+        for id_val, g in df_rot.groupby("رقم الهوية", sort=False):
+            product = None
+            if has_product and "نوع المنتج" in g.columns:
+                product = g["نوع المنتج"].mode().iloc[0] if not g["نوع المنتج"].mode().empty else g["نوع المنتج"].iloc[0]
+
+            groups.append({
+                "id": id_val,
+                "debt": float(g["متبقي المديونية"].sum()),
+                "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
+                "product": product,
+                "n_accounts": len(g)
+            })
+
+        groups.sort(key=lambda x: x["debt"], reverse=True)
+
+        current_count = {c: 0 for c in collectors}
+        current_debt = {c: 0.0 for c in collectors}
+        current_prod_count = {c: {} for c in collectors} if has_product else None
+
+        assignment = {}
+        unassignable = []
+
+        for grp in groups:
+            candidates = [c for c in collectors if c not in grp["forbidden"]]
+            if not candidates:
+                unassignable.append(str(grp["id"]))
+                continue
+
+            def score(c):
+                prod_score = 0.0
+                if has_product and grp["product"] and target_prod_count:
                     prod = grp["product"]
-                    current_prod_count[best][prod] = current_prod_count[best].get(prod, 0) + 1
-    
-            if unassignable:
-                raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
-    
-            # تحسين قوي
-            refine_assignment(
-                groups, assignment, current_count, current_debt,
-                target_count, target_debt, collectors,
-                current_prod_count=current_prod_count,
-                target_prod_count=target_prod_count,
-                max_passes=80,
-                pool_cap=300
-            )
-    
-            return assignment, current_count, current_debt
+                    target_p = target_prod_count.get(c, {}).get(prod, 0)
+                    current_p = current_prod_count[c].get(prod, 0)
+                    tp = max(target_p, 1)
+                    prod_score = (target_p - current_p) / tp * 3.0
+
+                tc = max(target_count.get(c, 0), 1)
+                td = max(target_debt.get(c, 0.0), 1.0)
+                count_score = (target_count.get(c, 0) - current_count[c]) / tc
+                debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
+
+                return prod_score + count_score * 1.1 + debt_score * 1.2
+
+            best = max(candidates, key=score)
+            assignment[grp["id"]] = best
+            current_count[best] += 1
+            current_debt[best] += grp["debt"]
+
+            if has_product and grp["product"]:
+                prod = grp["product"]
+                current_prod_count[best][prod] = current_prod_count[best].get(prod, 0) + 1
+
+        if unassignable:
+            raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
+
+        refine_assignment(
+            groups, assignment, current_count, current_debt,
+            target_count, target_debt, collectors,
+            current_prod_count=current_prod_count,
+            target_prod_count=target_prod_count,
+            max_passes=80,
+            pool_cap=300
+        )
+
+        return assignment, current_count, current_debt
+
     if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
 
         try:
@@ -3745,7 +3742,7 @@ elif page == "التدوير":
                         total_p = (df_rotate["نوع المنتج"] == prod).sum()
                         base_p = total_p // n
                         rem_p = total_p % n
-                        for i, c in enumerate(selected_collectors):
+                        for i, for i, c in enumerate(selected_collectors):
                             target_prod_count[c][prod] = base_p + (1 if i < rem_p else 0)
             else:
                 target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
@@ -3822,7 +3819,6 @@ elif page == "التدوير":
                         fmt[col] = "{:+,.0f}"
                 return d.style.format(fmt)
 
-            # جدول 1
             st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
             rows = []
             for c in selected_collectors:
@@ -3842,7 +3838,6 @@ elif page == "التدوير":
                 })
             st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
-            # جدول 2: حسب المنتج
             if has_product:
                 st.markdown("### 2️⃣ تفصيل حسب نوع المنتج")
                 rows = []
@@ -3868,7 +3863,6 @@ elif page == "التدوير":
                 if rows:
                     st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
-            # جدول 3: حسب NPL
             if has_npl:
                 st.markdown("### 3️⃣ تفصيل حسب NPL / DPD60")
                 rows = []
