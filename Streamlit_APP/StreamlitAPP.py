@@ -3227,10 +3227,10 @@ elif page == "التدوير":
         step = len(items_sorted) / cap
         return [items_sorted[int(i * step)] for i in range(cap)]
 
-    def refine_assignment(groups, assignment, current_count, current_debt,
+def refine_assignment(groups, assignment, current_count, current_debt,
                            target_count, target_debt, collectors,
                            current_prod_count=None, target_prod_count=None,
-                           max_passes=50, pool_cap=200):
+                           max_passes=80, pool_cap=300):
         has_prod = current_prod_count is not None and target_prod_count is not None
 
         def pen_total(count_val, target_c, debt_val, target_d):
@@ -3238,7 +3238,7 @@ elif page == "التدوير":
             td = max(target_d, 1.0)
             pc = abs(count_val - target_c) / tc
             pdv = abs(debt_val - target_d) / td
-            return (pc ** 1.4) * 1.3 + (pdv ** 1.4)
+            return (pc ** 1.6) * 1.5 + (pdv ** 1.5)
 
         def pen_prod(c):
             if not has_prod:
@@ -3247,7 +3247,8 @@ elif page == "التدوير":
             for prod, target in target_prod_count.get(c, {}).items():
                 current = current_prod_count.get(c, {}).get(prod, 0)
                 tc = max(target, 1)
-                total += (abs(current - target) / tc) ** 1.3
+                # عقوبة قوية جدًا على اختلاف عدد الحسابات لكل منتج
+                total += (abs(current - target) / tc) ** 1.8 * 2.5
             return total
 
         groups_by_collector = {c: [] for c in collectors}
@@ -3263,7 +3264,7 @@ elif page == "التدوير":
             improved = False
             passes += 1
 
-            # ---------- Move ----------
+            # ---------- Move (أولوية للمنتج) ----------
             sorted_groups = sorted(groups, key=lambda x: x["debt"], reverse=True)
             for g in sorted_groups:
                 gid = g["id"]
@@ -3277,28 +3278,32 @@ elif page == "التدوير":
                     if c_new == c_old or c_new in g["forbidden"]:
                         continue
 
-                    new_count_old = current_count[c_old] - 1
-                    new_debt_old = current_debt[c_old] - g["debt"]
-                    new_count_new = current_count[c_new] + 1
-                    new_debt_new = current_debt[c_new] + g["debt"]
-
+                    # تحديث مؤقت
                     if has_prod and prod:
                         current_prod_count[c_old][prod] = current_prod_count[c_old].get(prod, 0) - 1
                         current_prod_count[c_new][prod] = current_prod_count[c_new].get(prod, 0) + 1
 
-                    new_pen = (pen_total(new_count_old, target_count.get(c_old, 0), new_debt_old, target_debt.get(c_old, 0.0)) +
-                               pen_total(new_count_new, target_count.get(c_new, 0), new_debt_new, target_debt.get(c_new, 0.0)) +
-                               pen_prod(c_old) + pen_prod(c_new))
+                    new_pen = (
+                        pen_total(current_count[c_old]-1, target_count.get(c_old, 0),
+                                  current_debt[c_old]-g["debt"], target_debt.get(c_old, 0.0)) +
+                        pen_total(current_count[c_new]+1, target_count.get(c_new, 0),
+                                  current_debt[c_new]+g["debt"], target_debt.get(c_new, 0.0)) +
+                        pen_prod(c_old) + pen_prod(c_new)
+                    )
 
                     if has_prod and prod:
                         current_prod_count[c_old][prod] += 1
                         current_prod_count[c_new][prod] -= 1
 
-                    old_pen_pair = (pen_total(current_count[c_old], target_count.get(c_old, 0), current_debt[c_old], target_debt.get(c_old, 0.0)) +
-                                    pen_total(current_count[c_new], target_count.get(c_new, 0), current_debt[c_new], target_debt.get(c_new, 0.0)) +
-                                    pen_prod(c_old) + pen_prod(c_new))
+                    old_pen = (
+                        pen_total(current_count[c_old], target_count.get(c_old, 0),
+                                  current_debt[c_old], target_debt.get(c_old, 0.0)) +
+                        pen_total(current_count[c_new], target_count.get(c_new, 0),
+                                  current_debt[c_new], target_debt.get(c_new, 0.0)) +
+                        pen_prod(c_old) + pen_prod(c_new)
+                    )
 
-                    delta = new_pen - old_pen_pair
+                    delta = new_pen - old_pen
                     if delta < best_delta:
                         best_delta = delta
                         best_c = c_new
@@ -3329,9 +3334,11 @@ elif page == "التدوير":
                     list1 = _sample_by_debt(list1, pool_cap)
                     list2 = _sample_by_debt(list2, pool_cap)
 
-                    old_pen_pair = (pen_total(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
-                                    pen_total(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0)) +
-                                    pen_prod(c1) + pen_prod(c2))
+                    old_pen = (
+                        pen_total(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
+                        pen_total(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0)) +
+                        pen_prod(c1) + pen_prod(c2)
+                    )
 
                     best_pair = None
                     best_delta = -1e-9
@@ -3341,9 +3348,6 @@ elif page == "التدوير":
                             prod1 = g1.get("product")
                             prod2 = g2.get("product")
 
-                            new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
-                            new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
-
                             if has_prod:
                                 if prod1:
                                     current_prod_count[c1][prod1] = current_prod_count[c1].get(prod1, 0) - 1
@@ -3352,9 +3356,14 @@ elif page == "التدوير":
                                     current_prod_count[c2][prod2] = current_prod_count[c2].get(prod2, 0) - 1
                                     current_prod_count[c1][prod2] = current_prod_count[c1].get(prod2, 0) + 1
 
-                            new_pen_pair = (pen_total(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
-                                            pen_total(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)) +
-                                            pen_prod(c1) + pen_prod(c2))
+                            new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
+                            new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
+
+                            new_pen = (
+                                pen_total(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
+                                pen_total(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)) +
+                                pen_prod(c1) + pen_prod(c2)
+                            )
 
                             if has_prod:
                                 if prod1:
@@ -3364,7 +3373,7 @@ elif page == "التدوير":
                                     current_prod_count[c2][prod2] += 1
                                     current_prod_count[c1][prod2] -= 1
 
-                            delta = new_pen_pair - old_pen_pair
+                            delta = new_pen - old_pen
                             if delta < best_delta:
                                 best_delta = delta
                                 best_pair = (g1, g2)
@@ -3394,7 +3403,6 @@ elif page == "التدوير":
                         improved = True
 
         return passes
-
     # ============================================================
     # 1. رفع الملف
     # ============================================================
@@ -3591,7 +3599,7 @@ elif page == "التدوير":
     # ============================================================
     # 7. التشغيل
     # ============================================================
-    @st.cache_data(show_spinner="جاري التوزيع مع توازن المنتجات...")
+@st.cache_data(show_spinner="جاري التوزيع القوي مع توازن المنتجات...")
     def run_rotation(df_bytes, collectors, target_count, target_debt, 
                      target_prod_count=None, has_product=False):
         df_rot = pd.read_pickle(BytesIO(df_bytes))
@@ -3627,20 +3635,21 @@ elif page == "التدوير":
                 continue
 
             def score(c):
-                tc = max(target_count.get(c, 0), 1)
-                td = max(target_debt.get(c, 0.0), 1.0)
-                deficit_count = (target_count.get(c, 0) - current_count[c]) / tc
-                deficit_debt = (target_debt.get(c, 0.0) - current_debt[c]) / td
-
-                prod_deficit = 0.0
+                # أولوية عالية لتساوي المنتج
+                prod_score = 0.0
                 if has_product and grp["product"] and target_prod_count:
                     prod = grp["product"]
                     target_p = target_prod_count.get(c, {}).get(prod, 0)
                     current_p = current_prod_count[c].get(prod, 0)
                     tp = max(target_p, 1)
-                    prod_deficit = (target_p - current_p) / tp
+                    prod_score = (target_p - current_p) / tp * 3.0   # وزن عالي جدًا
 
-                return deficit_count * 1.2 + deficit_debt * 1.3 + prod_deficit * 1.5
+                tc = max(target_count.get(c, 0), 1)
+                td = max(target_debt.get(c, 0.0), 1.0)
+                count_score = (target_count.get(c, 0) - current_count[c]) / tc
+                debt_score  = (target_debt.get(c, 0.0) - current_debt[c]) / td
+
+                return prod_score + count_score * 1.1 + debt_score * 1.2
 
             best = max(candidates, key=score)
             assignment[grp["id"]] = best
@@ -3654,17 +3663,17 @@ elif page == "التدوير":
         if unassignable:
             raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
 
+        # تحسين قوي
         refine_assignment(
             groups, assignment, current_count, current_debt,
             target_count, target_debt, collectors,
             current_prod_count=current_prod_count,
             target_prod_count=target_prod_count,
-            max_passes=50,
-            pool_cap=200
+            max_passes=80,
+            pool_cap=300
         )
 
         return assignment, current_count, current_debt
-
     if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
 
         try:
