@@ -3001,10 +3001,8 @@ elif page == "الاوتودايلر":
 elif page == "التدوير":
     import pandas as pd
     import numpy as np
-    import plotly.express as px
     import traceback
     from io import BytesIO
-    from collections import defaultdict
 
     # ============================================================
     # 🎨 تصميم
@@ -3125,20 +3123,6 @@ elif page == "التدوير":
             font-size: 16.5px;
             color: #0d2d4a;
         }
-        .chart-card {
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 14px 16px 4px 16px;
-            border: 1px solid #eef1ef;
-            box-shadow: 0 4px 14px rgba(17,24,39,0.05);
-            margin-bottom: 18px;
-        }
-        .chart-card-title {
-            font-weight: 800;
-            font-size: 14.5px;
-            color: #0f172a;
-            margin-bottom: 4px;
-        }
         div[data-testid="stFileUploader"] {
             border: 2px dashed #155a8a44;
             border-radius: 16px;
@@ -3196,13 +3180,6 @@ elif page == "التدوير":
             margin-bottom: 14px;
             line-height: 1.8;
         }
-        .confirm-box {
-            background: #f0f7ff;
-            border: 1px solid #b6d4f0;
-            border-radius: 14px;
-            padding: 16px 20px;
-            margin-bottom: 18px;
-        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -3210,7 +3187,7 @@ elif page == "التدوير":
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
         <p>إعادة توزيع العملاء على المحصلين — أنت تختار الأعمدة والمحصلين والحالات بنفسك</p>
-        <span class="header-badge">توزيع مرن + Cache ذكي + بدون أخطاء مبكرة</span>
+        <span class="header-badge">توزيع مرن + Cache ذكي + جداول تفصيلية</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3338,7 +3315,7 @@ elif page == "التدوير":
         return passes_done
 
     # ============================================================
-    # 1. رفع الملف + تخزين في session_state (Cache)
+    # 1. رفع الملف + session_state
     # ============================================================
     st.markdown('<div class="section-title">1️⃣ رفع ملف المحفظة</div>', unsafe_allow_html=True)
 
@@ -3348,7 +3325,6 @@ elif page == "التدوير":
         key="rotation_uploader"
     )
 
-    # لو فيه ملف جديد → نمسحه القديم من الذاكرة
     if uploaded_file is not None:
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         if st.session_state.get("rotation_file_id") != file_id:
@@ -3357,7 +3333,7 @@ elif page == "التدوير":
                 df_raw.columns = [str(c).strip() for c in df_raw.columns]
                 st.session_state["rotation_df_raw"] = df_raw
                 st.session_state["rotation_file_id"] = file_id
-                st.session_state["columns_confirmed"] = False   # إعادة تعيين
+                st.session_state["columns_confirmed"] = False
                 st.session_state.pop("rotation_mapped_df", None)
             except Exception as e:
                 st.error(f"مش قادر أقرأ الملف: {e}")
@@ -3415,7 +3391,6 @@ elif page == "التدوير":
 
         df = df_raw.rename(columns=rename_map).copy()
 
-        # تنظيف
         df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
         df["رقم الحساب"] = df["رقم الحساب"].astype(str).str.strip()
         df["اسم المحصل القديم"] = df["اسم المحصل القديم"].astype(str).str.strip()
@@ -3437,12 +3412,13 @@ elif page == "التدوير":
         st.session_state["columns_confirmed"] = True
         st.success("تم تأكيد الأعمدة بنجاح ✅")
 
-    # لو الأعمدة لسه متأكدتش → نوقف هنا
     if not st.session_state.get("columns_confirmed", False):
         st.info("👆 اختار كل الأعمدة المطلوبة بعدين اضغط **تأكيد الأعمدة**")
         st.stop()
 
     df = st.session_state["rotation_mapped_df"]
+    has_product = "نوع المنتج" in df.columns
+    has_npl = "NPL_DPD" in df.columns
 
     # ============================================================
     # 3. اختيار المحصلين (بدون default)
@@ -3454,7 +3430,7 @@ elif page == "التدوير":
     selected_collectors = st.multiselect(
         "اختار المحصلين (لازم اتنين على الأقل)",
         options=all_collectors,
-        default=[],                    # ← فاضي، أنت تختار
+        default=[],
         key="selected_collectors"
     )
 
@@ -3473,7 +3449,7 @@ elif page == "التدوير":
     selected_statuses = st.multiselect(
         "اختار الحالات",
         options=all_statuses,
-        default=[],                    # ← فاضي
+        default=[],
         key="selected_statuses"
     )
 
@@ -3524,14 +3500,14 @@ elif page == "التدوير":
     """, unsafe_allow_html=True)
 
     # ============================================================
-    # 6. نوع التوزيع
+    # 6. نوع التوزيع + خيارات التساوي
     # ============================================================
     st.markdown('<div class="section-title">6️⃣ نوع التوزيع</div>', unsafe_allow_html=True)
 
     rotation_mode = st.radio(
         "أسلوب التدوير:",
         options=[
-            "تدوير بالتساوي (يساوي عدد الحسابات + المديونية + يحاول يساوي الحالات و NPL)",
+            "تدوير بالتساوي",
             "تدوير بدون تساوي (يحافظ على نفس أعداد كل محصل قدر الإمكان)"
         ],
         index=0,
@@ -3539,11 +3515,39 @@ elif page == "التدوير":
     )
     equalize = rotation_mode.startswith("تدوير بالتساوي")
 
+    equalize_whole_portfolio = False
+    equalize_statuses = selected_statuses  # default
+
+    if equalize:
+        equalize_sub = st.radio(
+            "نوع التساوي:",
+            options=[
+                "تدوير بالتساوي على المحفظة كلها (المحصولين المختارين) + اختيار الحالات اللي هتتساوي عليها",
+                "تدوير بالتساوي زي الوضع الحالي (على الجزء المتدور بس)"
+            ],
+            index=1,
+            key="equalize_sub"
+        )
+        equalize_whole_portfolio = equalize_sub.startswith("تدوير بالتساوي على المحفظة كلها")
+
+        if equalize_whole_portfolio:
+            st.markdown("**اختار الحالات اللي هتتساوي عليها المحفظة كلها:**")
+            equalize_statuses = st.multiselect(
+                "الحالات للتساوي على المحفظة",
+                options=all_statuses,
+                default=selected_statuses,
+                key="equalize_statuses"
+            )
+            if not equalize_statuses:
+                st.warning("لازم تختار حالة واحدة على الأقل للتساوي.")
+                st.stop()
+
     # ============================================================
-    # 7. تشغيل التدوير (Cached)
+    # 7. تشغيل التدوير
     # ============================================================
     @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة...")
-    def run_rotation(df_rotate_bytes, collectors, equalize, target_count_dict, target_debt_dict):
+    def run_rotation(df_rotate_bytes, collectors, equalize, equalize_whole, 
+                     target_count_dict, target_debt_dict, equalize_statuses_tuple):
         df_rotate = pd.read_pickle(BytesIO(df_rotate_bytes))
         collectors = list(collectors)
 
@@ -3610,7 +3614,7 @@ elif page == "التدوير":
         st.stop()
 
     try:
-        # تجهيز الأهداف لو مش equalize
+        # تجهيز الأهداف
         if not equalize:
             target_count = df_rotate.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
             target_debt = df_rotate.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
@@ -3618,7 +3622,6 @@ elif page == "التدوير":
             target_count = {}
             target_debt = {}
 
-        # تحويل الـ DataFrame لـ bytes عشان الـ cache
         buffer = BytesIO()
         df_rotate.to_pickle(buffer)
         df_bytes = buffer.getvalue()
@@ -3627,11 +3630,13 @@ elif page == "التدوير":
             df_bytes,
             tuple(selected_collectors),
             equalize,
+            equalize_whole_portfolio,
             target_count,
-            target_debt
+            target_debt,
+            tuple(equalize_statuses)
         )
 
-        # تطبيق
+        # تطبيق التوزيع
         df_rotate = df_rotate.copy()
         df_rotate["المحصل الجديد"] = df_rotate["رقم الهوية"].map(assignment)
 
@@ -3641,25 +3646,7 @@ elif page == "التدوير":
 
         result_df = pd.concat([df_rotate, df_keep], ignore_index=True)
 
-        # ملخص
-        summary_rows = []
-        for c in selected_collectors:
-            old_count = df_rotate[df_rotate["اسم المحصل القديم"] == c]["رقم الهوية"].nunique()
-            new_count = current_count.get(c, 0)
-            old_debt = df_rotate[df_rotate["اسم المحصل القديم"] == c]["متبقي المديونية"].sum()
-            new_debt = current_debt.get(c, 0.0)
-            summary_rows.append({
-                "المحصل": c,
-                "عدد العملاء (قديم)": old_count,
-                "عدد العملاء (جديد)": new_count,
-                "فرق العدد": new_count - old_count,
-                "متبقي المديونية (قديم)": old_debt,
-                "متبقي المديونية (جديد)": new_debt,
-                "فرق المديونية": new_debt - old_debt,
-            })
-        summary_df = pd.DataFrame(summary_rows)
-
-        # ===== عرض النتائج =====
+        # ===== KPI =====
         same_collector_violations = int((df_rotate["المحصل الجديد"] == df_rotate["اسم المحصل القديم"]).sum())
         split_id_violations = int(df_rotate.groupby("رقم الهوية")["المحصل الجديد"].nunique().gt(1).sum())
         total_clients = df_rotate["رقم الهوية"].nunique()
@@ -3696,12 +3683,11 @@ elif page == "التدوير":
                 unsafe_allow_html=True
             )
 
-        # تحميل
+        # ===== تحميل =====
         output = BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             result_df.to_excel(writer, index=False, sheet_name="التدوير الكامل")
             df_rotate.to_excel(writer, index=False, sheet_name="الجزء اللي اتدور")
-            summary_df.to_excel(writer, index=False, sheet_name="مقارنة قبل وبعد")
         output.seek(0)
 
         st.download_button(
@@ -3712,55 +3698,112 @@ elif page == "التدوير":
             use_container_width=True
         )
 
-        # جداول
-        st.markdown('<div class="section-title">📊 النتائج</div>', unsafe_allow_html=True)
+        # ============================================================
+        # الجداول التفصيلية (بدل الرسوم)
+        # ============================================================
+        st.markdown('<div class="section-title">📊 ملخص النتائج بعد التدوير</div>', unsafe_allow_html=True)
 
-        def style_summary(d):
+        # ---------- جدول 1: أساسي ----------
+        st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
+
+        summary_basic = []
+        for c in selected_collectors:
+            old_mask = df_rotate["اسم المحصل القديم"] == c
+            new_mask = df_rotate["المحصل الجديد"] == c
+
+            summary_basic.append({
+                "المحصل": c,
+                "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
+                "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                "عدد الحسابات (قديم)": old_mask.sum(),
+                "عدد الحسابات (جديد)": new_mask.sum(),
+                "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+                "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
+                "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+            })
+
+        summary_basic_df = pd.DataFrame(summary_basic)
+
+        def style_basic(d):
             fmt = {
-                "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العدد": "{:+,.0f}",
+                "عدد العملاء (قديم)": "{:,.0f}", "عدد العملاء (جديد)": "{:,.0f}", "فرق العملاء": "{:+,.0f}",
+                "عدد الحسابات (قديم)": "{:,.0f}", "عدد الحسابات (جديد)": "{:,.0f}", "فرق الحسابات": "{:+,.0f}",
                 "متبقي المديونية (قديم)": "{:,.0f}", "متبقي المديونية (جديد)": "{:,.0f}", "فرق المديونية": "{:+,.0f}",
             }
             return d.style.format(fmt)
 
-        tab1, tab2, tab3 = st.tabs(["📄 المقارنة", "🗂️ الجزء المتدور", "📋 الملف الكامل"])
-        with tab1:
-            st.dataframe(style_summary(summary_df), use_container_width=True, hide_index=True)
-        with tab2:
+        st.dataframe(style_basic(summary_basic_df), use_container_width=True, hide_index=True)
+
+        # ---------- جدول 2: + نوع المنتج ----------
+        if has_product:
+            st.markdown("### 2️⃣ نفس الملخص + تفصيل حسب نوع المنتج")
+
+            product_rows = []
+            for c in selected_collectors:
+                for prod in df_rotate["نوع المنتج"].dropna().unique():
+                    old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["نوع المنتج"] == prod)
+                    new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["نوع المنتج"] == prod)
+                    if old_mask.sum() == 0 and new_mask.sum() == 0:
+                        continue
+                    product_rows.append({
+                        "المحصل": c,
+                        "نوع المنتج": prod,
+                        "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                        "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
+                        "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                        "عدد الحسابات (قديم)": old_mask.sum(),
+                        "عدد الحسابات (جديد)": new_mask.sum(),
+                        "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                        "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+                        "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
+                        "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+                    })
+
+            if product_rows:
+                product_df = pd.DataFrame(product_rows)
+                st.dataframe(style_basic(product_df), use_container_width=True, hide_index=True)
+            else:
+                st.info("مفيش بيانات نوع منتج متاحة للعرض.")
+
+        # ---------- جدول 3: + NPL/DPD ----------
+        if has_npl:
+            st.markdown("### 3️⃣ نفس الملخص + تفصيل حسب NPL / DPD60")
+
+            npl_rows = []
+            for c in selected_collectors:
+                for npl_val in df_rotate["NPL_DPD"].dropna().unique():
+                    old_mask = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == npl_val)
+                    new_mask = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == npl_val)
+                    if old_mask.sum() == 0 and new_mask.sum() == 0:
+                        continue
+                    npl_rows.append({
+                        "المحصل": c,
+                        "NPL / DPD60": npl_val,
+                        "عدد العملاء (قديم)": df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                        "عدد العملاء (جديد)": df_rotate.loc[new_mask, "رقم الهوية"].nunique(),
+                        "فرق العملاء": df_rotate.loc[new_mask, "رقم الهوية"].nunique() - df_rotate.loc[old_mask, "رقم الهوية"].nunique(),
+                        "عدد الحسابات (قديم)": old_mask.sum(),
+                        "عدد الحسابات (جديد)": new_mask.sum(),
+                        "فرق الحسابات": new_mask.sum() - old_mask.sum(),
+                        "متبقي المديونية (قديم)": df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+                        "متبقي المديونية (جديد)": df_rotate.loc[new_mask, "متبقي المديونية"].sum(),
+                        "فرق المديونية": df_rotate.loc[new_mask, "متبقي المديونية"].sum() - df_rotate.loc[old_mask, "متبقي المديونية"].sum(),
+                    })
+
+            if npl_rows:
+                npl_df = pd.DataFrame(npl_rows)
+                st.dataframe(style_basic(npl_df), use_container_width=True, hide_index=True)
+            else:
+                st.info("مفيش بيانات NPL/DPD متاحة للعرض.")
+
+        # باقي البيانات
+        with st.expander("🗂️ عرض الجزء اللي اتدور (البيانات التفصيلية)"):
             st.dataframe(df_rotate, use_container_width=True, hide_index=True)
-        with tab3:
+
+        with st.expander("📋 عرض الملف الكامل بعد التدوير"):
             st.dataframe(result_df, use_container_width=True, hide_index=True)
-
-        # رسوم
-        st.markdown('<div class="section-title">📈 الرسوم البيانية</div>', unsafe_allow_html=True)
-        BLUE, GOLD = "#155a8a", "#C9A227"
-
-        def style_fig(fig):
-            fig.update_layout(height=400, margin=dict(t=20, b=10, l=10, r=10),
-                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                              font=dict(family="Tajawal"),
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            return fig
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown('<div class="chart-card"><div class="chart-card-title">عدد العملاء</div>', unsafe_allow_html=True)
-            count_melt = summary_df.melt(id_vars="المحصل", value_vars=["عدد العملاء (قديم)", "عدد العملاء (جديد)"],
-                                         var_name="النوع", value_name="عدد")
-            fig1 = px.bar(count_melt, x="المحصل", y="عدد", color="النوع", barmode="group", text="عدد",
-                          color_discrete_map={"عدد العملاء (قديم)": GOLD, "عدد العملاء (جديد)": BLUE})
-            fig1.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside")
-            st.plotly_chart(style_fig(fig1), use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with c2:
-            st.markdown('<div class="chart-card"><div class="chart-card-title">متبقي المديونية</div>', unsafe_allow_html=True)
-            debt_melt = summary_df.melt(id_vars="المحصل", value_vars=["متبقي المديونية (قديم)", "متبقي المديونية (جديد)"],
-                                        var_name="النوع", value_name="المديونية")
-            fig2 = px.bar(debt_melt, x="المحصل", y="المديونية", color="النوع", barmode="group", text="المديونية",
-                          color_discrete_map={"متبقي المديونية (قديم)": GOLD, "متبقي المديونية (جديد)": BLUE})
-            fig2.update_traces(texttemplate="<b>%{text:,.0f}</b>", textposition="outside")
-            st.plotly_chart(style_fig(fig2), use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
 
     except Exception as e:
         show_error(e)
