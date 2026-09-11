@@ -3836,5 +3836,3 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
-
-
