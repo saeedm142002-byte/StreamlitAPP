@@ -3229,13 +3229,17 @@ elif page == "التدوير":
 
     def refine_assignment(groups, assignment, current_count, current_debt,
                            target_count, target_debt, collectors,
-                           max_passes=25, pool_cap=100):
+                           max_passes=60, pool_cap=250):
+        """
+        تحسين محلي قوي جدًا
+        """
         def pen(count_val, target_c, debt_val, target_d):
-            tc = target_c or 1
-            td = target_d or 1.0
-            pc = (count_val - target_c) / tc
-            pdv = (debt_val - target_d) / td
-            return pc * pc + pdv * pdv
+            tc = max(target_c, 1)
+            td = max(target_d, 1.0)
+            # وزن أعلى للانحراف النسبي
+            pc = abs(count_val - target_c) / tc
+            pdv = abs(debt_val - target_d) / td
+            return (pc ** 1.5) * 1.4 + (pdv ** 1.5)   # عقوبة أقوى على الانحرافات الكبيرة
 
         groups_by_collector = {c: [] for c in collectors}
         for g in groups:
@@ -3243,77 +3247,111 @@ elif page == "التدوير":
             if cid is not None:
                 groups_by_collector[cid].append(g)
 
-        passes_done = 0
         improved = True
+        passes_done = 0
+
         while improved and passes_done < max_passes:
             improved = False
             passes_done += 1
 
-            # Move
-            for g in groups:
+            # ==================== 1. Move قوي ====================
+            # نرتب المجموعات من الأكبر للأصغر عشان نصلح الكبير الأول
+            sorted_groups = sorted(groups, key=lambda x: x["debt"], reverse=True)
+
+            for g in sorted_groups:
                 gid = g["id"]
                 c_old = assignment[gid]
-                old_pen_old = pen(current_count[c_old], target_count.get(c_old, 0),
-                                  current_debt[c_old], target_debt.get(c_old, 0.0))
-                best_c, best_delta = None, -1e-9
+
+                old_total_pen = pen(current_count[c_old], target_count.get(c_old, 0),
+                                    current_debt[c_old], target_debt.get(c_old, 0.0))
+
+                best_c = None
+                best_delta = -1e-9
+
                 for c_new in collectors:
                     if c_new == c_old or c_new in g["forbidden"]:
                         continue
-                    old_pen_new = pen(current_count[c_new], target_count.get(c_new, 0),
-                                      current_debt[c_new], target_debt.get(c_new, 0.0))
-                    new_pen_old = pen(current_count[c_old] - 1, target_count.get(c_old, 0),
-                                      current_debt[c_old] - g["debt"], target_debt.get(c_old, 0.0))
-                    new_pen_new = pen(current_count[c_new] + 1, target_count.get(c_new, 0),
-                                      current_debt[c_new] + g["debt"], target_debt.get(c_new, 0.0))
-                    delta = (new_pen_old + new_pen_new) - (old_pen_old + old_pen_new)
+
+                    # العقوبة القديمة للاتنين
+                    old_pen_pair = (
+                        pen(current_count[c_old], target_count.get(c_old, 0), current_debt[c_old], target_debt.get(c_old, 0.0)) +
+                        pen(current_count[c_new], target_count.get(c_new, 0), current_debt[c_new], target_debt.get(c_new, 0.0))
+                    )
+
+                    # العقوبة الجديدة
+                    new_pen_pair = (
+                        pen(current_count[c_old] - 1, target_count.get(c_old, 0), current_debt[c_old] - g["debt"], target_debt.get(c_old, 0.0)) +
+                        pen(current_count[c_new] + 1, target_count.get(c_new, 0), current_debt[c_new] + g["debt"], target_debt.get(c_new, 0.0))
+                    )
+
+                    delta = new_pen_pair - old_pen_pair
                     if delta < best_delta:
                         best_delta = delta
                         best_c = c_new
+
                 if best_c is not None:
+                    # نفذ النقل
                     current_count[c_old] -= 1
                     current_debt[c_old] -= g["debt"]
                     current_count[best_c] += 1
                     current_debt[best_c] += g["debt"]
                     assignment[gid] = best_c
+
                     groups_by_collector[c_old].remove(g)
                     groups_by_collector[best_c].append(g)
                     improved = True
 
-            # Swap
+            # ==================== 2. Swap قوي ====================
             for i, c1 in enumerate(collectors):
-                for c2 in collectors[i + 1:]:
+                for c2 in collectors[i+1:]:
                     list1 = [g for g in groups_by_collector[c1] if c2 not in g["forbidden"]]
                     list2 = [g for g in groups_by_collector[c2] if c1 not in g["forbidden"]]
+
                     if not list1 or not list2:
                         continue
+
+                    # ناخد عينة أكبر + نركز على الاختلافات الكبيرة في المديونية
                     list1 = _sample_by_debt(list1, pool_cap)
                     list2 = _sample_by_debt(list2, pool_cap)
-                    old_pen_pair = (pen(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
-                                    pen(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0)))
-                    best_pair, best_delta = None, -1e-9
+
+                    old_pen_pair = (
+                        pen(current_count[c1], target_count.get(c1, 0), current_debt[c1], target_debt.get(c1, 0.0)) +
+                        pen(current_count[c2], target_count.get(c2, 0), current_debt[c2], target_debt.get(c2, 0.0))
+                    )
+
+                    best_pair = None
+                    best_delta = -1e-9
+
                     for g1 in list1:
                         for g2 in list2:
                             new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
                             new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
-                            new_pen_pair = (pen(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
-                                            pen(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)))
+
+                            new_pen_pair = (
+                                pen(current_count[c1], target_count.get(c1, 0), new_debt1, target_debt.get(c1, 0.0)) +
+                                pen(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0))
+                            )
+
                             delta = new_pen_pair - old_pen_pair
                             if delta < best_delta:
                                 best_delta = delta
                                 best_pair = (g1, g2)
+
                     if best_pair:
                         g1, g2 = best_pair
                         assignment[g1["id"]] = c2
                         assignment[g2["id"]] = c1
+
                         current_debt[c1] += (g2["debt"] - g1["debt"])
                         current_debt[c2] += (g1["debt"] - g2["debt"])
+
                         groups_by_collector[c1].remove(g1)
                         groups_by_collector[c1].append(g2)
                         groups_by_collector[c2].remove(g2)
                         groups_by_collector[c2].append(g1)
                         improved = True
-        return passes_done
 
+        return passes_done
     # ============================================================
     # 1. رفع الملف
     # ============================================================
@@ -3510,7 +3548,7 @@ elif page == "التدوير":
     # ============================================================
     # 7. التشغيل
     # ============================================================
-    @st.cache_data(show_spinner="جاري إعادة التوزيع...")
+    @st.cache_data(show_spinner="جاري إعادة التوزيع والتحسين القوي...")
     def run_rotation(df_bytes, collectors, target_count, target_debt):
         df_rot = pd.read_pickle(BytesIO(df_bytes))
         collectors = list(collectors)
@@ -3522,6 +3560,8 @@ elif page == "التدوير":
                 "debt": float(g["متبقي المديونية"].sum()),
                 "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
             })
+
+        # ترتيب تنازلي حسب المديونية (مهم جدًا)
         groups.sort(key=lambda x: x["debt"], reverse=True)
 
         current_count = {c: 0 for c in collectors}
@@ -3529,6 +3569,7 @@ elif page == "التدوير":
         assignment = {}
         unassignable = []
 
+        # ----- توزيع أولي أقوى -----
         for grp in groups:
             candidates = [c for c in collectors if c not in grp["forbidden"]]
             if not candidates:
@@ -3536,10 +3577,13 @@ elif page == "التدوير":
                 continue
 
             def score(c):
-                tc = target_count.get(c, 0) or 1
-                td = target_debt.get(c, 0.0) or 1.0
-                return ((target_count.get(c, 0) - current_count[c]) / tc +
-                        (target_debt.get(c, 0.0) - current_debt[c]) / td)
+                # نفضل المحصل اللي عنده أكبر عجز حالي
+                tc = max(target_count.get(c, 0), 1)
+                td = max(target_debt.get(c, 0.0), 1.0)
+                deficit_count = (target_count.get(c, 0) - current_count[c]) / tc
+                deficit_debt  = (target_debt.get(c, 0.0) - current_debt[c]) / td
+                # نعطي وزن أعلى للعجز في المديونية شوية
+                return deficit_count * 1.1 + deficit_debt * 1.3
 
             best = max(candidates, key=score)
             assignment[grp["id"]] = best
@@ -3549,7 +3593,14 @@ elif page == "التدوير":
         if unassignable:
             raise KeyError("STEP::تعذر إيجاد محصل بديل::MISSING::" + "|".join(unassignable[:30]))
 
-        refine_assignment(groups, assignment, current_count, current_debt, target_count, target_debt, collectors)
+        # ----- تحسين محلي قوي -----
+        refine_assignment(
+            groups, assignment, current_count, current_debt,
+            target_count, target_debt, collectors,
+            max_passes=60,
+            pool_cap=250
+        )
+
         return assignment, current_count, current_debt
 
     if st.button("🚀 ابدأ التدوير", type="primary", use_container_width=True):
