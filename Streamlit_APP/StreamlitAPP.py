@@ -3231,12 +3231,9 @@ elif page == "التدوير":
                            target_count, target_debt, collectors,
                            current_prod_count=None, target_prod_count=None,
                            max_passes=50, pool_cap=200):
-        """
-        تحسين محلي يدعم التوازن حسب المنتج (لو موجود)
-        """
         has_prod = current_prod_count is not None and target_prod_count is not None
 
-    def pen_total(count_val, target_c, debt_val, target_d):
+        def pen_total(count_val, target_c, debt_val, target_d):
             tc = max(target_c, 1)
             td = max(target_d, 1.0)
             pc = abs(count_val - target_c) / tc
@@ -3273,10 +3270,6 @@ elif page == "التدوير":
                 c_old = assignment[gid]
                 prod = g.get("product")
 
-                old_pen = (pen_total(current_count[c_old], target_count.get(c_old, 0),
-                                     current_debt[c_old], target_debt.get(c_old, 0.0)) +
-                           pen_prod(c_old))
-
                 best_c = None
                 best_delta = -1e-9
 
@@ -3284,13 +3277,11 @@ elif page == "التدوير":
                     if c_new == c_old or c_new in g["forbidden"]:
                         continue
 
-                    # حساب العقوبة الجديدة
                     new_count_old = current_count[c_old] - 1
                     new_debt_old = current_debt[c_old] - g["debt"]
                     new_count_new = current_count[c_new] + 1
                     new_debt_new = current_debt[c_new] + g["debt"]
 
-                    # تحديث مؤقت للمنتج
                     if has_prod and prod:
                         current_prod_count[c_old][prod] = current_prod_count[c_old].get(prod, 0) - 1
                         current_prod_count[c_new][prod] = current_prod_count[c_new].get(prod, 0) + 1
@@ -3299,7 +3290,6 @@ elif page == "التدوير":
                                pen_total(new_count_new, target_count.get(c_new, 0), new_debt_new, target_debt.get(c_new, 0.0)) +
                                pen_prod(c_old) + pen_prod(c_new))
 
-                    # تراجع عن التحديث المؤقت
                     if has_prod and prod:
                         current_prod_count[c_old][prod] += 1
                         current_prod_count[c_new][prod] -= 1
@@ -3314,7 +3304,6 @@ elif page == "التدوير":
                         best_c = c_new
 
                 if best_c is not None:
-                    # تنفيذ النقل
                     current_count[c_old] -= 1
                     current_debt[c_old] -= g["debt"]
                     current_count[best_c] += 1
@@ -3355,7 +3344,6 @@ elif page == "التدوير":
                             new_debt1 = current_debt[c1] - g1["debt"] + g2["debt"]
                             new_debt2 = current_debt[c2] - g2["debt"] + g1["debt"]
 
-                            # تحديث مؤقت للمنتجات
                             if has_prod:
                                 if prod1:
                                     current_prod_count[c1][prod1] = current_prod_count[c1].get(prod1, 0) - 1
@@ -3368,7 +3356,6 @@ elif page == "التدوير":
                                             pen_total(current_count[c2], target_count.get(c2, 0), new_debt2, target_debt.get(c2, 0.0)) +
                                             pen_prod(c1) + pen_prod(c2))
 
-                            # تراجع
                             if has_prod:
                                 if prod1:
                                     current_prod_count[c1][prod1] += 1
@@ -3406,7 +3393,7 @@ elif page == "التدوير":
                         groups_by_collector[c2].append(g1)
                         improved = True
 
-                return passes
+        return passes
 
     # ============================================================
     # 1. رفع الملف
@@ -3532,7 +3519,7 @@ elif page == "التدوير":
     )
     exclude_payment = protect_payment.startswith("نعم")
 
-    # بناء df_rotate (اللي هيتحرك)
+    # بناء df_rotate
     mask = (
         df["اسم المحصل القديم"].isin(selected_collectors) &
         df["الحالة"].isin(selected_statuses)
@@ -3826,6 +3813,7 @@ elif page == "التدوير":
                         fmt[col] = "{:+,.0f}"
                 return d.style.format(fmt)
 
+            # جدول 1
             st.markdown("### 1️⃣ عدد العملاء + عدد الحسابات + متبقي المديونية")
             rows = []
             for c in selected_collectors:
@@ -3845,6 +3833,7 @@ elif page == "التدوير":
                 })
             st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
 
+            # جدول 2: حسب المنتج
             if has_product:
                 st.markdown("### 2️⃣ تفصيل حسب نوع المنتج")
                 rows = []
@@ -3859,3 +3848,47 @@ elif page == "التدوير":
                             "نوع المنتج": prod,
                             "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
                             "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
+                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد الحسابات (قديم)": int(old_m.sum()),
+                            "عدد الحسابات (جديد)": int(new_m.sum()),
+                            "فرق الحسابات": int(new_m.sum() - old_m.sum()),
+                            "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                            "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
+                            "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                        })
+                if rows:
+                    st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
+
+            # جدول 3: حسب NPL
+            if has_npl:
+                st.markdown("### 3️⃣ تفصيل حسب NPL / DPD60")
+                rows = []
+                for c in selected_collectors:
+                    for val in sorted(df_rotate["NPL_DPD"].dropna().unique()):
+                        old_m = (df_rotate["اسم المحصل القديم"] == c) & (df_rotate["NPL_DPD"] == val)
+                        new_m = (df_rotate["المحصل الجديد"] == c) & (df_rotate["NPL_DPD"] == val)
+                        if old_m.sum() == 0 and new_m.sum() == 0:
+                            continue
+                        rows.append({
+                            "المحصل": c,
+                            "NPL / DPD60": val,
+                            "عدد العملاء (قديم)": df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد العملاء (جديد)": df_rotate.loc[new_m, "رقم الهوية"].nunique(),
+                            "فرق العملاء": df_rotate.loc[new_m, "رقم الهوية"].nunique() - df_rotate.loc[old_m, "رقم الهوية"].nunique(),
+                            "عدد الحسابات (قديم)": int(old_m.sum()),
+                            "عدد الحسابات (جديد)": int(new_m.sum()),
+                            "فرق الحسابات": int(new_m.sum() - old_m.sum()),
+                            "متبقي المديونية (قديم)": df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                            "متبقي المديونية (جديد)": df_rotate.loc[new_m, "متبقي المديونية"].sum(),
+                            "فرق المديونية": df_rotate.loc[new_m, "متبقي المديونية"].sum() - df_rotate.loc[old_m, "متبقي المديونية"].sum(),
+                        })
+                if rows:
+                    st.dataframe(style_num(pd.DataFrame(rows)), use_container_width=True, hide_index=True)
+
+            with st.expander("🗂️ الجزء اللي اتدور"):
+                st.dataframe(df_rotate, use_container_width=True, hide_index=True)
+            with st.expander("📋 الملف الكامل"):
+                st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+        except Exception as e:
+            show_error(e)
