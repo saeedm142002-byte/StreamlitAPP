@@ -3306,12 +3306,18 @@ elif page == "التدوير":
         على أساسها عادي من غير أي تغيير في منطقها.
         """
 
+        # أولوية قصوى وحادة لتساوي عدد الحسابات بين المحصلين قبل أي حاجة تانية.
+        # وزن ضخم على فرق العدد يخلي أي تحسن في تساوي العدد (Move) يطغى
+        # دايمًا على أي تأثير سلبي على توازن المديونية. توازن المديونية بيتحسن
+        # بعد كده بس عن طريق Swap (لأن Swap مبيغيّرش عدد حسابات أي محصل أصلاً).
+        COUNT_PRIORITY_WEIGHT = 1_000_000
+
         def pen(count_val, target_c, debt_val, target_d):
             tc = target_c or 1
             td = target_d or 1.0
             pc = (count_val - target_c) / tc
             pdv = (debt_val - target_d) / td
-            return pc * pc + pdv * pdv
+            return COUNT_PRIORITY_WEIGHT * (pc * pc) + pdv * pdv
 
         groups_by_collector = {c: [] for c in collectors}
         for g in groups:
@@ -3566,7 +3572,9 @@ elif page == "التدوير":
                 td = target_debt.get(c, 0.0) or 1.0
                 deficit_count = (target_count.get(c, 0) - current_count[c]) / tc
                 deficit_debt = (target_debt.get(c, 0.0) - current_debt[c]) / td
-                return deficit_count + deficit_debt
+                # أولوية حادة لسد فجوة العدد أولاً؛ متبقي المديونية بيفرق بس
+                # لما يكون فيه أكتر من محصل بنفس درجة الاحتياج للعدد تقريبًا.
+                return 1_000_000 * deficit_count + deficit_debt
 
             best = max(candidates, key=score)
             assignment[grp["id"]] = best
