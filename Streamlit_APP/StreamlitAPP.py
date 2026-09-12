@@ -3167,56 +3167,62 @@ elif page == "التوزيع":
         st.markdown("### ارفع ملف المحفظة الحالية")
         equal_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="equalize_file")
 
+        @st.cache_data
+        def load_equalize_file(file_bytes):
+            return pd.read_excel(io.BytesIO(file_bytes))
+
         if equal_file:
-            df_eq = pd.read_excel(equal_file)
+            df_eq = load_equalize_file(equal_file.getvalue())
             cols = list(df_eq.columns)
 
-            st.markdown("### اختار الأعمدة")
-            id_col = st.selectbox("عمود رقم الهوية", cols, key="eq_id")
-            account_col = st.selectbox("عمود رقم الحساب", cols, key="eq_account")
-            sp_col = st.selectbox("عمود اسم المحصل", cols, key="eq_sp")
-            product_col = st.selectbox("عمود نوع المنتج", cols, key="eq_product")
-            debt_col = st.selectbox("عمود متبقي المديونية", cols, key="eq_debt")
-            status_col = st.selectbox("عمود حالة الحساب", cols, key="eq_status")
+            with st.form("equalize_settings_form"):
+                st.markdown("### اختار الأعمدة")
+                id_col = st.selectbox("عمود رقم الهوية", cols, key="eq_id")
+                account_col = st.selectbox("عمود رقم الحساب", cols, key="eq_account")
+                sp_col = st.selectbox("عمود اسم المحصل", cols, key="eq_sp")
+                product_col = st.selectbox("عمود نوع المنتج", cols, key="eq_product")
+                debt_col = st.selectbox("عمود متبقي المديونية", cols, key="eq_debt")
+                default_status_index = cols.index("Sub State") if "Sub State" in cols else 0
+                status_col = st.selectbox("عمود حالة الحساب", cols, index=default_status_index, key="eq_status")
 
-            status_values = sorted(df_eq[status_col].dropna().unique().tolist())
-            included_statuses = st.multiselect(
-                "اختار الحالات اللي هيتساوى بيها فقط (أي عميل عنده حالة تانية غير دول هيفضل ثابت)",
-                status_values, key="eq_statuses"
-            )
-
-            df_eq = df_eq.dropna(subset=[account_col])
-
-            if not included_statuses:
-                st.info("اختار حالة واحدة على الأقل عشان تقدر تنفذ التساوي")
-
-            if included_statuses and st.button("نفذ التساوي"):
-                result_df, summary_df = equalize_portfolio(
-                    df_eq, id_col, account_col, sp_col, product_col, debt_col,
-                    status_col, included_statuses
+                status_values = sorted(df_eq[status_col].dropna().unique().tolist())
+                included_statuses = st.multiselect(
+                    "اختار الحالات اللي هيتساوى بيها فقط (أي عميل عنده حالة تانية غير دول هيفضل ثابت)",
+                    status_values, key="eq_statuses"
                 )
 
-                st.success("تم التساوي")
-                st.markdown("### ملخص قبل/بعد لكل محصل ولكل منتج")
-                st.dataframe(summary_df, use_container_width=True)
+                submitted = st.form_submit_button("نفذ التساوي")
 
-                moved = result_df[result_df[sp_col] != result_df["المحصل بعد التساوي"]]
-                st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
-                if len(moved) > 0:
-                    st.dataframe(
-                        moved[[id_col, account_col, product_col, debt_col, status_col, sp_col, "المحصل بعد التساوي"]],
-                        use_container_width=True
+            if submitted:
+                if not included_statuses:
+                    st.warning("اختار حالة واحدة على الأقل عشان تقدر تنفذ التساوي")
+                else:
+                    df_eq_clean = df_eq.dropna(subset=[account_col])
+                    result_df, summary_df = equalize_portfolio(
+                        df_eq_clean, id_col, account_col, sp_col, product_col, debt_col,
+                        status_col, included_statuses
                     )
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    result_df.to_excel(writer, index=False, sheet_name="المحفظة بعد التساوي")
-                    summary_df.to_excel(writer, index=False, sheet_name="ملخص")
-                    if len(moved) > 0:
-                        moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
-                st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
-                                    file_name="portfolio_equalized.xlsx")
+                    st.success("تم التساوي")
+                    st.markdown("### ملخص قبل/بعد لكل محصل ولكل منتج")
+                    st.dataframe(summary_df, use_container_width=True)
 
+                    moved = result_df[result_df[sp_col] != result_df["المحصل بعد التساوي"]]
+                    st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
+                    if len(moved) > 0:
+                        st.dataframe(
+                            moved[[id_col, account_col, product_col, debt_col, status_col, sp_col, "المحصل بعد التساوي"]],
+                            use_container_width=True
+                        )
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        result_df.to_excel(writer, index=False, sheet_name="المحفظة بعد التساوي")
+                        summary_df.to_excel(writer, index=False, sheet_name="ملخص")
+                        if len(moved) > 0:
+                            moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
+                    st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
+                                        file_name="portfolio_equalized.xlsx")
 
 elif page == "اخطاء الحالات":
     st.subheader("❌ اخطاء الحالات")
