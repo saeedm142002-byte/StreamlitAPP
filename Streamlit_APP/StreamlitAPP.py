@@ -3262,7 +3262,7 @@ elif page == "التوزيع":
                 if not included_statuses:
                     st.warning("اختار حالة واحدة على الأقل عشان تقدر تنفذ التساوي")
                 else:
-                    df_eq_clean = df_eq.dropna(subset=[account_col])
+                   # df_eq_clean = df_eq.dropna(subset=[account_col])
                     result_df, summary_df = equalize_portfolio(
                         df_eq_clean, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
