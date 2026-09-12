@@ -2904,9 +2904,87 @@ elif page == "النشاط":
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
 # ======================
+def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
+                        include_paid, payment_col=None):
+    df = df.copy()
+    if include_paid or not payment_col:
+        df["_قابل_للنقل"] = True
+    else:
+        df["_قابل_للنقل"] = df[payment_col].isna() | (df[payment_col] == 0)
+
+    new_col = "المحصل بعد التساوي"
+    df[new_col] = df[sp_col]
+
+    summary_rows = []
+
+    for product, pdf in df.groupby(product_col):
+        salespeople = sorted(pdf[sp_col].unique())
+        n = len(salespeople)
+        if n <= 1:
+            for sp in salespeople:
+                after = pdf[pdf[sp_col] == sp]
+                summary_rows.append({
+                    product_col: product, sp_col: sp,
+                    "عدد_الحسابات_قبل": len(after), "متبقي_المديونية_قبل": round(after[debt_col].sum(), 2),
+                    "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
+                })
+            continue
+
+        total_count = len(pdf)
+        total_amount = pdf[debt_col].sum()
+        target_count = total_count / n
+        target_amount = total_amount / n
+
+        current = pdf.groupby(sp_col).agg(
+            count=(account_col, "count"), amount=(debt_col, "sum")
+        ).reindex(salespeople, fill_value=0)
+
+        need_count = {sp: target_count - current.loc[sp, "count"] for sp in salespeople}
+        need_amount = {sp: target_amount - current.loc[sp, "amount"] for sp in salespeople}
+
+        movable = {
+            sp: pdf[(pdf[sp_col] == sp) & (pdf["_قابل_للنقل"])][debt_col].to_dict()
+            for sp in salespeople
+        }  # {sp: {row_index: amount}}
+
+        givers = sorted([sp for sp in salespeople if need_count[sp] < -0.5], key=lambda s: need_count[s])
+        receivers = sorted([sp for sp in salespeople if need_count[sp] > 0.5], key=lambda s: -need_count[s])
+
+        for receiver in receivers:
+            if need_count[receiver] <= 0.5:
+                continue
+            for giver in givers:
+                while movable[giver] and need_count[receiver] > 0.5 and need_count[giver] < -0.5:
+                    remaining_need = need_amount[receiver]
+                    best_row = min(movable[giver], key=lambda r: abs(movable[giver][r] - remaining_need))
+                    amt = movable[giver].pop(best_row)
+                    df.loc[best_row, new_col] = receiver
+                    need_count[receiver] -= 1
+                    need_count[giver] += 1
+                    need_amount[receiver] -= amt
+                    need_amount[giver] += amt
+                if need_count[receiver] <= 0.5:
+                    break
+
+        for sp in salespeople:
+            before = current.loc[sp]
+            after = df[(df[product_col] == product) & (df[new_col] == sp)]
+            summary_rows.append({
+                product_col: product, sp_col: sp,
+                "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
+            })
+
+    return df, pd.DataFrame(summary_rows)
+
+
 elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
-    distribution_type = st.radio("نوع التوزيع", ["محصل هيمشي", "محصل جديد جاي"], horizontal=True)
+    distribution_type = st.radio(
+        "نوع التوزيع",
+        ["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"],
+        horizontal=True
+    )
 
     # ---------------- سيناريو 1: محصل هيمشي ----------------
     if distribution_type == "محصل هيمشي":
@@ -2967,7 +3045,7 @@ elif page == "التوزيع":
                                     file_name="portfolio_after_distribution.xlsx")
 
     # ---------------- سيناريو 2: محصل جديد جاي ----------------
-    else:
+    elif distribution_type == "محصل جديد جاي":
         st.markdown("### ارفع ملف المحفظة")
         st.caption("للاطلاع على أرصدة المحصلين الحاليين، وعشان نجيب منه أسماء Sales Team")
         portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
@@ -3058,6 +3136,64 @@ elif page == "التوزيع":
                 assignment_summary.to_excel(writer, index=False, sheet_name="ملخص")
             st.download_button("تحميل ملف المحصل الجديد", output.getvalue(),
                                 file_name=f"new_collector_{new_sp_name}.xlsx")
+
+    # ---------------- سيناريو 3: تساوي المحفظة ----------------
+    else:
+        st.markdown("### ارفع ملف المحفظة الحالية")
+        equal_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="equalize_file")
+
+        if equal_file:
+            df_eq = pd.read_excel(equal_file)
+            cols = list(df_eq.columns)
+
+            st.markdown("### اختار الأعمدة")
+            id_col = st.selectbox("عمود رقم الهوية", cols, key="eq_id")
+            account_col = st.selectbox("عمود رقم الحساب", cols, key="eq_account")
+            sp_col = st.selectbox("عمود اسم المحصل", cols, key="eq_sp")
+            product_col = st.selectbox("عمود نوع المنتج", cols, key="eq_product")
+            debt_col = st.selectbox("عمود متبقي المديونية", cols, key="eq_debt")
+
+            include_paid_choice = st.radio(
+                "هل تريد اعتبار الحسابات اللي عليها سداد ضمن عملية التساوي؟",
+                ["لا، استبعدها من النقل", "أيوه، اعتبرها زي أي حساب تاني"],
+                horizontal=True
+            )
+            include_paid_bool = include_paid_choice.startswith("أيوه")
+
+            payment_col = None
+            if not include_paid_bool:
+                payment_col = st.selectbox(
+                    "عمود السداد (الحسابات اللي عليها سداد مش هتتنقل)", cols, key="eq_payment"
+                )
+
+            df_eq = df_eq.dropna(subset=[account_col])
+
+            if st.button("نفذ التساوي"):
+                result_df, summary_df = equalize_portfolio(
+                    df_eq, id_col, account_col, sp_col, product_col, debt_col,
+                    include_paid_bool, payment_col
+                )
+
+                st.success("تم التساوي")
+                st.markdown("### ملخص قبل/بعد لكل محصل ولكل منتج")
+                st.dataframe(summary_df, use_container_width=True)
+
+                moved = result_df[result_df[sp_col] != result_df["المحصل بعد التساوي"]]
+                st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
+                if len(moved) > 0:
+                    st.dataframe(
+                        moved[[id_col, account_col, product_col, debt_col, sp_col, "المحصل بعد التساوي"]],
+                        use_container_width=True
+                    )
+
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    result_df.to_excel(writer, index=False, sheet_name="المحفظة بعد التساوي")
+                    summary_df.to_excel(writer, index=False, sheet_name="ملخص")
+                    if len(moved) > 0:
+                        moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
+                st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
+                                    file_name="portfolio_equalized.xlsx")
 
 
 elif page == "اخطاء الحالات":
