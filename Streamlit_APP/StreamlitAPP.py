@@ -141,16 +141,25 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     new_col = "المحصل بعد التساوي"
     df[new_col] = df[sp_col]
 
+    # فئة كل محصل: "كامل" لو شغال على كل المنتجات الموجودة، "جزئي" لو منتج أو منتجين بس
+    all_products = set(df[product_col].unique())
+    sp_products = df.groupby(sp_col)[product_col].apply(set)
+    sp_cohort = {
+        sp: ("كامل" if prods == all_products else "جزئي")
+        for sp, prods in sp_products.items()
+    }
+    df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
+
     summary_rows = []
 
-    for product, pdf in df.groupby(product_col):
+    for (product, cohort), pdf in df.groupby([product_col, "_فئة_المحصل"]):
         salespeople = sorted(pdf[sp_col].unique())
         n = len(salespeople)
         if n <= 1:
             for sp in salespeople:
                 after = pdf[pdf[sp_col] == sp]
                 summary_rows.append({
-                    product_col: product, sp_col: sp,
+                    product_col: product, "فئة المحصل": cohort, sp_col: sp,
                     "عدد_الحسابات_قبل": len(after), "متبقي_المديونية_قبل": round(after[debt_col].sum(), 2),
                     "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
                 })
@@ -171,7 +180,7 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
         movable = {
             sp: pdf[(pdf[sp_col] == sp) & (pdf["_قابل_للنقل"])][debt_col].to_dict()
             for sp in salespeople
-        }  # {sp: {row_index: amount}}
+        }
 
         givers = sorted([sp for sp in salespeople if need_count[sp] < -0.5], key=lambda s: need_count[s])
         receivers = sorted([sp for sp in salespeople if need_count[sp] > 0.5], key=lambda s: -need_count[s])
@@ -194,9 +203,9 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
 
         for sp in salespeople:
             before = current.loc[sp]
-            after = df[(df[product_col] == product) & (df[new_col] == sp)]
+            after = df[(df[product_col] == product) & (df["_فئة_المحصل"] == cohort) & (df[new_col] == sp)]
             summary_rows.append({
-                product_col: product, sp_col: sp,
+                product_col: product, "فئة المحصل": cohort, sp_col: sp,
                 "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
                 "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
             })
