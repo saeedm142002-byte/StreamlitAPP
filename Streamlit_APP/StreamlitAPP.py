@@ -332,6 +332,7 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
     return pool_sorted.iloc[best_start:best_start + need_count]
 
 
+
 def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
                       status_col, included_statuses,
                       payment_col=None, move_paid_accounts=True,
@@ -476,6 +477,149 @@ def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
 
 
 
+def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col, debt_col,
+                                    status_col, included_statuses,
+                                    payment_col=None, move_paid_accounts=True,
+                                    max_iterations=20000):
+    """
+    تساوي عنيف - مخصص لوضع NPL & Dpd60:
+    - مفيش فرز فئات (كامل/جزئي) خالص - كل المحصلين اللي عندهم نفس المنتج
+      (جوة نفس التصنيف اللي اتبعتله الداتا) بيتساووا مع بعض كتلة واحدة.
+    - مفيش سقف مسموح به للفرق: في كل خطوة بيدور على أكتر منتج فيه فرق، وبينقل
+      حساب/عميل من المحصل الأعلى للأقل بس لو النقلة دي فعلاً بتقرّب فرق العدد
+      وفرق المديونية لبعض أكتر. بيقف لما محدش فيه نقلة بتحسن الوضع (يعني وصلنا
+      لأقرب حاجة للصفر ممكنة رياضيًا بالنظر لحجم كل عميل).
+    """
+    df = df.copy()
+    new_col = "المحصل بعد التساوي"
+    df[new_col] = df[sp_col]
+ 
+    if payment_col:
+        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
+    else:
+        df["_عليه_سداد"] = False
+ 
+    salespeople = sorted(df[sp_col].unique())
+    n = len(salespeople)
+    products = sorted(df[product_col].unique())
+ 
+    before_stats = {}
+    for p in products:
+        pdf = df[df[product_col] == p]
+        before_stats[p] = pdf.groupby(sp_col).agg(
+            count=(account_col, "count"), amount=(debt_col, "sum")
+        ).reindex(salespeople, fill_value=0)
+ 
+    summary_rows = []
+ 
+    if n <= 1:
+        for p in products:
+            for sp in salespeople:
+                before = before_stats[p].loc[sp]
+                summary_rows.append({
+                    product_col: p, sp_col: sp,
+                    "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                    "عدد_الحسابات_بعد": int(before["count"]), "متبقي_المديونية_بعد": round(before["amount"], 2)
+                })
+        return df, pd.DataFrame(summary_rows)
+ 
+    client_units = {}
+    for cid, grp in df.groupby(id_col):
+        statuses = set(grp[status_col].unique())
+        if not statuses.issubset(set(included_statuses)):
+            continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
+        if not move_paid_accounts and grp["_عليه_سداد"].any():
+            continue  # العميل عنده حساب مسدد ومختار إنه يفضل ثابت خالص
+        per_product = grp.groupby(product_col).agg(
+            count=(account_col, "count"), amount=(debt_col, "sum")
+        ).to_dict("index")
+        client_units[cid] = {
+            "current_sp": grp[sp_col].mode().iloc[0],
+            "products": per_product,
+            "row_index": grp.index.tolist()
+        }
+ 
+    pool_by_sp = {sp: [] for sp in salespeople}
+    for cid, unit in client_units.items():
+        pool_by_sp[unit["current_sp"]].append(cid)
+ 
+    stats = {p: {} for p in products}
+    for p in products:
+        for sp in salespeople:
+            stats[p][sp] = {
+                "count": float(before_stats[p].loc[sp, "count"]),
+                "amount": float(before_stats[p].loc[sp, "amount"])
+            }
+ 
+    iterations = 0
+    stalled_products = set()
+    while iterations < max_iterations and len(stalled_products) < len(products):
+        target = None
+        for p in products:
+            if p in stalled_products:
+                continue
+            counts = {sp: stats[p][sp]["count"] for sp in salespeople}
+            amounts = {sp: stats[p][sp]["amount"] for sp in salespeople}
+            count_diff = max(counts.values()) - min(counts.values())
+            amount_diff = max(amounts.values()) - min(amounts.values())
+            if count_diff <= 0 and amount_diff <= 0:
+                continue
+            score = count_diff * 1_000_000 + amount_diff
+            if target is None or score > target[0]:
+                target = (score, p, counts, amounts, count_diff, amount_diff)
+ 
+        if target is None:
+            break  # وصلنا لأقصى تقارب ممكن على كل المنتجات
+ 
+        _, p, counts, amounts, count_diff, amount_diff = target
+        fix_by_count = count_diff > 0
+        giver = max(counts, key=lambda s: counts[s]) if fix_by_count else max(amounts, key=lambda s: amounts[s])
+        receiver = min(counts, key=lambda s: counts[s]) if fix_by_count else min(amounts, key=lambda s: amounts[s])
+ 
+        candidates = [cid for cid in pool_by_sp[giver] if p in client_units[cid]["products"]]
+        if not candidates:
+            stalled_products.add(p)
+            continue
+ 
+        diff_before = (count_diff, amount_diff)
+        best_cid, best_after = None, None
+        for cid in candidates:
+            vals = client_units[cid]["products"][p]
+            c2, a2 = dict(counts), dict(amounts)
+            c2[giver] -= vals["count"]; c2[receiver] += vals["count"]
+            a2[giver] -= vals["amount"]; a2[receiver] += vals["amount"]
+            diff_after = (max(c2.values()) - min(c2.values()), max(a2.values()) - min(a2.values()))
+            if best_after is None or diff_after < best_after:
+                best_after, best_cid = diff_after, cid
+ 
+        if best_after is None or best_after >= diff_before:
+            stalled_products.add(p)  # مفيش نقلة تقرّب المنتج ده أكتر من كده
+            continue
+ 
+        unit = client_units[best_cid]
+        for pp, vals in unit["products"].items():
+            stats[pp][giver]["count"] -= vals["count"]
+            stats[pp][giver]["amount"] -= vals["amount"]
+            stats[pp][receiver]["count"] += vals["count"]
+            stats[pp][receiver]["amount"] += vals["amount"]
+        df.loc[unit["row_index"], new_col] = receiver
+        pool_by_sp[giver].remove(best_cid)
+        pool_by_sp[receiver].append(best_cid)
+        unit["current_sp"] = receiver
+        stalled_products.clear()  # النقلة ممكن تكون حلت منتج كان متعثر قبل كده
+        iterations += 1
+ 
+    for p in products:
+        for sp in salespeople:
+            before = before_stats[p].loc[sp]
+            summary_rows.append({
+                product_col: p, sp_col: sp,
+                "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                "عدد_الحسابات_بعد": int(stats[p][sp]["count"]), "متبقي_المديونية_بعد": round(stats[p][sp]["amount"], 2)
+            })
+ 
+    return df, pd.DataFrame(summary_rows)
+
 def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None):
     """
     ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
@@ -533,20 +677,22 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
  
  
 
+
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
                         payment_col=None, move_paid_accounts=True,
                         max_amount_diff=10000, max_iterations=20000,
                         classification_col=None):
     """
-    لو classification_col=None (وضع SNB): زي القديم بالظبط - فئة المحصل وتوازن
-    المنتج بيتحددوا على مستوى المحفظة كلها.
+    لو classification_col=None (وضع SNB): زي القديم بالظبط - _equalize_single،
+    فئة المحصل (كامل/جزئي) وتوازن بحد أقصى مسموح به لفرق المديونية (max_amount_diff).
+    مفيش أي تغيير هنا خالص.
  
     لو classification_col مفعّل (NPL & Dpd60): بنقسم المحفظة تصنيف تصنيف
-    (كل تصنيف [NPL] لوحده بالكامل، وكل تصنيف [Dpd60] لوحده بالكامل)، وجوة كل
-    تصنيف بيتحدد فئة المحصل (كامل = عنده منتجات التصنيف ده كلها / جزئي = عنده
-    منتج واحد بس منها) وبيتساوى المنتجين مع بعض جوة كل فئة - تمامًا بنفس
-    منطق _equalize_single، لكن مرة مستقلة لكل تصنيف.
+    (NPL لوحده، Dpd60 لوحده)، وجوة كل تصنيف بيتنفذ تساوي عنيف بدون فرز فئات
+    (_equalize_aggressive_no_cohort) - كل اللي عندهم نفس المنتج جوة نفس
+    التصنيف بيتساووا مع بعض لأقرب حاجة للصفر ممكنة، من غير سقف مسموح به.
+    ملحوظة: max_amount_diff مش بيتستخدم في وضع NPL & Dpd60.
     """
     if not classification_col:
         return _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
@@ -555,9 +701,11 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
  
     result_parts, summary_parts = [], []
     for cls_val, sub_df in df.groupby(classification_col):
-        res, summ = _equalize_single(sub_df, id_col, account_col, sp_col, product_col, debt_col,
-                                      status_col, included_statuses, payment_col, move_paid_accounts,
-                                      max_amount_diff, max_iterations)
+        res, summ = _equalize_aggressive_no_cohort(
+            sub_df, id_col, account_col, sp_col, product_col, debt_col,
+            status_col, included_statuses, payment_col, move_paid_accounts,
+            max_iterations
+        )
         summ.insert(0, "التصنيف", cls_val)
         result_parts.append(res)
         summary_parts.append(summ)
@@ -565,6 +713,8 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     result_df = pd.concat(result_parts, ignore_index=False).sort_index()
     summary_df = pd.concat(summary_parts, ignore_index=True)
     return result_df, summary_df
+ 
+
 
 
 
@@ -638,7 +788,6 @@ def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
                .reset_index())
     return df, summary
- 
  
 
 # ======================
@@ -3263,6 +3412,10 @@ elif page == "النشاط":
 # استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
 # ==========================================================================
 
+# ==========================================================================
+# استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
+# ==========================================================================
+
 elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
 
@@ -3526,8 +3679,10 @@ elif page == "التوزيع":
                 )
                 move_paid_accounts = paid_behavior.startswith("وزّعها")
 
+                if classification_mode == "NPL & Dpd60":
+                    st.caption("في وضع NPL & Dpd60 التساوي بيبقى عنيف تلقائيًا (بيوصل لأقرب حاجة للصفر) - الرقم ده مش هيتفعل")
                 max_amount_diff = st.number_input(
-                    "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل مستوى)",
+                    "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل منتج) - وضع SNB بس",
                     min_value=0, value=10000, step=1000, key="eq_max_diff"
                 )
 
