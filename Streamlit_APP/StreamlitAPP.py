@@ -196,6 +196,7 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
 
 
 
+
 def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
                       status_col, included_statuses,
                       payment_col=None, move_paid_accounts=True,
@@ -337,13 +338,12 @@ def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
                 })
  
     return df, pd.DataFrame(summary_rows)
+ 
 
 
 
 
-def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col, debt_col,
-                                    status_col, included_statuses,
-                                    payment_col=None, move_paid_accounts=True,
+             payment_col=None, move_paid_accounts=True,
                                     max_iterations=20000):
     """
     تساوي عنيف - مخصص لوضع NPL & Dpd60.
@@ -543,6 +543,8 @@ def _aggressive_balance_group(df, id_col, account_col, sp_col, product_col, debt
             })
  
     return df, pd.DataFrame(summary_rows)
+ 
+
 
 
 
@@ -607,7 +609,7 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name,
     return new_collector_df, assignment_summary, shortage_report
  
  
- 
+
 
 
 
@@ -651,6 +653,8 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
  
  
  
+ 
+
 
 
 
