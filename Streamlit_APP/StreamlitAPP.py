@@ -129,6 +129,80 @@ def build_new_collector_targets(df, choice, new_sp_name,
     sheet2 = pd.DataFrame(rows_existing).groupby(["المحصل", "نوع المنتج"]).sum(numeric_only=True).reset_index()
 
     return sheet1, sheet2
+
+def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
+                        include_paid, payment_col=None):
+    df = df.copy()
+    if include_paid or not payment_col:
+        df["_قابل_للنقل"] = True
+    else:
+        df["_قابل_للنقل"] = df[payment_col].isna() | (df[payment_col] == 0)
+
+    new_col = "المحصل بعد التساوي"
+    df[new_col] = df[sp_col]
+
+    summary_rows = []
+
+    for product, pdf in df.groupby(product_col):
+        salespeople = sorted(pdf[sp_col].unique())
+        n = len(salespeople)
+        if n <= 1:
+            for sp in salespeople:
+                after = pdf[pdf[sp_col] == sp]
+                summary_rows.append({
+                    product_col: product, sp_col: sp,
+                    "عدد_الحسابات_قبل": len(after), "متبقي_المديونية_قبل": round(after[debt_col].sum(), 2),
+                    "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
+                })
+            continue
+
+        total_count = len(pdf)
+        total_amount = pdf[debt_col].sum()
+        target_count = total_count / n
+        target_amount = total_amount / n
+
+        current = pdf.groupby(sp_col).agg(
+            count=(account_col, "count"), amount=(debt_col, "sum")
+        ).reindex(salespeople, fill_value=0)
+
+        need_count = {sp: target_count - current.loc[sp, "count"] for sp in salespeople}
+        need_amount = {sp: target_amount - current.loc[sp, "amount"] for sp in salespeople}
+
+        movable = {
+            sp: pdf[(pdf[sp_col] == sp) & (pdf["_قابل_للنقل"])][debt_col].to_dict()
+            for sp in salespeople
+        }  # {sp: {row_index: amount}}
+
+        givers = sorted([sp for sp in salespeople if need_count[sp] < -0.5], key=lambda s: need_count[s])
+        receivers = sorted([sp for sp in salespeople if need_count[sp] > 0.5], key=lambda s: -need_count[s])
+
+        for receiver in receivers:
+            if need_count[receiver] <= 0.5:
+                continue
+            for giver in givers:
+                while movable[giver] and need_count[receiver] > 0.5 and need_count[giver] < -0.5:
+                    remaining_need = need_amount[receiver]
+                    best_row = min(movable[giver], key=lambda r: abs(movable[giver][r] - remaining_need))
+                    amt = movable[giver].pop(best_row)
+                    df.loc[best_row, new_col] = receiver
+                    need_count[receiver] -= 1
+                    need_count[giver] += 1
+                    need_amount[receiver] -= amt
+                    need_amount[giver] += amt
+                if need_count[receiver] <= 0.5:
+                    break
+
+        for sp in salespeople:
+            before = current.loc[sp]
+            after = df[(df[product_col] == product) & (df[new_col] == sp)]
+            summary_rows.append({
+                product_col: product, sp_col: sp,
+                "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
+            })
+
+    return df, pd.DataFrame(summary_rows)
+
  
  
 def match_payments_with_activity(payments_df: pd.DataFrame, activity_df: pd.DataFrame) -> pd.DataFrame:
@@ -2904,78 +2978,6 @@ elif page == "النشاط":
 # ======================
 # PAGE 6 - باقي الصفحات (مختصر)
 # ======================
-def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
-                        include_paid, payment_col=None):
-    df = df.copy()
-    if include_paid or not payment_col:
-        df["_قابل_للنقل"] = True
-    else:
-        df["_قابل_للنقل"] = df[payment_col].isna() | (df[payment_col] == 0)
-
-    new_col = "المحصل بعد التساوي"
-    df[new_col] = df[sp_col]
-
-    summary_rows = []
-
-    for product, pdf in df.groupby(product_col):
-        salespeople = sorted(pdf[sp_col].unique())
-        n = len(salespeople)
-        if n <= 1:
-            for sp in salespeople:
-                after = pdf[pdf[sp_col] == sp]
-                summary_rows.append({
-                    product_col: product, sp_col: sp,
-                    "عدد_الحسابات_قبل": len(after), "متبقي_المديونية_قبل": round(after[debt_col].sum(), 2),
-                    "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
-                })
-            continue
-
-        total_count = len(pdf)
-        total_amount = pdf[debt_col].sum()
-        target_count = total_count / n
-        target_amount = total_amount / n
-
-        current = pdf.groupby(sp_col).agg(
-            count=(account_col, "count"), amount=(debt_col, "sum")
-        ).reindex(salespeople, fill_value=0)
-
-        need_count = {sp: target_count - current.loc[sp, "count"] for sp in salespeople}
-        need_amount = {sp: target_amount - current.loc[sp, "amount"] for sp in salespeople}
-
-        movable = {
-            sp: pdf[(pdf[sp_col] == sp) & (pdf["_قابل_للنقل"])][debt_col].to_dict()
-            for sp in salespeople
-        }  # {sp: {row_index: amount}}
-
-        givers = sorted([sp for sp in salespeople if need_count[sp] < -0.5], key=lambda s: need_count[s])
-        receivers = sorted([sp for sp in salespeople if need_count[sp] > 0.5], key=lambda s: -need_count[s])
-
-        for receiver in receivers:
-            if need_count[receiver] <= 0.5:
-                continue
-            for giver in givers:
-                while movable[giver] and need_count[receiver] > 0.5 and need_count[giver] < -0.5:
-                    remaining_need = need_amount[receiver]
-                    best_row = min(movable[giver], key=lambda r: abs(movable[giver][r] - remaining_need))
-                    amt = movable[giver].pop(best_row)
-                    df.loc[best_row, new_col] = receiver
-                    need_count[receiver] -= 1
-                    need_count[giver] += 1
-                    need_amount[receiver] -= amt
-                    need_amount[giver] += amt
-                if need_count[receiver] <= 0.5:
-                    break
-
-        for sp in salespeople:
-            before = current.loc[sp]
-            after = df[(df[product_col] == product) & (df[new_col] == sp)]
-            summary_rows.append({
-                product_col: product, sp_col: sp,
-                "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
-                "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
-            })
-
-    return df, pd.DataFrame(summary_rows)
 
 
 elif page == "التوزيع":
