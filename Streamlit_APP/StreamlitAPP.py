@@ -129,7 +129,7 @@ def build_new_collector_targets(df, choice, new_sp_name,
     sheet2 = pd.DataFrame(rows_existing).groupby(["المحصل", "نوع المنتج"]).sum(numeric_only=True).reset_index()
 
     return sheet1, sheet2
-
+"""
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
                         payment_col=None, move_paid_accounts=True,
@@ -269,7 +269,7 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
 
     return df, pd.DataFrame(summary_rows)
  
- 
+ """
 def match_payments_with_activity(payments_df: pd.DataFrame, activity_df: pd.DataFrame) -> pd.DataFrame:
     required_payments_cols = {"Customer Account Number", "Collected By"}
     required_activity_cols = {"Customer Account Number", "Collector"}
@@ -330,6 +330,7 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
         if best_diff is None or diff < best_diff:
             best_diff, best_start = diff, start
     return pool_sorted.iloc[best_start:best_start + need_count]
+
 
 
 
@@ -478,20 +479,24 @@ def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
 
 
 
+
 def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col, debt_col,
                                     status_col, included_statuses,
                                     payment_col=None, move_paid_accounts=True,
                                     max_iterations=20000):
     """
-    تساوي عنيف - مخصص لوضع NPL & Dpd60:
-    - مفيش فرز فئات (كامل/جزئي) خالص - كل المحصلين اللي عندهم نفس المنتج
-      (جوة نفس التصنيف اللي اتبعتله الداتا) بيتساووا مع بعض كتلة واحدة.
-    - العميل (id_col) بيفضل بكل حساباته مع نفس المحصل - مينفعش يتقسم على
-      محصلين. فبالتالي قرار أي نقلة بيتاخد بناءً على الأثر الكلي على *كل*
-      المنتجات اللي العميل ده عنده حسابات فيها مع بعض، مش منتج واحد بس -
-      عشان تظبيط منتج معين ميبوظش منتج تاني لنفس العميل من غير داعي.
-    - بيقف لما محدش فيه نقلة بتحسن الوضع الكلي (يعني وصلنا لأقرب حاجة للصفر
-      ممكنة فعليًا بالنظر لإن كل عميل لازم يفضل كتلة واحدة).
+    تساوي عنيف - مخصص لوضع NPL & Dpd60.
+ 
+    مهم جدًا: قبل أي تساوي، المحصلين بيتفرزوا حسب "مجموعة المنتجات" اللي كل
+    واحد فيهم شغال عليها بالظبط (مثلاً: مجموعة شغالة CC+PF، ومجموعة تانية
+    شغالة RF بس) - وبيتساووا بس مع زمايلهم في نفس المجموعة دي. من غير الفرز
+    ده، محصل شغال RF بس كان ممكن (غلط) ياخد حسابات CC/PF من زميله، والعكس.
+ 
+    جوة كل مجموعة زملاء، مفيش فرز تاني (كامل/جزئي) - الكل مع بعض. وقرار أي
+    نقلة بيتاخد بناءً على الأثر الكلي على *كل* منتجات العميل مع بعض (مش
+    منتج واحد بس)، عشان تظبيط منتج معين ميبوظش منتج تاني لنفس العميل. العميل
+    بيفضل بكل حساباته مع نفس المحصل دايمًا. بيقف لما محدش فيه نقلة بتحسن
+    الوضع الكلي جوة المجموعة (يعني وصلنا لأقرب حاجة للصفر ممكنة فعليًا).
     """
     df = df.copy()
     new_col = "المحصل بعد التساوي"
@@ -501,6 +506,39 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
         df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
     else:
         df["_عليه_سداد"] = False
+ 
+    # فرز المحصلين حسب "بصمة" المنتجات اللي شغالين عليها فعليًا
+    sp_products = df.groupby(sp_col)[product_col].apply(lambda s: frozenset(s.unique()))
+    df["_مجموعة_منتجات_المحصل"] = df[sp_col].map(sp_products)
+ 
+    summary_parts = []
+ 
+    for group_key, gdf in df.groupby("_مجموعة_منتجات_المحصل"):
+        group_label = " + ".join(sorted(group_key))
+        result_gdf, summ = _aggressive_balance_group(
+            gdf, id_col, account_col, sp_col, product_col, debt_col,
+            status_col, included_statuses, payment_col, move_paid_accounts, max_iterations
+        )
+        df.loc[result_gdf.index, new_col] = result_gdf[new_col]
+        summ.insert(0, "فئة المحصل", group_label)
+        summary_parts.append(summ)
+ 
+    summary_df = pd.concat(summary_parts, ignore_index=True) if summary_parts else pd.DataFrame()
+    df = df.drop(columns=["_مجموعة_منتجات_المحصل"])
+    return df, summary_df
+
+
+def _aggressive_balance_group(df, id_col, account_col, sp_col, product_col, debt_col,
+                               status_col, included_statuses,
+                               payment_col=None, move_paid_accounts=True,
+                               max_iterations=20000):
+    """
+    التساوي العنيف الفعلي - بيتنفذ جوة مجموعة محصلين عندهم بالظبط نفس
+    مجموعة المنتجات (اتفرزوا في _equalize_aggressive_no_cohort). مفيش فرز
+    تاني هنا - كل أعضاء المجموعة دي بيتساووا مع بعض من غير تفرقة.
+    """
+    df = df.copy()
+    new_col = "المحصل بعد التساوي"
  
     salespeople = sorted(df[sp_col].unique())
     n = len(salespeople)
@@ -563,9 +601,6 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
         # فرق العدد مينفعش يوصل صفر لو مش قابل للقسمة بالظبط - أقصى تقارب = 1
         count_violation = max(0, count_diff - 1)
         return count_violation * 1_000_000 + amount_diff, count_diff, amount_diff
- 
-    def total_score():
-        return sum(product_score(p)[0] for p in products)
  
     def move_delta(unit_products, giver, receiver):
         """التغيّر الكلي في درجة عدم التوازن لو نقلنا العميل ده - أي رقم سالب = تحسّن"""
@@ -648,6 +683,8 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
  
     return df, pd.DataFrame(summary_rows)
 
+
+
 def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None):
     """
     ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
@@ -708,6 +745,7 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
 
 
 
+
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
                         payment_col=None, move_paid_accounts=True,
@@ -745,6 +783,7 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     return result_df, summary_df
  
  
+
 
 
 
