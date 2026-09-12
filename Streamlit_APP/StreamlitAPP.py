@@ -2999,13 +2999,14 @@ elif page == "التوزيع":
         st.caption("Sheet2: المحصل (الحالي) | متبقي المديونية | عدد الحسابات | نوع المنتج")
         new_targets_file = st.file_uploader("ملف المستهدفات", type=["xlsx"], key="new_targets_file")
 
-        if (portfolio_df is not None and neglect_file
-                and sheet1 is not None and sheet2 is not None
+        if (portfolio_df is not None and neglect_file and new_targets_file
                 and new_sp_name and new_sp_team and st.button("نفذ توزيع المحصل الجديد")):
 
             neglect_df = pd.read_excel(neglect_file)
             neglect_df = neglect_df.dropna(subset=["Account Number"])
 
+            sheet1 = pd.read_excel(new_targets_file, sheet_name=0)
+            sheet2 = pd.read_excel(new_targets_file, sheet_name=1)
             sheet1.columns = [c.strip() for c in sheet1.columns]
             sheet2.columns = [c.strip() for c in sheet2.columns]
 
