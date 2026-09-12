@@ -332,6 +332,150 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
     return pool_sorted.iloc[best_start:best_start + need_count]
 
 
+def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
+                      status_col, included_statuses,
+                      payment_col=None, move_paid_accounts=True,
+                      max_amount_diff=10000, max_iterations=20000):
+    """
+    المنطق الأصلي - من غير أي تعديل: فئة المحصل (كامل/جزئي) بتتحدد بمجموعة المنتجات
+    الموجودة في df، وبيتساوى كل منتج جوة كل فئة لوحده.
+    """
+    df = df.copy()
+    new_col = "المحصل بعد التساوي"
+    df[new_col] = df[sp_col]
+ 
+    all_products = set(df[product_col].unique())
+    sp_products = df.groupby(sp_col)[product_col].apply(set)
+    sp_cohort = {sp: ("كامل" if prods == all_products else "جزئي") for sp, prods in sp_products.items()}
+    df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
+ 
+    if payment_col:
+        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
+    else:
+        df["_عليه_سداد"] = False
+ 
+    summary_rows = []
+ 
+    for cohort, cdf_full in df.groupby("_فئة_المحصل"):
+        salespeople = sorted(cdf_full[sp_col].unique())
+        n = len(salespeople)
+        if n <= 1:
+            continue
+ 
+        products_in_cohort = sorted(cdf_full[product_col].unique())
+ 
+        before_stats = {}
+        for p in products_in_cohort:
+            pdf = cdf_full[cdf_full[product_col] == p]
+            before_stats[p] = pdf.groupby(sp_col).agg(
+                count=(account_col, "count"), amount=(debt_col, "sum")
+            ).reindex(salespeople, fill_value=0)
+ 
+        client_units = {}
+        for cid, grp in cdf_full.groupby(id_col):
+            statuses = set(grp[status_col].unique())
+            if not statuses.issubset(set(included_statuses)):
+                continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
+ 
+            if not move_paid_accounts and grp["_عليه_سداد"].any():
+                continue  # العميل عنده حساب مسدد ومختار إنه يفضل ثابت خالص
+ 
+            per_product = grp.groupby(product_col).agg(
+                count=(account_col, "count"), amount=(debt_col, "sum")
+            ).to_dict("index")
+            client_units[cid] = {
+                "current_sp": grp[sp_col].mode().iloc[0],
+                "products": per_product,
+                "row_index": grp.index.tolist()
+            }
+ 
+        pool_by_sp = {sp: [] for sp in salespeople}
+        for cid, unit in client_units.items():
+            pool_by_sp[unit["current_sp"]].append(cid)
+ 
+        stats = {p: {} for p in products_in_cohort}
+        for p in products_in_cohort:
+            for sp in salespeople:
+                stats[p][sp] = {
+                    "count": float(before_stats[p].loc[sp, "count"]),
+                    "amount": float(before_stats[p].loc[sp, "amount"])
+                }
+ 
+        def evaluate_move(unit_products, giver, receiver):
+            delta = 0
+            for p, vals in unit_products.items():
+                counts_now = {sp: stats[p][sp]["count"] for sp in salespeople}
+                amounts_now = {sp: stats[p][sp]["amount"] for sp in salespeople}
+                counts_now[giver] -= vals["count"]; counts_now[receiver] += vals["count"]
+                amounts_now[giver] -= vals["amount"]; amounts_now[receiver] += vals["amount"]
+                count_diff = max(counts_now.values()) - min(counts_now.values())
+                amount_diff = max(amounts_now.values()) - min(amounts_now.values())
+                delta += max(0, count_diff - 1) * 1000 + max(0, amount_diff - max_amount_diff)
+            return delta
+ 
+        iterations = 0
+        stalled_products = set()
+        while iterations < max_iterations:
+            target = None
+            for p in products_in_cohort:
+                if p in stalled_products:
+                    continue
+                counts = {sp: stats[p][sp]["count"] for sp in salespeople}
+                amounts = {sp: stats[p][sp]["amount"] for sp in salespeople}
+                count_diff = max(counts.values()) - min(counts.values())
+                amount_diff = max(amounts.values()) - min(amounts.values())
+                count_violation = max(0, count_diff - 1)
+                amount_violation = max(0, amount_diff - max_amount_diff)
+                score = count_violation * 1000 + amount_violation
+                if score > 0:
+                    fix_by_count = count_violation > 0
+                    giver = max(counts, key=lambda s: counts[s]) if fix_by_count else max(amounts, key=lambda s: amounts[s])
+                    receiver = min(counts, key=lambda s: counts[s]) if fix_by_count else min(amounts, key=lambda s: amounts[s])
+                    if target is None or score > target[0]:
+                        target = (score, p, giver, receiver)
+ 
+            if target is None:
+                break  # اتحقق الشرطين لكل المنتجات في الفئة دي
+ 
+            _, p, giver, receiver = target
+            candidates = [cid for cid in pool_by_sp[giver] if p in client_units[cid]["products"]]
+ 
+            if not candidates:
+                stalled_products.add(p)  # مفيش حسابات قابلة للنقل تحل المشكلة دي
+                continue
+ 
+            best_cid, best_delta = None, None
+            for cid in candidates:
+                d = evaluate_move(client_units[cid]["products"], giver, receiver)
+                if best_delta is None or d < best_delta:
+                    best_delta, best_cid = d, cid
+ 
+            unit = client_units[best_cid]
+            for pp, vals in unit["products"].items():
+                stats[pp][giver]["count"] -= vals["count"]
+                stats[pp][giver]["amount"] -= vals["amount"]
+                stats[pp][receiver]["count"] += vals["count"]
+                stats[pp][receiver]["amount"] += vals["amount"]
+            df.loc[unit["row_index"], new_col] = receiver
+            pool_by_sp[giver].remove(best_cid)
+            pool_by_sp[receiver].append(best_cid)
+            unit["current_sp"] = receiver
+            stalled_products.clear()  # النقلة ممكن تكون حلت منتج كان متعثر قبل كده
+            iterations += 1
+ 
+        for p in products_in_cohort:
+            for sp in salespeople:
+                before = before_stats[p].loc[sp]
+                summary_rows.append({
+                    product_col: p, "فئة المحصل": cohort, sp_col: sp,
+                    "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                    "عدد_الحسابات_بعد": int(stats[p][sp]["count"]), "متبقي_المديونية_بعد": round(stats[p][sp]["amount"], 2)
+                })
+ 
+    return df, pd.DataFrame(summary_rows)
+
+
+
 def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None):
     """
     ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
@@ -388,197 +532,40 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
     return new_collector_df, assignment_summary, shortage_report
  
  
+
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
                         payment_col=None, move_paid_accounts=True,
                         max_amount_diff=10000, max_iterations=20000,
                         classification_col=None):
     """
-    لو classification_col=None: زي القديم بالظبط - توازن على مستوى المنتج بس.
+    لو classification_col=None (وضع SNB): زي القديم بالظبط - فئة المحصل وتوازن
+    المنتج بيتحددوا على مستوى المحفظة كلها.
  
-    لو classification_col مفعّل (NPL / Dpd60): التوازن بيبقى على مستويين مع بعض
-    جوة كل فئة محصلين (كامل/جزئي):
-      1) مستوى التصنيف نفسه (إجمالي NPL لكل محصل، إجمالي Dpd60 لكل محصل)
-      2) مستوى (تصنيف + منتج) - يعني كل منتج جوة كل تصنيف بيتساوى لوحده
+    لو classification_col مفعّل (NPL & Dpd60): بنقسم المحفظة تصنيف تصنيف
+    (كل تصنيف [NPL] لوحده بالكامل، وكل تصنيف [Dpd60] لوحده بالكامل)، وجوة كل
+    تصنيف بيتحدد فئة المحصل (كامل = عنده منتجات التصنيف ده كلها / جزئي = عنده
+    منتج واحد بس منها) وبيتساوى المنتجين مع بعض جوة كل فئة - تمامًا بنفس
+    منطق _equalize_single، لكن مرة مستقلة لكل تصنيف.
     """
-    df = df.copy()
-    new_col = "المحصل بعد التساوي"
-    df[new_col] = df[sp_col]
+    if not classification_col:
+        return _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
+                                 status_col, included_statuses, payment_col, move_paid_accounts,
+                                 max_amount_diff, max_iterations)
  
-    # فئة المحصل (كامل/جزئي) بتتحدد بمجموعة المنتجات - زي ما هي، من غير تغيير
-    all_products = set(df[product_col].unique())
-    sp_products = df.groupby(sp_col)[product_col].apply(set)
-    sp_cohort = {sp: ("كامل" if prods == all_products else "جزئي") for sp, prods in sp_products.items()}
-    df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
+    result_parts, summary_parts = [], []
+    for cls_val, sub_df in df.groupby(classification_col):
+        res, summ = _equalize_single(sub_df, id_col, account_col, sp_col, product_col, debt_col,
+                                      status_col, included_statuses, payment_col, move_paid_accounts,
+                                      max_amount_diff, max_iterations)
+        summ.insert(0, "التصنيف", cls_val)
+        result_parts.append(res)
+        summary_parts.append(summ)
  
-    if payment_col:
-        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
-    else:
-        df["_عليه_سداد"] = False
- 
-    def row_levels(classification_val, product_val):
-        """المستويات (levels) اللي حساب واحد بيشترك فيها"""
-        if classification_col:
-            return [
-                ("تصنيف", classification_val),
-                ("تصنيف-منتج", (classification_val, product_val)),
-            ]
-        return [("منتج", product_val)]
- 
-    def level_mask(cdf, level):
-        kind, val = level
-        if kind == "منتج":
-            return cdf[product_col] == val
-        elif kind == "تصنيف":
-            return cdf[classification_col] == val
-        else:  # تصنيف-منتج
-            cls, p = val
-            return (cdf[classification_col] == cls) & (cdf[product_col] == p)
- 
-    summary_rows = []
- 
-    for cohort, cdf_full in df.groupby("_فئة_المحصل"):
-        salespeople = sorted(cdf_full[sp_col].unique())
-        n = len(salespeople)
-        if n <= 1:
-            continue
- 
-        # كل المستويات اللي هنوازنها جوة الفئة دي
-        if classification_col:
-            level_keys = set()
-            for _, r in cdf_full[[classification_col, product_col]].drop_duplicates().iterrows():
-                level_keys.add(("تصنيف", r[classification_col]))
-                level_keys.add(("تصنيف-منتج", (r[classification_col], r[product_col])))
-        else:
-            level_keys = {("منتج", p) for p in cdf_full[product_col].unique()}
-        level_keys = sorted(level_keys, key=str)
- 
-        before_stats = {}
-        for lvl in level_keys:
-            ldf = cdf_full[level_mask(cdf_full, lvl)]
-            before_stats[lvl] = ldf.groupby(sp_col).agg(
-                count=(account_col, "count"), amount=(debt_col, "sum")
-            ).reindex(salespeople, fill_value=0)
- 
-        client_units = {}
-        for cid, grp in cdf_full.groupby(id_col):
-            statuses = set(grp[status_col].unique())
-            if not statuses.issubset(set(included_statuses)):
-                continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
- 
-            if not move_paid_accounts and grp["_عليه_سداد"].any():
-                continue  # العميل عنده حساب مسدد ومختار إنه يفضل ثابت خالص
- 
-            client_levels = {}
-            for _, row in grp.iterrows():
-                cls_val = row[classification_col] if classification_col else None
-                for lvl in row_levels(cls_val, row[product_col]):
-                    client_levels.setdefault(lvl, {"count": 0, "amount": 0.0})
-                    client_levels[lvl]["count"] += 1
-                    client_levels[lvl]["amount"] += row[debt_col]
- 
-            client_units[cid] = {
-                "current_sp": grp[sp_col].mode().iloc[0],
-                "levels": client_levels,
-                "row_index": grp.index.tolist()
-            }
- 
-        pool_by_sp = {sp: [] for sp in salespeople}
-        for cid, unit in client_units.items():
-            pool_by_sp[unit["current_sp"]].append(cid)
- 
-        # إحصائيات حية بتتحدث مع كل نقلة
-        stats = {lvl: {} for lvl in level_keys}
-        for lvl in level_keys:
-            for sp in salespeople:
-                stats[lvl][sp] = {
-                    "count": float(before_stats[lvl].loc[sp, "count"]),
-                    "amount": float(before_stats[lvl].loc[sp, "amount"])
-                }
- 
-        def evaluate_move(unit_levels, giver, receiver):
-            delta = 0
-            for lvl, vals in unit_levels.items():
-                counts_now = {sp: stats[lvl][sp]["count"] for sp in salespeople}
-                amounts_now = {sp: stats[lvl][sp]["amount"] for sp in salespeople}
-                counts_now[giver] -= vals["count"]; counts_now[receiver] += vals["count"]
-                amounts_now[giver] -= vals["amount"]; amounts_now[receiver] += vals["amount"]
-                count_diff = max(counts_now.values()) - min(counts_now.values())
-                amount_diff = max(amounts_now.values()) - min(amounts_now.values())
-                delta += max(0, count_diff - 1) * 1000 + max(0, amount_diff - max_amount_diff)
-            return delta
- 
-        iterations = 0
-        stalled_levels = set()
-        while iterations < max_iterations:
-            target = None
-            for lvl in level_keys:
-                if lvl in stalled_levels:
-                    continue
-                counts = {sp: stats[lvl][sp]["count"] for sp in salespeople}
-                amounts = {sp: stats[lvl][sp]["amount"] for sp in salespeople}
-                count_diff = max(counts.values()) - min(counts.values())
-                amount_diff = max(amounts.values()) - min(amounts.values())
-                count_violation = max(0, count_diff - 1)
-                amount_violation = max(0, amount_diff - max_amount_diff)
-                score = count_violation * 1000 + amount_violation
-                if score > 0:
-                    fix_by_count = count_violation > 0
-                    giver = max(counts, key=lambda s: counts[s]) if fix_by_count else max(amounts, key=lambda s: amounts[s])
-                    receiver = min(counts, key=lambda s: counts[s]) if fix_by_count else min(amounts, key=lambda s: amounts[s])
-                    if target is None or score > target[0]:
-                        target = (score, lvl, giver, receiver)
- 
-            if target is None:
-                break  # اتحقق الشرطين على كل المستويات في الفئة دي
- 
-            _, lvl, giver, receiver = target
-            candidates = [cid for cid in pool_by_sp[giver] if lvl in client_units[cid]["levels"]]
- 
-            if not candidates:
-                stalled_levels.add(lvl)  # مفيش حسابات قابلة للنقل تحل المشكلة دي
-                continue
- 
-            best_cid, best_delta = None, None
-            for cid in candidates:
-                d = evaluate_move(client_units[cid]["levels"], giver, receiver)
-                if best_delta is None or d < best_delta:
-                    best_delta, best_cid = d, cid
- 
-            unit = client_units[best_cid]
-            for lv, vals in unit["levels"].items():
-                stats[lv][giver]["count"] -= vals["count"]
-                stats[lv][giver]["amount"] -= vals["amount"]
-                stats[lv][receiver]["count"] += vals["count"]
-                stats[lv][receiver]["amount"] += vals["amount"]
-            df.loc[unit["row_index"], new_col] = receiver
-            pool_by_sp[giver].remove(best_cid)
-            pool_by_sp[receiver].append(best_cid)
-            unit["current_sp"] = receiver
-            stalled_levels.clear()  # النقلة ممكن تكون حلت مستوى كان متعثر قبل كده
-            iterations += 1
- 
-        for lvl in level_keys:
-            kind, val = lvl
-            if classification_col:
-                if kind == "تصنيف":
-                    label = {product_col: "(إجمالي كل المنتجات)", "التصنيف": val}
-                else:
-                    cls, p = val
-                    label = {product_col: p, "التصنيف": cls}
-            else:
-                label = {product_col: val}
- 
-            for sp in salespeople:
-                before = before_stats[lvl].loc[sp]
-                summary_rows.append({
-                    **label, "فئة المحصل": cohort, sp_col: sp,
-                    "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
-                    "عدد_الحسابات_بعد": int(stats[lvl][sp]["count"]), "متبقي_المديونية_بعد": round(stats[lvl][sp]["amount"], 2)
-                })
- 
-    return df, pd.DataFrame(summary_rows)
- 
+    result_df = pd.concat(result_parts, ignore_index=False).sort_index()
+    summary_df = pd.concat(summary_parts, ignore_index=True)
+    return result_df, summary_df
+
 
 
 def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
@@ -651,6 +638,7 @@ def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
                .reset_index())
     return df, summary
+ 
  
 
 # ======================
