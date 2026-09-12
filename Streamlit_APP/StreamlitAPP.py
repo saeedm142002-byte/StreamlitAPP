@@ -61,6 +61,74 @@ def read_any(uploaded_file):
     if uploaded_file.name.lower().endswith(".csv"):
         return pd.read_csv(uploaded_file)
     return pd.read_excel(uploaded_file)
+
+def build_new_collector_targets(df, choice, new_sp_name,
+                                 sp_col="Salesperson",
+                                 product_col="نوع المتنج-التمويل",
+                                 amount_col="Amount",
+                                 cc_label="CC",
+                                 ratio=0.25):
+    """
+    choice: "CC" (المحصل الجديد ياخد CC بس) أو "3PRODUCTS" (ياخد التلات منتجات)
+    بيرجع sheet1 (مستهدف المحصل الجديد) و sheet2 (مستهدف باقي المحصلين)
+    بنفس فورمات ملف المستهدفات الحالي
+    """
+    all_products = set(df[product_col].unique())
+    sp_products = df.groupby(sp_col)[product_col].apply(set)
+    full_size = len(all_products)
+
+    g2_sps = sp_products[sp_products.apply(len) == full_size].index.tolist()  # 3 منتجات
+    g1_sps = sp_products[sp_products.apply(len) < full_size].index.tolist()   # CC+AL بس
+
+    primary_sps, secondary_sps = (g1_sps, g2_sps) if choice == "CC" else (g2_sps, g1_sps)
+
+    def solve_primary(total, n):
+        # primary*(1+ratio) == (total-primary)/n
+        return total / ((1 + ratio) * n + 1)
+
+    def split_proportional(sub_df, metric_col, amount_to_take):
+        totals = (sub_df.groupby(sp_col)["Account Number"].count()
+                  if metric_col == "Account Number"
+                  else sub_df.groupby(sp_col)[amount_col].sum())
+        share = totals / totals.sum()
+        return share * amount_to_take
+
+    rows_new, rows_existing = [], []
+    cc_df = df[df[product_col] == cc_label]
+
+    for metric_col, metric_name in [("Account Number", "عدد الحسابات"), (amount_col, "متبقي المديونية")]:
+        primary_df = cc_df[cc_df[sp_col].isin(primary_sps)]
+        secondary_df = cc_df[cc_df[sp_col].isin(secondary_sps)]
+
+        T = (primary_df["Account Number"].count() if metric_col == "Account Number"
+             else primary_df[amount_col].sum())
+        a = solve_primary(T, len(primary_sps))
+        b = a * ratio
+
+        for sp, val in split_proportional(primary_df, metric_col, a).items():
+            rows_existing.append({"المحصل": sp, "نوع المنتج": cc_label, metric_name: val})
+        for sp, val in split_proportional(secondary_df, metric_col, b).items():
+            rows_existing.append({"المحصل": sp, "نوع المنتج": cc_label, metric_name: val})
+
+        rows_new.append({"نوع المنتج": cc_label, metric_name: a + b})
+
+    if choice == "3PRODUCTS":
+        for p in all_products - {cc_label}:
+            p_df = df[(df[product_col] == p) & (df[sp_col].isin(g2_sps))]
+            for metric_col, metric_name in [("Account Number", "عدد الحسابات"), (amount_col, "متبقي المديونية")]:
+                T_p = (p_df["Account Number"].count() if metric_col == "Account Number"
+                       else p_df[amount_col].sum())
+                new_share = T_p / (len(g2_sps) + 1)
+                for sp, val in split_proportional(p_df, metric_col, new_share).items():
+                    rows_existing.append({"المحصل": sp, "نوع المنتج": p, metric_name: val})
+                rows_new.append({"نوع المنتج": p, metric_name: new_share})
+
+    sheet1 = pd.DataFrame(rows_new).groupby("نوع المنتج").sum(numeric_only=True).reset_index()
+    sheet1.insert(0, "المحصل الجديد", new_sp_name)
+
+    sheet2 = pd.DataFrame(rows_existing).groupby(["المحصل", "نوع المنتج"]).sum(numeric_only=True).reset_index()
+
+    return sheet1, sheet2
  
  
 def match_payments_with_activity(payments_df: pd.DataFrame, activity_df: pd.DataFrame) -> pd.DataFrame:
@@ -2931,14 +2999,13 @@ elif page == "التوزيع":
         st.caption("Sheet2: المحصل (الحالي) | متبقي المديونية | عدد الحسابات | نوع المنتج")
         new_targets_file = st.file_uploader("ملف المستهدفات", type=["xlsx"], key="new_targets_file")
 
-        if (portfolio_df is not None and neglect_file and new_targets_file
+        if (portfolio_df is not None and neglect_file
+                and sheet1 is not None and sheet2 is not None
                 and new_sp_name and new_sp_team and st.button("نفذ توزيع المحصل الجديد")):
 
             neglect_df = pd.read_excel(neglect_file)
             neglect_df = neglect_df.dropna(subset=["Account Number"])
 
-            sheet1 = pd.read_excel(new_targets_file, sheet_name=0)
-            sheet2 = pd.read_excel(new_targets_file, sheet_name=1)
             sheet1.columns = [c.strip() for c in sheet1.columns]
             sheet2.columns = [c.strip() for c in sheet2.columns]
 
