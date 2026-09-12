@@ -343,51 +343,6 @@ def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
 
 
 
-    payment_col=None, move_paid_accounts=True,
-    max_iterations=20000):
-    """
-    تساوي عنيف - مخصص لوضع NPL & Dpd60.
- 
-    مهم جدًا: قبل أي تساوي، المحصلين بيتفرزوا حسب "مجموعة المنتجات" اللي كل
-    واحد فيهم شغال عليها بالظبط (مثلاً: مجموعة شغالة CC+PF، ومجموعة تانية
-    شغالة RF بس) - وبيتساووا بس مع زمايلهم في نفس المجموعة دي. من غير الفرز
-    ده، محصل شغال RF بس كان ممكن (غلط) ياخد حسابات CC/PF من زميله، والعكس.
- 
-    جوة كل مجموعة زملاء، مفيش فرز تاني (كامل/جزئي) - الكل مع بعض. وقرار أي
-    نقلة بيتاخد بناءً على الأثر الكلي على *كل* منتجات العميل مع بعض (مش
-    منتج واحد بس)، عشان تظبيط منتج معين ميبوظش منتج تاني لنفس العميل. العميل
-    بيفضل بكل حساباته مع نفس المحصل دايمًا. بيقف لما محدش فيه نقلة بتحسن
-    الوضع الكلي جوة المجموعة (يعني وصلنا لأقرب حاجة للصفر ممكنة فعليًا).
-    """
-    df = df.copy()
-    new_col = "المحصل بعد التساوي"
-    df[new_col] = df[sp_col]
- 
-    if payment_col:
-        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
-    else:
-        df["_عليه_سداد"] = False
- 
-    # فرز المحصلين حسب "بصمة" المنتجات اللي شغالين عليها فعليًا
-    sp_products = df.groupby(sp_col)[product_col].apply(lambda s: frozenset(s.unique()))
-    df["_مجموعة_منتجات_المحصل"] = df[sp_col].map(sp_products)
- 
-    summary_parts = []
- 
-    for group_key, gdf in df.groupby("_مجموعة_منتجات_المحصل"):
-        group_label = " + ".join(sorted(group_key))
-        result_gdf, summ = _aggressive_balance_group(
-            gdf, id_col, account_col, sp_col, product_col, debt_col,
-            status_col, included_statuses, payment_col, move_paid_accounts, max_iterations
-        )
-        df.loc[result_gdf.index, new_col] = result_gdf[new_col]
-        summ.insert(0, "فئة المحصل", group_label)
-        summary_parts.append(summ)
- 
-    summary_df = pd.concat(summary_parts, ignore_index=True) if summary_parts else pd.DataFrame()
-    df = df.drop(columns=["_مجموعة_منتجات_المحصل"])
-    return df, summary_df
-
 
 def _aggressive_balance_group(df, id_col, account_col, sp_col, product_col, debt_col,
                                status_col, included_statuses,
