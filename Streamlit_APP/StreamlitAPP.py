@@ -195,6 +195,7 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
 
 
 
+
 def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
                       status_col, included_statuses,
                       payment_col=None, move_paid_accounts=True,
@@ -545,7 +546,11 @@ def _aggressive_balance_group(df, id_col, account_col, sp_col, product_col, debt
 
 
 
-def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None):
+
+def assign_from_neglect(neglect_df, sheet2, new_sp_name,
+                         sp_col="Salesperson", product_col="نوع المتنج-التمويل",
+                         acc_col="Account Number", amt_col="Amount",
+                         classification_col=None):
     """
     ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
     (عدد حسابات + مبلغ تقريبي لكل نوع منتج، ولو NPL مفعّل: لكل تصنيف+منتج)
@@ -561,8 +566,8 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
         need_count = int(req["عدد الحسابات"]) if pd.notna(req["عدد الحسابات"]) else 0
         need_amount = float(req["متبقي المديونية"]) if pd.notna(req["متبقي المديونية"]) else 0.0
  
-        mask = ((neglect_remaining["Salesperson"] == sp) &
-                (neglect_remaining["نوع المتنج-التمويل"] == product))
+        mask = ((neglect_remaining[sp_col] == sp) &
+                (neglect_remaining[product_col] == product))
  
         report_key = {"المحصل": sp, "نوع المنتج": product}
         if classification_col:
@@ -575,7 +580,7 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
         if len(pool) < need_count:
             shortage_report.append({**report_key, "مطلوب عدد": need_count, "متاح فعليًا": len(pool)})
  
-        take = pick_closest_count_amount(pool, need_count, need_amount)
+        take = pick_closest_count_amount(pool, need_count, need_amount, amount_col=amt_col)
         if not take.empty:
             assigned_rows.append(take)
             neglect_remaining = neglect_remaining.drop(take.index)
@@ -583,17 +588,18 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
     new_collector_df = (pd.concat(assigned_rows, ignore_index=True)
                          if assigned_rows else pd.DataFrame(columns=neglect_df.columns))
  
+    sp_old_col = f"{sp_col}_قديم"
     if not new_collector_df.empty:
-        new_collector_df["Salesperson_قديم"] = new_collector_df["Salesperson"]
-        new_collector_df["Salesperson"] = new_sp_name
+        new_collector_df[sp_old_col] = new_collector_df[sp_col]
+        new_collector_df[sp_col] = new_sp_name
  
-    group_cols = ["Salesperson_قديم", "نوع المتنج-التمويل"]
+    group_cols = [sp_old_col, product_col]
     if classification_col:
         group_cols.append(classification_col)
  
     assignment_summary = (
         new_collector_df.groupby(group_cols)
-        .agg(عدد_الحسابات=("Account Number", "count"), إجمالي_المبلغ=("Amount", "sum"))
+        .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
         .reset_index()
         if not new_collector_df.empty else pd.DataFrame()
     )
@@ -602,6 +608,7 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
  
  
  
+
 
 
 
@@ -643,6 +650,8 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     return result_df, summary_df
  
  
+ 
+
 
 
 
