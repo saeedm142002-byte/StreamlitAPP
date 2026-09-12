@@ -3356,6 +3356,10 @@ elif page == "النشاط":
 # استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
 # ==========================================================================
 
+# ==========================================================================
+# استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
+# ==========================================================================
+
 elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
 
@@ -3376,27 +3380,36 @@ elif page == "التوزيع":
     if distribution_type == "محصل هيمشي":
         uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx"], key="portfolio_file")
         if uploaded_file:
-            df = pd.read_excel(uploaded_file)
-            df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
+            df_raw = pd.read_excel(uploaded_file)
+            cols = list(df_raw.columns)
 
-            classification_col = None
-            if classification_mode == "NPL & Dpd60":
-                classification_col = st.selectbox(
-                    "عمود التصنيف (NPL / Dpd60)", df.columns.tolist(), key="leaving_class_col"
-                )
+            st.markdown("### اختار الأعمدة")
+            c1, c2 = st.columns(2)
+            with c1:
+                id_col = st.selectbox("عمود رقم الهوية", cols, key="leaving_id_col")
+                sp_col = st.selectbox("عمود اسم المحصل", cols, key="leaving_sp_col")
+                product_col = st.selectbox("عمود نوع المنتج", cols, key="leaving_product_col")
+            with c2:
+                acc_col = st.selectbox("عمود رقم الحساب", cols, key="leaving_acc_col")
+                amt_col = st.selectbox("عمود المبلغ / متبقي المديونية", cols, key="leaving_amt_col")
+                classification_col = None
+                if classification_mode == "NPL & Dpd60":
+                    classification_col = st.selectbox(
+                        "عمود التصنيف (NPL / Dpd60)", cols, key="leaving_class_col"
+                    )
 
-            overview_cols = ["Salesperson", "نوع المتنج-التمويل"] + (
-                [classification_col] if classification_col else []
-            )
+            df = df_raw.dropna(subset=[acc_col])  # يشيل صف الإجمالي لو موجود
+
+            overview_cols = [sp_col, product_col] + ([classification_col] if classification_col else [])
             overview = (df.groupby(overview_cols)
-                          .agg(عدد_الحسابات=("Account Number", "count"),
-                               إجمالي_المبلغ=("Amount", "sum"))
+                          .agg(عدد_الحسابات=(acc_col, "count"),
+                               إجمالي_المبلغ=(amt_col, "sum"))
                           .reset_index())
             st.dataframe(overview, use_container_width=True)
 
-            leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df["Salesperson"].unique()))
-            leaving_products = sorted(df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"].unique())
-            remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
+            leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df[sp_col].unique()))
+            leaving_products = sorted(df.loc[df[sp_col] == leaving_sp, product_col].unique())
+            remaining_sps = [s for s in sorted(df[sp_col].unique()) if s != leaving_sp]
 
             st.markdown("### ارفع ملف المستهدفات")
             if classification_col:
@@ -3432,8 +3445,8 @@ elif page == "التوزيع":
                     st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
                     if classification_col:
                         leaving_groups = set(zip(
-                            df.loc[df["Salesperson"] == leaving_sp, classification_col],
-                            df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"]
+                            df.loc[df[sp_col] == leaving_sp, classification_col],
+                            df.loc[df[sp_col] == leaving_sp, product_col]
                         ))
                         for sp in missing_sps:
                             targets[sp] = {g: {"count": 0, "amount": 0} for g in leaving_groups}
@@ -3442,14 +3455,16 @@ elif page == "التوزيع":
                             targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
 
                 new_df, summary = distribute_leaving_portfolio(
-                    df, leaving_sp, targets, classification_col=classification_col
+                    df, leaving_sp, targets,
+                    sp_col=sp_col, id_col=id_col, acc_col=acc_col, amt_col=amt_col, product_col=product_col,
+                    classification_col=classification_col
                 )
 
                 st.success("تم التوزيع")
                 st.markdown("### النتيجة: كل محصل معاه كام")
                 st.dataframe(summary, use_container_width=True)
 
-                totals = (summary.groupby("Salesperson")[["عدد_الحسابات", "إجمالي_المبلغ"]]
+                totals = (summary.groupby(sp_col)[["عدد_الحسابات", "إجمالي_المبلغ"]]
                           .sum().reset_index())
                 st.dataframe(totals, use_container_width=True)
 
@@ -3465,31 +3480,42 @@ elif page == "التوزيع":
         portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
 
         portfolio_df = None
-        if portfolio_file_new:
-            portfolio_df = pd.read_excel(portfolio_file_new)
-            portfolio_df = portfolio_df.dropna(subset=["Account Number"])
-            if "Sales Team" not in portfolio_df.columns:
-                st.error("عمود 'Sales Team' مش موجود في ملف المحفظة")
-                st.stop()
-
+        sp_col_new = product_col_new = acc_col_new = amt_col_new = team_col_new = None
         classification_col_new = None
-        if classification_mode == "NPL & Dpd60" and portfolio_df is not None:
-            classification_col_new = st.selectbox(
-                "عمود التصنيف (NPL / Dpd60)", portfolio_df.columns.tolist(), key="new_class_col"
-            )
+
+        if portfolio_file_new:
+            portfolio_raw = pd.read_excel(portfolio_file_new)
+            cols_p = list(portfolio_raw.columns)
+
+            st.markdown("### اختار الأعمدة")
+            c1, c2 = st.columns(2)
+            with c1:
+                sp_col_new = st.selectbox("عمود اسم المحصل", cols_p, key="new_sp_col")
+                product_col_new = st.selectbox("عمود نوع المنتج", cols_p, key="new_product_col")
+                acc_col_new = st.selectbox("عمود رقم الحساب", cols_p, key="new_acc_col")
+            with c2:
+                amt_col_new = st.selectbox("عمود المبلغ", cols_p, key="new_amt_col")
+                default_team_index = cols_p.index("Sales Team") if "Sales Team" in cols_p else 0
+                team_col_new = st.selectbox("عمود Sales Team", cols_p, index=default_team_index, key="new_team_col")
+                if classification_mode == "NPL & Dpd60":
+                    classification_col_new = st.selectbox(
+                        "عمود التصنيف (NPL / Dpd60)", cols_p, key="new_class_col"
+                    )
+
+            portfolio_df = portfolio_raw.dropna(subset=[acc_col_new])
 
         st.markdown("### بيانات المحصل الجديد")
         new_sp_name = st.text_input("اسم المحصل الجديد").strip()
 
         if portfolio_df is not None:
-            sales_teams = sorted(portfolio_df["Sales Team"].dropna().unique())
+            sales_teams = sorted(portfolio_df[team_col_new].dropna().unique())
             new_sp_team = st.selectbox("Sales Team", sales_teams)
         else:
             st.info("ارفع ملف المحفظة الأول عشان تقدر تختار Sales Team")
             new_sp_team = None
 
         st.markdown("### ارفع ملف الاهمال")
-        st.caption("منه هيتم سحب الحسابات اللي هتتدي للمحصل الجديد")
+        st.caption("منه هيتم سحب الحسابات اللي هتتدي للمحصل الجديد (نفس أسماء الأعمدة اللي اخترتها فوق)")
         neglect_file = st.file_uploader("ملف الاهمال", type=["xlsx"], key="neglect_new")
 
         st.markdown("### ارفع ملف المستهدفات (شيتين)")
@@ -3505,7 +3531,7 @@ elif page == "التوزيع":
                 and new_sp_name and new_sp_team and st.button("نفذ توزيع المحصل الجديد")):
 
             neglect_df = pd.read_excel(neglect_file)
-            neglect_df = neglect_df.dropna(subset=["Account Number"])
+            neglect_df = neglect_df.dropna(subset=[acc_col_new])
             if classification_col_new and classification_col_new not in neglect_df.columns:
                 st.error(f"عمود '{classification_col_new}' مش موجود في ملف الاهمال")
                 st.stop()
@@ -3558,7 +3584,10 @@ elif page == "التوزيع":
                 st.stop()
 
             new_df, assignment_summary, shortage_report = assign_from_neglect(
-                neglect_df, sheet2, new_sp_name, classification_col=classification_col_new
+                neglect_df, sheet2, new_sp_name,
+                sp_col=sp_col_new, product_col=product_col_new,
+                acc_col=acc_col_new, amt_col=amt_col_new,
+                classification_col=classification_col_new
             )
 
             if shortage_report:
