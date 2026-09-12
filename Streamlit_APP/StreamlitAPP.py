@@ -3233,7 +3233,7 @@ elif page == "التوزيع":
                     status_values, key="eq_statuses"
                 )
 
-                                payment_col = st.selectbox("عمود السداد", cols, key="eq_payment")
+                payment_col = st.selectbox("عمود السداد", cols, key="eq_payment")
 
                 paid_behavior = st.radio(
                     "الحسابات اللي عليها سداد",
