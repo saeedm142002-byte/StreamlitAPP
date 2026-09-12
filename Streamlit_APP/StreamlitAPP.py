@@ -333,6 +333,7 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
 
 
 
+
 def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
                       status_col, included_statuses,
                       payment_col=None, move_paid_accounts=True,
@@ -485,10 +486,12 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
     تساوي عنيف - مخصص لوضع NPL & Dpd60:
     - مفيش فرز فئات (كامل/جزئي) خالص - كل المحصلين اللي عندهم نفس المنتج
       (جوة نفس التصنيف اللي اتبعتله الداتا) بيتساووا مع بعض كتلة واحدة.
-    - مفيش سقف مسموح به للفرق: في كل خطوة بيدور على أكتر منتج فيه فرق، وبينقل
-      حساب/عميل من المحصل الأعلى للأقل بس لو النقلة دي فعلاً بتقرّب فرق العدد
-      وفرق المديونية لبعض أكتر. بيقف لما محدش فيه نقلة بتحسن الوضع (يعني وصلنا
-      لأقرب حاجة للصفر ممكنة رياضيًا بالنظر لحجم كل عميل).
+    - العميل (id_col) بيفضل بكل حساباته مع نفس المحصل - مينفعش يتقسم على
+      محصلين. فبالتالي قرار أي نقلة بيتاخد بناءً على الأثر الكلي على *كل*
+      المنتجات اللي العميل ده عنده حسابات فيها مع بعض، مش منتج واحد بس -
+      عشان تظبيط منتج معين ميبوظش منتج تاني لنفس العميل من غير داعي.
+    - بيقف لما محدش فيه نقلة بتحسن الوضع الكلي (يعني وصلنا لأقرب حاجة للصفر
+      ممكنة فعليًا بالنظر لإن كل عميل لازم يفضل كتلة واحدة).
     """
     df = df.copy()
     new_col = "المحصل بعد التساوي"
@@ -551,28 +554,56 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
                 "amount": float(before_stats[p].loc[sp, "amount"])
             }
  
+    def product_score(p):
+        """درجة عدم التوازن الحالية للمنتج ده (كل ما قلّت كل ما كان أحسن)"""
+        counts = [stats[p][sp]["count"] for sp in salespeople]
+        amounts = [stats[p][sp]["amount"] for sp in salespeople]
+        count_diff = max(counts) - min(counts)
+        amount_diff = max(amounts) - min(amounts)
+        # فرق العدد مينفعش يوصل صفر لو مش قابل للقسمة بالظبط - أقصى تقارب = 1
+        count_violation = max(0, count_diff - 1)
+        return count_violation * 1_000_000 + amount_diff, count_diff, amount_diff
+ 
+    def total_score():
+        return sum(product_score(p)[0] for p in products)
+ 
+    def move_delta(unit_products, giver, receiver):
+        """التغيّر الكلي في درجة عدم التوازن لو نقلنا العميل ده - أي رقم سالب = تحسّن"""
+        delta = 0.0
+        for p, vals in unit_products.items():
+            before_score, _, _ = product_score(p)
+            counts = {sp: stats[p][sp]["count"] for sp in salespeople}
+            amounts = {sp: stats[p][sp]["amount"] for sp in salespeople}
+            counts[giver] -= vals["count"]; counts[receiver] += vals["count"]
+            amounts[giver] -= vals["amount"]; amounts[receiver] += vals["amount"]
+            count_diff = max(counts.values()) - min(counts.values())
+            amount_diff = max(amounts.values()) - min(amounts.values())
+            count_violation = max(0, count_diff - 1)
+            after_score = count_violation * 1_000_000 + amount_diff
+            delta += (after_score - before_score)
+        return delta
+ 
     iterations = 0
     stalled_products = set()
     while iterations < max_iterations and len(stalled_products) < len(products):
+        # اختار أسوأ منتج (الأعلى فرقًا) من غير المتعثرين، عشان نحدد مين المحصل الزيادة ومين الناقص
         target = None
         for p in products:
             if p in stalled_products:
                 continue
-            counts = {sp: stats[p][sp]["count"] for sp in salespeople}
-            amounts = {sp: stats[p][sp]["amount"] for sp in salespeople}
-            count_diff = max(counts.values()) - min(counts.values())
-            amount_diff = max(amounts.values()) - min(amounts.values())
-            if count_diff <= 0 and amount_diff <= 0:
+            score, count_diff, amount_diff = product_score(p)
+            if score <= 0:
                 continue
-            score = count_diff * 1_000_000 + amount_diff
             if target is None or score > target[0]:
-                target = (score, p, counts, amounts, count_diff, amount_diff)
+                target = (score, p, count_diff, amount_diff)
  
         if target is None:
             break  # وصلنا لأقصى تقارب ممكن على كل المنتجات
  
-        _, p, counts, amounts, count_diff, amount_diff = target
-        fix_by_count = count_diff > 0
+        _, p, count_diff, amount_diff = target
+        counts = {sp: stats[p][sp]["count"] for sp in salespeople}
+        amounts = {sp: stats[p][sp]["amount"] for sp in salespeople}
+        fix_by_count = count_diff > 1
         giver = max(counts, key=lambda s: counts[s]) if fix_by_count else max(amounts, key=lambda s: amounts[s])
         receiver = min(counts, key=lambda s: counts[s]) if fix_by_count else min(amounts, key=lambda s: amounts[s])
  
@@ -581,19 +612,16 @@ def _equalize_aggressive_no_cohort(df, id_col, account_col, sp_col, product_col,
             stalled_products.add(p)
             continue
  
-        diff_before = (count_diff, amount_diff)
-        best_cid, best_after = None, None
+        # نختار العميل اللي نقله بيحسّن الوضع الكلي (على كل منتجاته) أكتر حاجة
+        best_cid, best_delta = None, None
         for cid in candidates:
-            vals = client_units[cid]["products"][p]
-            c2, a2 = dict(counts), dict(amounts)
-            c2[giver] -= vals["count"]; c2[receiver] += vals["count"]
-            a2[giver] -= vals["amount"]; a2[receiver] += vals["amount"]
-            diff_after = (max(c2.values()) - min(c2.values()), max(a2.values()) - min(a2.values()))
-            if best_after is None or diff_after < best_after:
-                best_after, best_cid = diff_after, cid
+            d = move_delta(client_units[cid]["products"], giver, receiver)
+            if best_delta is None or d < best_delta:
+                best_delta, best_cid = d, cid
  
-        if best_after is None or best_after >= diff_before:
-            stalled_products.add(p)  # مفيش نقلة تقرّب المنتج ده أكتر من كده
+        if best_delta is None or best_delta >= 0:
+            # مفيش عميل نقله بيحسّن الوضع الكلي - المنتج ده وصل لأقصى تقارب ممكن
+            stalled_products.add(p)
             continue
  
         unit = client_units[best_cid]
@@ -676,6 +704,8 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None
     return new_collector_df, assignment_summary, shortage_report
  
  
+ 
+
 
 
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
@@ -714,6 +744,8 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     summary_df = pd.concat(summary_parts, ignore_index=True)
     return result_df, summary_df
  
+ 
+
 
 
 
