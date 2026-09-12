@@ -178,7 +178,9 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
         return pool_df.iloc[0:0]
     if len(pool_df) <= need_count:
         return pool_df
-    pool_sorted = pool_df.sort_values(amount_col).reset_index(drop=True)
+    # مهم: من غير reset_index(drop=True) - عشان نحافظ على أرقام الـ index الأصلية
+    # اللي محتاجينها بعدين في assign_from_neglect عشان نحذف الصفوف دي من neglect_remaining
+    pool_sorted = pool_df.sort_values(amount_col)
     amounts = pool_sorted[amount_col].values
     n = len(amounts)
     prefix = amounts.cumsum()
