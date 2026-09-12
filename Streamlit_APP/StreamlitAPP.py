@@ -515,7 +515,7 @@ def assign_from_neglect(neglect_df, sheet2, new_sp_name,
     """
     assigned_rows = []
     shortage_report = []
-    neglect_remaining = neglect_df.copy()
+    neglect_remaining = neglect_df.reset_index(drop=True).copy()
  
     for _, req in sheet2.iterrows():
         sp = str(req["المحصل"]).strip()
