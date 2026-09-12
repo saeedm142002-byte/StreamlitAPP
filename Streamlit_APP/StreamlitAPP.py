@@ -332,100 +332,326 @@ def pick_closest_count_amount(pool_df, need_count, need_amount, amount_col="Amou
     return pool_sorted.iloc[best_start:best_start + need_count]
 
 
-def assign_from_neglect(neglect_df, sheet2, new_sp_name):
+def assign_from_neglect(neglect_df, sheet2, new_sp_name, classification_col=None):
     """
     ياخد من ملف الاهمال حسابات لكل محصل حسب المطلوب في sheet2
-    (عدد حسابات + مبلغ تقريبي لكل نوع منتج) وينقلهم للمحصل الجديد.
+    (عدد حسابات + مبلغ تقريبي لكل نوع منتج، ولو NPL مفعّل: لكل تصنيف+منتج)
+    وينقلهم للمحصل الجديد.
     """
     assigned_rows = []
     shortage_report = []
     neglect_remaining = neglect_df.copy()
-
+ 
     for _, req in sheet2.iterrows():
         sp = str(req["المحصل"]).strip()
         product = str(req["نوع المنتج"]).strip()
         need_count = int(req["عدد الحسابات"]) if pd.notna(req["عدد الحسابات"]) else 0
         need_amount = float(req["متبقي المديونية"]) if pd.notna(req["متبقي المديونية"]) else 0.0
-
-        pool = neglect_remaining[
-            (neglect_remaining["Salesperson"] == sp) &
-            (neglect_remaining["نوع المتنج-التمويل"] == product)
-        ]
-
+ 
+        mask = ((neglect_remaining["Salesperson"] == sp) &
+                (neglect_remaining["نوع المتنج-التمويل"] == product))
+ 
+        report_key = {"المحصل": sp, "نوع المنتج": product}
+        if classification_col:
+            cls = str(req["التصنيف"]).strip()
+            mask &= (neglect_remaining[classification_col].astype(str).str.strip() == cls)
+            report_key["التصنيف"] = cls
+ 
+        pool = neglect_remaining[mask]
+ 
         if len(pool) < need_count:
-            shortage_report.append({
-                "المحصل": sp, "نوع المنتج": product,
-                "مطلوب عدد": need_count, "متاح فعليًا": len(pool)
-            })
-
+            shortage_report.append({**report_key, "مطلوب عدد": need_count, "متاح فعليًا": len(pool)})
+ 
         take = pick_closest_count_amount(pool, need_count, need_amount)
         if not take.empty:
             assigned_rows.append(take)
             neglect_remaining = neglect_remaining.drop(take.index)
-
+ 
     new_collector_df = (pd.concat(assigned_rows, ignore_index=True)
                          if assigned_rows else pd.DataFrame(columns=neglect_df.columns))
-
+ 
     if not new_collector_df.empty:
         new_collector_df["Salesperson_قديم"] = new_collector_df["Salesperson"]
         new_collector_df["Salesperson"] = new_sp_name
-
+ 
+    group_cols = ["Salesperson_قديم", "نوع المتنج-التمويل"]
+    if classification_col:
+        group_cols.append(classification_col)
+ 
     assignment_summary = (
-        new_collector_df.groupby(["Salesperson_قديم", "نوع المتنج-التمويل"])
+        new_collector_df.groupby(group_cols)
         .agg(عدد_الحسابات=("Account Number", "count"), إجمالي_المبلغ=("Amount", "sum"))
         .reset_index()
         if not new_collector_df.empty else pd.DataFrame()
     )
-
+ 
     return new_collector_df, assignment_summary, shortage_report
+ 
+ 
+def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
+                        status_col, included_statuses,
+                        payment_col=None, move_paid_accounts=True,
+                        max_amount_diff=10000, max_iterations=20000,
+                        classification_col=None):
+    """
+    لو classification_col=None: زي القديم بالظبط - توازن على مستوى المنتج بس.
+ 
+    لو classification_col مفعّل (NPL / Dpd60): التوازن بيبقى على مستويين مع بعض
+    جوة كل فئة محصلين (كامل/جزئي):
+      1) مستوى التصنيف نفسه (إجمالي NPL لكل محصل، إجمالي Dpd60 لكل محصل)
+      2) مستوى (تصنيف + منتج) - يعني كل منتج جوة كل تصنيف بيتساوى لوحده
+    """
+    df = df.copy()
+    new_col = "المحصل بعد التساوي"
+    df[new_col] = df[sp_col]
+ 
+    # فئة المحصل (كامل/جزئي) بتتحدد بمجموعة المنتجات - زي ما هي، من غير تغيير
+    all_products = set(df[product_col].unique())
+    sp_products = df.groupby(sp_col)[product_col].apply(set)
+    sp_cohort = {sp: ("كامل" if prods == all_products else "جزئي") for sp, prods in sp_products.items()}
+    df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
+ 
+    if payment_col:
+        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
+    else:
+        df["_عليه_سداد"] = False
+ 
+    def row_levels(classification_val, product_val):
+        """المستويات (levels) اللي حساب واحد بيشترك فيها"""
+        if classification_col:
+            return [
+                ("تصنيف", classification_val),
+                ("تصنيف-منتج", (classification_val, product_val)),
+            ]
+        return [("منتج", product_val)]
+ 
+    def level_mask(cdf, level):
+        kind, val = level
+        if kind == "منتج":
+            return cdf[product_col] == val
+        elif kind == "تصنيف":
+            return cdf[classification_col] == val
+        else:  # تصنيف-منتج
+            cls, p = val
+            return (cdf[classification_col] == cls) & (cdf[product_col] == p)
+ 
+    summary_rows = []
+ 
+    for cohort, cdf_full in df.groupby("_فئة_المحصل"):
+        salespeople = sorted(cdf_full[sp_col].unique())
+        n = len(salespeople)
+        if n <= 1:
+            continue
+ 
+        # كل المستويات اللي هنوازنها جوة الفئة دي
+        if classification_col:
+            level_keys = set()
+            for _, r in cdf_full[[classification_col, product_col]].drop_duplicates().iterrows():
+                level_keys.add(("تصنيف", r[classification_col]))
+                level_keys.add(("تصنيف-منتج", (r[classification_col], r[product_col])))
+        else:
+            level_keys = {("منتج", p) for p in cdf_full[product_col].unique()}
+        level_keys = sorted(level_keys, key=str)
+ 
+        before_stats = {}
+        for lvl in level_keys:
+            ldf = cdf_full[level_mask(cdf_full, lvl)]
+            before_stats[lvl] = ldf.groupby(sp_col).agg(
+                count=(account_col, "count"), amount=(debt_col, "sum")
+            ).reindex(salespeople, fill_value=0)
+ 
+        client_units = {}
+        for cid, grp in cdf_full.groupby(id_col):
+            statuses = set(grp[status_col].unique())
+            if not statuses.issubset(set(included_statuses)):
+                continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
+ 
+            if not move_paid_accounts and grp["_عليه_سداد"].any():
+                continue  # العميل عنده حساب مسدد ومختار إنه يفضل ثابت خالص
+ 
+            client_levels = {}
+            for _, row in grp.iterrows():
+                cls_val = row[classification_col] if classification_col else None
+                for lvl in row_levels(cls_val, row[product_col]):
+                    client_levels.setdefault(lvl, {"count": 0, "amount": 0.0})
+                    client_levels[lvl]["count"] += 1
+                    client_levels[lvl]["amount"] += row[debt_col]
+ 
+            client_units[cid] = {
+                "current_sp": grp[sp_col].mode().iloc[0],
+                "levels": client_levels,
+                "row_index": grp.index.tolist()
+            }
+ 
+        pool_by_sp = {sp: [] for sp in salespeople}
+        for cid, unit in client_units.items():
+            pool_by_sp[unit["current_sp"]].append(cid)
+ 
+        # إحصائيات حية بتتحدث مع كل نقلة
+        stats = {lvl: {} for lvl in level_keys}
+        for lvl in level_keys:
+            for sp in salespeople:
+                stats[lvl][sp] = {
+                    "count": float(before_stats[lvl].loc[sp, "count"]),
+                    "amount": float(before_stats[lvl].loc[sp, "amount"])
+                }
+ 
+        def evaluate_move(unit_levels, giver, receiver):
+            delta = 0
+            for lvl, vals in unit_levels.items():
+                counts_now = {sp: stats[lvl][sp]["count"] for sp in salespeople}
+                amounts_now = {sp: stats[lvl][sp]["amount"] for sp in salespeople}
+                counts_now[giver] -= vals["count"]; counts_now[receiver] += vals["count"]
+                amounts_now[giver] -= vals["amount"]; amounts_now[receiver] += vals["amount"]
+                count_diff = max(counts_now.values()) - min(counts_now.values())
+                amount_diff = max(amounts_now.values()) - min(amounts_now.values())
+                delta += max(0, count_diff - 1) * 1000 + max(0, amount_diff - max_amount_diff)
+            return delta
+ 
+        iterations = 0
+        stalled_levels = set()
+        while iterations < max_iterations:
+            target = None
+            for lvl in level_keys:
+                if lvl in stalled_levels:
+                    continue
+                counts = {sp: stats[lvl][sp]["count"] for sp in salespeople}
+                amounts = {sp: stats[lvl][sp]["amount"] for sp in salespeople}
+                count_diff = max(counts.values()) - min(counts.values())
+                amount_diff = max(amounts.values()) - min(amounts.values())
+                count_violation = max(0, count_diff - 1)
+                amount_violation = max(0, amount_diff - max_amount_diff)
+                score = count_violation * 1000 + amount_violation
+                if score > 0:
+                    fix_by_count = count_violation > 0
+                    giver = max(counts, key=lambda s: counts[s]) if fix_by_count else max(amounts, key=lambda s: amounts[s])
+                    receiver = min(counts, key=lambda s: counts[s]) if fix_by_count else min(amounts, key=lambda s: amounts[s])
+                    if target is None or score > target[0]:
+                        target = (score, lvl, giver, receiver)
+ 
+            if target is None:
+                break  # اتحقق الشرطين على كل المستويات في الفئة دي
+ 
+            _, lvl, giver, receiver = target
+            candidates = [cid for cid in pool_by_sp[giver] if lvl in client_units[cid]["levels"]]
+ 
+            if not candidates:
+                stalled_levels.add(lvl)  # مفيش حسابات قابلة للنقل تحل المشكلة دي
+                continue
+ 
+            best_cid, best_delta = None, None
+            for cid in candidates:
+                d = evaluate_move(client_units[cid]["levels"], giver, receiver)
+                if best_delta is None or d < best_delta:
+                    best_delta, best_cid = d, cid
+ 
+            unit = client_units[best_cid]
+            for lv, vals in unit["levels"].items():
+                stats[lv][giver]["count"] -= vals["count"]
+                stats[lv][giver]["amount"] -= vals["amount"]
+                stats[lv][receiver]["count"] += vals["count"]
+                stats[lv][receiver]["amount"] += vals["amount"]
+            df.loc[unit["row_index"], new_col] = receiver
+            pool_by_sp[giver].remove(best_cid)
+            pool_by_sp[receiver].append(best_cid)
+            unit["current_sp"] = receiver
+            stalled_levels.clear()  # النقلة ممكن تكون حلت مستوى كان متعثر قبل كده
+            iterations += 1
+ 
+        for lvl in level_keys:
+            kind, val = lvl
+            if classification_col:
+                if kind == "تصنيف":
+                    label = {product_col: "(إجمالي كل المنتجات)", "التصنيف": val}
+                else:
+                    cls, p = val
+                    label = {product_col: p, "التصنيف": cls}
+            else:
+                label = {product_col: val}
+ 
+            for sp in salespeople:
+                before = before_stats[lvl].loc[sp]
+                summary_rows.append({
+                    **label, "فئة المحصل": cohort, sp_col: sp,
+                    "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                    "عدد_الحسابات_بعد": int(stats[lvl][sp]["count"]), "متبقي_المديونية_بعد": round(stats[lvl][sp]["amount"], 2)
+                })
+ 
+    return df, pd.DataFrame(summary_rows)
+ 
+
 
 def distribute_leaving_portfolio(df, leaving_sp, targets, sp_col="Salesperson",
                                   id_col="ID", acc_col="Account Number",
-                                  amt_col="Amount", product_col="نوع المتنج-التمويل"):
+                                  amt_col="Amount", product_col="نوع المتنج-التمويل",
+                                  classification_col=None):
     """
-    targets: dict {salesperson: {product: {"count": x, "amount": y}}}
-    يوزع كل ID (بكل حساباته) على المحصل الأقرب لهدفه، منتج بمنتج.
-    يرجع df معدّل + جدول ملخص.
+    targets: dict {salesperson: {group_key: {"count": x, "amount": y}}}
+    group_key = نوع المنتج فقط (SNB) أو (التصنيف, نوع المنتج) لو NPL/Dpd60 مفعّل
+    يوزع كل ID (بكل حساباته) على المحصل الأقرب لهدفه، مجموعة بمجموعة.
     """
     df = df.copy()
     df[sp_col] = df[sp_col].astype(object)
     leaving_df = df[df[sp_col] == leaving_sp]
     remaining = list(targets.keys())
-
-    assigned_count = {c: {p: 0 for p in set(leaving_df[product_col])} for c in remaining}
-    assigned_amount = {c: {p: 0.0 for p in set(leaving_df[product_col])} for c in remaining}
-
-    for product, sub in leaving_df.groupby(product_col):
+ 
+    group_cols = [classification_col, product_col] if classification_col else [product_col]
+ 
+    if classification_col:
+        all_groups = set(zip(leaving_df[classification_col], leaving_df[product_col]))
+    else:
+        all_groups = set(leaving_df[product_col])
+ 
+    assigned_count = {c: {g: 0 for g in all_groups} for c in remaining}
+    assigned_amount = {c: {g: 0.0 for g in all_groups} for c in remaining}
+ 
+    groupby_key = group_cols if classification_col else product_col
+ 
+    for group_val, sub in leaving_df.groupby(groupby_key):
+        g = group_val  # سكالار لو مفيش تصنيف، تابل (تصنيف, منتج) لو فيه تصنيف
+ 
         groups = (sub.groupby(id_col)
                      .agg(cnt=(acc_col, "count"), amt=(amt_col, "sum"))
                      .reset_index()
                      .sort_values("amt", ascending=False))
-
-        for _, g in groups.iterrows():
+ 
+        for _, row in groups.iterrows():
             best_c, best_score = None, float("-inf")
             for c in remaining:
-                t = targets[c].get(product, {"count": 0, "amount": 0})
+                t = targets[c].get(g, {"count": 0, "amount": 0})
                 tc, ta = t["count"], t["amount"]
                 if tc == 0 and ta == 0:
                     continue
-                dc = (tc - assigned_count[c][product]) / tc if tc else 0
-                da = (ta - assigned_amount[c][product]) / ta if ta else 0
+                dc = (tc - assigned_count[c][g]) / tc if tc else 0
+                da = (ta - assigned_amount[c][g]) / ta if ta else 0
                 score = dc + da
                 if score > best_score:
                     best_score, best_c = score, c
-            if best_c is None:  # محدش حاطط هدف لهذا المنتج -> يتوزع بالتساوي
-                best_c = min(remaining, key=lambda c: assigned_count[c][product])
-
-            mask = (df[id_col] == g[id_col]) & (df[product_col] == product) & (df[sp_col] == leaving_sp)
+            if best_c is None:  # محدش حاطط هدف للمجموعة دي -> يتوزع بالتساوي
+                best_c = min(remaining, key=lambda c: assigned_count[c][g])
+ 
+            if classification_col:
+                cls, p = g
+                mask = ((df[id_col] == row[id_col]) &
+                        (df[classification_col] == cls) &
+                        (df[product_col] == p) &
+                        (df[sp_col] == leaving_sp))
+            else:
+                mask = ((df[id_col] == row[id_col]) &
+                        (df[product_col] == g) &
+                        (df[sp_col] == leaving_sp))
+ 
             df.loc[mask, sp_col] = best_c
-            assigned_count[best_c][product] += g["cnt"]
-            assigned_amount[best_c][product] += g["amt"]
-
+            assigned_count[best_c][g] += row["cnt"]
+            assigned_amount[best_c][g] += row["amt"]
+ 
+    summary_group_cols = [sp_col] + group_cols
     summary = (df[df[sp_col].isin(remaining)]
-               .groupby([sp_col, product_col])
+               .groupby(summary_group_cols)
                .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
                .reset_index())
     return df, summary
+ 
 
 # ======================
 # PAGE CONFIG
@@ -3045,8 +3271,20 @@ elif page == "النشاط":
 # ======================
 
 
+# ==========================================================================
+# استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
+# ==========================================================================
+
 elif page == "التوزيع":
     st.subheader("⚖️👥 توزيع المحافظ")
+
+    classification_mode = st.radio(
+        "تصنيف المحفظة",
+        ["SNB", "NPL & Dpd60"],
+        horizontal=True,
+        key="classification_mode"
+    )
+
     distribution_type = st.radio(
         "نوع التوزيع",
         ["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"],
@@ -3059,7 +3297,17 @@ elif page == "التوزيع":
         if uploaded_file:
             df = pd.read_excel(uploaded_file)
             df = df.dropna(subset=["Account Number"])  # يشيل صف الإجمالي لو موجود
-            overview = (df.groupby(["Salesperson", "نوع المتنج-التمويل"])
+
+            classification_col = None
+            if classification_mode == "NPL & Dpd60":
+                classification_col = st.selectbox(
+                    "عمود التصنيف (NPL / Dpd60)", df.columns.tolist(), key="leaving_class_col"
+                )
+
+            overview_cols = ["Salesperson", "نوع المتنج-التمويل"] + (
+                [classification_col] if classification_col else []
+            )
+            overview = (df.groupby(overview_cols)
                           .agg(عدد_الحسابات=("Account Number", "count"),
                                إجمالي_المبلغ=("Amount", "sum"))
                           .reset_index())
@@ -3070,13 +3318,20 @@ elif page == "التوزيع":
             remaining_sps = [s for s in sorted(df["Salesperson"].unique()) if s != leaving_sp]
 
             st.markdown("### ارفع ملف المستهدفات")
-            st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
+            if classification_col:
+                st.caption("الأعمدة المطلوبة: المحصل | التصنيف | نوع المنتج | عدد الحسابات | المبلغ")
+            else:
+                st.caption("الأعمدة المطلوبة: المحصل | نوع المنتج | عدد الحسابات | المبلغ")
             targets_file = st.file_uploader("ارفع ملف المستهدف لكل محصل", type=["xlsx"], key="targets_file")
 
             if targets_file and st.button("نفذ التوزيع"):
                 targets_raw = pd.read_excel(targets_file)
                 targets_raw.columns = [c.strip() for c in targets_raw.columns]
-                missing_cols = {"المحصل", "نوع المنتج", "عدد الحسابات", "المبلغ"} - set(targets_raw.columns)
+
+                required_cols = {"المحصل", "نوع المنتج", "عدد الحسابات", "المبلغ"}
+                if classification_col:
+                    required_cols.add("التصنيف")
+                missing_cols = required_cols - set(targets_raw.columns)
                 if missing_cols:
                     st.error(f"الأعمدة دي ناقصة في ملف المستهدفات: {missing_cols}")
                     st.stop()
@@ -3085,7 +3340,8 @@ elif page == "التوزيع":
                 for _, r in targets_raw.iterrows():
                     sp = str(r["المحصل"]).strip()
                     p = str(r["نوع المنتج"]).strip()
-                    targets.setdefault(sp, {})[p] = {
+                    key = (str(r["التصنيف"]).strip(), p) if classification_col else p
+                    targets.setdefault(sp, {})[key] = {
                         "count": r["عدد الحسابات"] if pd.notna(r["عدد الحسابات"]) else 0,
                         "amount": r["المبلغ"] if pd.notna(r["المبلغ"]) else 0.0,
                     }
@@ -3093,10 +3349,20 @@ elif page == "التوزيع":
                 missing_sps = set(remaining_sps) - set(targets.keys())
                 if missing_sps:
                     st.warning(f"المحصلين دول مفيش لهم مستهدف في الملف، هياخدوا الباقي بالتساوي: {missing_sps}")
-                    for sp in missing_sps:
-                        targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
+                    if classification_col:
+                        leaving_groups = set(zip(
+                            df.loc[df["Salesperson"] == leaving_sp, classification_col],
+                            df.loc[df["Salesperson"] == leaving_sp, "نوع المتنج-التمويل"]
+                        ))
+                        for sp in missing_sps:
+                            targets[sp] = {g: {"count": 0, "amount": 0} for g in leaving_groups}
+                    else:
+                        for sp in missing_sps:
+                            targets[sp] = {p: {"count": 0, "amount": 0} for p in leaving_products}
 
-                new_df, summary = distribute_leaving_portfolio(df, leaving_sp, targets)
+                new_df, summary = distribute_leaving_portfolio(
+                    df, leaving_sp, targets, classification_col=classification_col
+                )
 
                 st.success("تم التوزيع")
                 st.markdown("### النتيجة: كل محصل معاه كام")
@@ -3125,6 +3391,12 @@ elif page == "التوزيع":
                 st.error("عمود 'Sales Team' مش موجود في ملف المحفظة")
                 st.stop()
 
+        classification_col_new = None
+        if classification_mode == "NPL & Dpd60" and portfolio_df is not None:
+            classification_col_new = st.selectbox(
+                "عمود التصنيف (NPL / Dpd60)", portfolio_df.columns.tolist(), key="new_class_col"
+            )
+
         st.markdown("### بيانات المحصل الجديد")
         new_sp_name = st.text_input("اسم المحصل الجديد").strip()
 
@@ -3140,8 +3412,12 @@ elif page == "التوزيع":
         neglect_file = st.file_uploader("ملف الاهمال", type=["xlsx"], key="neglect_new")
 
         st.markdown("### ارفع ملف المستهدفات (شيتين)")
-        st.caption("Sheet1: المحصل الجديد | متبقي المديونية | عدد الحسابات | نوع المنتج")
-        st.caption("Sheet2: المحصل (الحالي) | متبقي المديونية | عدد الحسابات | نوع المنتج")
+        if classification_col_new:
+            st.caption("Sheet1: المحصل الجديد | التصنيف | متبقي المديونية | عدد الحسابات | نوع المنتج")
+            st.caption("Sheet2: المحصل (الحالي) | التصنيف | متبقي المديونية | عدد الحسابات | نوع المنتج")
+        else:
+            st.caption("Sheet1: المحصل الجديد | متبقي المديونية | عدد الحسابات | نوع المنتج")
+            st.caption("Sheet2: المحصل (الحالي) | متبقي المديونية | عدد الحسابات | نوع المنتج")
         new_targets_file = st.file_uploader("ملف المستهدفات", type=["xlsx"], key="new_targets_file")
 
         if (portfolio_df is not None and neglect_file and new_targets_file
@@ -3149,14 +3425,23 @@ elif page == "التوزيع":
 
             neglect_df = pd.read_excel(neglect_file)
             neglect_df = neglect_df.dropna(subset=["Account Number"])
+            if classification_col_new and classification_col_new not in neglect_df.columns:
+                st.error(f"عمود '{classification_col_new}' مش موجود في ملف الاهمال")
+                st.stop()
 
             sheet1 = pd.read_excel(new_targets_file, sheet_name=0)
             sheet2 = pd.read_excel(new_targets_file, sheet_name=1)
             sheet1.columns = [c.strip() for c in sheet1.columns]
             sheet2.columns = [c.strip() for c in sheet2.columns]
 
-            missing1 = {"المحصل الجديد", "متبقي المديونية", "عدد الحسابات", "نوع المنتج"} - set(sheet1.columns)
-            missing2 = {"المحصل", "متبقي المديونية", "عدد الحسابات", "نوع المنتج"} - set(sheet2.columns)
+            req1 = {"المحصل الجديد", "متبقي المديونية", "عدد الحسابات", "نوع المنتج"}
+            req2 = {"المحصل", "متبقي المديونية", "عدد الحسابات", "نوع المنتج"}
+            if classification_col_new:
+                req1.add("التصنيف")
+                req2.add("التصنيف")
+
+            missing1 = req1 - set(sheet1.columns)
+            missing2 = req2 - set(sheet2.columns)
             if missing1:
                 st.error(f"الأعمدة دي ناقصة في Sheet1: {missing1}")
                 st.stop()
@@ -3164,11 +3449,12 @@ elif page == "التوزيع":
                 st.error(f"الأعمدة دي ناقصة في Sheet2: {missing2}")
                 st.stop()
 
-            s1_by_product = sheet1.groupby("نوع المنتج").agg(
+            group_keys = ["التصنيف", "نوع المنتج"] if classification_col_new else ["نوع المنتج"]
+            s1_by_product = sheet1.groupby(group_keys).agg(
                 عدد_الحسابات=("عدد الحسابات", "sum"),
                 متبقي_المديونية=("متبقي المديونية", "sum")
             )
-            s2_by_product = sheet2.groupby("نوع المنتج").agg(
+            s2_by_product = sheet2.groupby(group_keys).agg(
                 عدد_الحسابات=("عدد الحسابات", "sum"),
                 متبقي_المديونية=("متبقي المديونية", "sum")
             )
@@ -3180,7 +3466,9 @@ elif page == "التوزيع":
                 a1 = round(s1_by_product["متبقي_المديونية"].get(p, 0), 2)
                 a2 = round(s2_by_product["متبقي_المديونية"].get(p, 0), 2)
                 if c1 != c2 or a1 != a2:
-                    mismatch.append({"نوع المنتج": p, "عدد Sheet1": c1, "عدد Sheet2": c2,
+                    key_vals = p if isinstance(p, tuple) else (p,)
+                    row = dict(zip(group_keys, key_vals))
+                    mismatch.append({**row, "عدد Sheet1": c1, "عدد Sheet2": c2,
                                       "مبلغ Sheet1": a1, "مبلغ Sheet2": a2})
 
             if mismatch:
@@ -3188,7 +3476,9 @@ elif page == "التوزيع":
                 st.dataframe(pd.DataFrame(mismatch), use_container_width=True)
                 st.stop()
 
-            new_df, assignment_summary, shortage_report = assign_from_neglect(neglect_df, sheet2, new_sp_name)
+            new_df, assignment_summary, shortage_report = assign_from_neglect(
+                neglect_df, sheet2, new_sp_name, classification_col=classification_col_new
+            )
 
             if shortage_report:
                 st.warning("مفيش حسابات كفاية في الاهمال لتغطية المطلوب في الحالات دي:")
@@ -3227,6 +3517,12 @@ elif page == "التوزيع":
                 default_status_index = cols.index("Sub State") if "Sub State" in cols else 0
                 status_col = st.selectbox("عمود حالة الحساب", cols, index=default_status_index, key="eq_status")
 
+                classification_col_eq = None
+                if classification_mode == "NPL & Dpd60":
+                    classification_col_eq = st.selectbox(
+                        "عمود التصنيف (NPL / Dpd60)", cols, key="eq_classification"
+                    )
+
                 status_values = sorted(df_eq[status_col].dropna().unique().tolist())
                 included_statuses = st.multiselect(
                     "اختار الحالات اللي هيتساوى بيها فقط (أي عميل عنده حالة تانية غير دول هيفضل ثابت)",
@@ -3243,15 +3539,11 @@ elif page == "التوزيع":
                 move_paid_accounts = paid_behavior.startswith("وزّعها")
 
                 max_amount_diff = st.number_input(
-                    "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل منتج)",
+                    "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل مستوى)",
                     min_value=0, value=10000, step=1000, key="eq_max_diff"
                 )
 
                 submitted = st.form_submit_button("نفذ التساوي", key="eq_submit_btn")
-
-                
-
-
 
             if submitted:
                 if not included_statuses:
@@ -3262,20 +3554,21 @@ elif page == "التوزيع":
                         df_eq_clean, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
                         payment_col=payment_col, move_paid_accounts=move_paid_accounts,
-                        max_amount_diff=max_amount_diff
+                        max_amount_diff=max_amount_diff,
+                        classification_col=classification_col_eq
                     )
 
                     st.success("تم التساوي")
-                    st.markdown("### ملخص قبل/بعد لكل محصل ولكل منتج")
+                    st.markdown("### ملخص قبل/بعد لكل محصل ولكل مستوى (منتج / تصنيف)")
                     st.dataframe(summary_df, use_container_width=True)
 
                     moved = result_df[result_df[sp_col] != result_df["المحصل بعد التساوي"]]
                     st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
                     if len(moved) > 0:
-                        st.dataframe(
-                            moved[[id_col, account_col, product_col, debt_col, status_col, sp_col, "المحصل بعد التساوي"]],
-                            use_container_width=True
-                        )
+                        display_cols = [id_col, account_col, product_col, debt_col, status_col, sp_col, "المحصل بعد التساوي"]
+                        if classification_col_eq:
+                            display_cols.insert(3, classification_col_eq)
+                        st.dataframe(moved[display_cols], use_container_width=True)
 
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
