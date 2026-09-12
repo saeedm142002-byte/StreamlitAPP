@@ -343,8 +343,8 @@ def _equalize_single(df, id_col, account_col, sp_col, product_col, debt_col,
 
 
 
-             payment_col=None, move_paid_accounts=True,
-                                    max_iterations=20000):
+    payment_col=None, move_paid_accounts=True,
+    max_iterations=20000):
     """
     تساوي عنيف - مخصص لوضع NPL & Dpd60.
  
