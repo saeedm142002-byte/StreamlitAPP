@@ -131,84 +131,98 @@ def build_new_collector_targets(df, choice, new_sp_name,
     return sheet1, sheet2
 
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
-                        include_paid, payment_col=None):
+                        status_col, included_statuses):
     df = df.copy()
-    if include_paid or not payment_col:
-        df["_قابل_للنقل"] = True
-    else:
-        df["_قابل_للنقل"] = df[payment_col].isna() | (df[payment_col] == 0)
-
     new_col = "المحصل بعد التساوي"
     df[new_col] = df[sp_col]
 
-    # فئة كل محصل: "كامل" لو شغال على كل المنتجات الموجودة، "جزئي" لو منتج أو منتجين بس
+    # فئة كل محصل: كامل (كل المنتجات) أو جزئي
     all_products = set(df[product_col].unique())
     sp_products = df.groupby(sp_col)[product_col].apply(set)
-    sp_cohort = {
-        sp: ("كامل" if prods == all_products else "جزئي")
-        for sp, prods in sp_products.items()
-    }
+    sp_cohort = {sp: ("كامل" if prods == all_products else "جزئي") for sp, prods in sp_products.items()}
     df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
 
     summary_rows = []
 
-    for (product, cohort), pdf in df.groupby([product_col, "_فئة_المحصل"]):
-        salespeople = sorted(pdf[sp_col].unique())
+    for cohort, cdf in df.groupby("_فئة_المحصل"):
+        salespeople = sorted(cdf[sp_col].unique())
         n = len(salespeople)
         if n <= 1:
-            for sp in salespeople:
-                after = pdf[pdf[sp_col] == sp]
-                summary_rows.append({
-                    product_col: product, "فئة المحصل": cohort, sp_col: sp,
-                    "عدد_الحسابات_قبل": len(after), "متبقي_المديونية_قبل": round(after[debt_col].sum(), 2),
-                    "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
-                })
             continue
 
-        total_count = len(pdf)
-        total_amount = pdf[debt_col].sum()
-        target_count = total_count / n
-        target_amount = total_amount / n
+        products_in_cohort = sorted(cdf[product_col].unique())
 
-        current = pdf.groupby(sp_col).agg(
-            count=(account_col, "count"), amount=(debt_col, "sum")
-        ).reindex(salespeople, fill_value=0)
+        current, target = {}, {}
+        for p in products_in_cohort:
+            pdf = cdf[cdf[product_col] == p]
+            current[p] = pdf.groupby(sp_col).agg(
+                count=(account_col, "count"), amount=(debt_col, "sum")
+            ).reindex(salespeople, fill_value=0)
+            target[p] = {"count": len(pdf) / n, "amount": pdf[debt_col].sum() / n}
 
-        need_count = {sp: target_count - current.loc[sp, "count"] for sp in salespeople}
-        need_amount = {sp: target_amount - current.loc[sp, "amount"] for sp in salespeople}
+        need_count = {(sp, p): target[p]["count"] - current[p].loc[sp, "count"]
+                      for sp in salespeople for p in products_in_cohort}
+        need_amount = {(sp, p): target[p]["amount"] - current[p].loc[sp, "amount"]
+                       for sp in salespeople for p in products_in_cohort}
 
-        movable = {
-            sp: pdf[(pdf[sp_col] == sp) & (pdf["_قابل_للنقل"])][debt_col].to_dict()
-            for sp in salespeople
-        }
+        # وحدات العملاء: عميل قابل للنقل لو كل حالاته ضمن الحالات المختارة
+        client_units = []
+        for cid, grp in cdf.groupby(id_col):
+            statuses = set(grp[status_col].unique())
+            if not statuses.issubset(set(included_statuses)):
+                continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
+            sp_current = grp[sp_col].mode().iloc[0]
+            per_product = grp.groupby(product_col).agg(
+                count=(account_col, "count"), amount=(debt_col, "sum")
+            ).to_dict("index")
+            client_units.append({
+                "id": cid, "current_sp": sp_current,
+                "products": per_product, "row_index": grp.index.tolist()
+            })
 
-        givers = sorted([sp for sp in salespeople if need_count[sp] < -0.5], key=lambda s: need_count[s])
-        receivers = sorted([sp for sp in salespeople if need_count[sp] > 0.5], key=lambda s: -need_count[s])
+        pool_by_sp = {sp: [] for sp in salespeople}
+        for unit in client_units:
+            pool_by_sp[unit["current_sp"]].append(unit)
+
+        def net_need(sp):
+            return sum(need_count[(sp, p)] for p in products_in_cohort)
+
+        givers = [sp for sp in salespeople if net_need(sp) < -0.5]
+        receivers = sorted([sp for sp in salespeople if net_need(sp) > 0.5], key=lambda s: -net_need(s))
 
         for receiver in receivers:
-            if need_count[receiver] <= 0.5:
-                continue
-            for giver in givers:
-                while movable[giver] and need_count[receiver] > 0.5 and need_count[giver] < -0.5:
-                    remaining_need = need_amount[receiver]
-                    best_row = min(movable[giver], key=lambda r: abs(movable[giver][r] - remaining_need))
-                    amt = movable[giver].pop(best_row)
-                    df.loc[best_row, new_col] = receiver
-                    need_count[receiver] -= 1
-                    need_count[giver] += 1
-                    need_amount[receiver] -= amt
-                    need_amount[giver] += amt
-                if need_count[receiver] <= 0.5:
+            while net_need(receiver) > 0.5:
+                best_unit = best_giver = None
+                best_score = None
+                for giver in givers:
+                    if net_need(giver) >= -0.5:
+                        continue
+                    for unit in pool_by_sp[giver]:
+                        score = 0
+                        for p, vals in unit["products"].items():
+                            avg_c = max(target[p]["count"], 1)
+                            avg_a = max(target[p]["amount"], 1)
+                            score += abs(need_count[(receiver, p)] - vals["count"]) / avg_c
+                            score += abs(need_amount[(receiver, p)] - vals["amount"]) / avg_a
+                        if best_score is None or score < best_score:
+                            best_score, best_unit, best_giver = score, unit, giver
+                if best_unit is None:
                     break
+                df.loc[best_unit["row_index"], new_col] = receiver
+                for p, vals in best_unit["products"].items():
+                    need_count[(receiver, p)] -= vals["count"]; need_count[(best_giver, p)] += vals["count"]
+                    need_amount[(receiver, p)] -= vals["amount"]; need_amount[(best_giver, p)] += vals["amount"]
+                pool_by_sp[best_giver].remove(best_unit)
 
-        for sp in salespeople:
-            before = current.loc[sp]
-            after = df[(df[product_col] == product) & (df["_فئة_المحصل"] == cohort) & (df[new_col] == sp)]
-            summary_rows.append({
-                product_col: product, "فئة المحصل": cohort, sp_col: sp,
-                "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
-                "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
-            })
+        for p in products_in_cohort:
+            for sp in salespeople:
+                before = current[p].loc[sp]
+                after = df[(df[product_col] == p) & (df["_فئة_المحصل"] == cohort) & (df[new_col] == sp)]
+                summary_rows.append({
+                    product_col: p, "فئة المحصل": cohort, sp_col: sp,
+                    "عدد_الحسابات_قبل": int(before["count"]), "متبقي_المديونية_قبل": round(before["amount"], 2),
+                    "عدد_الحسابات_بعد": len(after), "متبقي_المديونية_بعد": round(after[debt_col].sum(), 2)
+                })
 
     return df, pd.DataFrame(summary_rows)
 
@@ -3163,26 +3177,23 @@ elif page == "التوزيع":
             sp_col = st.selectbox("عمود اسم المحصل", cols, key="eq_sp")
             product_col = st.selectbox("عمود نوع المنتج", cols, key="eq_product")
             debt_col = st.selectbox("عمود متبقي المديونية", cols, key="eq_debt")
+            status_col = st.selectbox("عمود حالة الحساب", cols, key="eq_status")
 
-            include_paid_choice = st.radio(
-                "هل تريد اعتبار الحسابات اللي عليها سداد ضمن عملية التساوي؟",
-                ["لا، استبعدها من النقل", "أيوه، اعتبرها زي أي حساب تاني"],
-                horizontal=True
+            status_values = sorted(df_eq[status_col].dropna().unique().tolist())
+            included_statuses = st.multiselect(
+                "اختار الحالات اللي هيتساوى بيها فقط (أي عميل عنده حالة تانية غير دول هيفضل ثابت)",
+                status_values, key="eq_statuses"
             )
-            include_paid_bool = include_paid_choice.startswith("أيوه")
-
-            payment_col = None
-            if not include_paid_bool:
-                payment_col = st.selectbox(
-                    "عمود السداد (الحسابات اللي عليها سداد مش هتتنقل)", cols, key="eq_payment"
-                )
 
             df_eq = df_eq.dropna(subset=[account_col])
 
-            if st.button("نفذ التساوي"):
+            if not included_statuses:
+                st.info("اختار حالة واحدة على الأقل عشان تقدر تنفذ التساوي")
+
+            if included_statuses and st.button("نفذ التساوي"):
                 result_df, summary_df = equalize_portfolio(
                     df_eq, id_col, account_col, sp_col, product_col, debt_col,
-                    include_paid_bool, payment_col
+                    status_col, included_statuses
                 )
 
                 st.success("تم التساوي")
@@ -3193,7 +3204,7 @@ elif page == "التوزيع":
                 st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
                 if len(moved) > 0:
                     st.dataframe(
-                        moved[[id_col, account_col, product_col, debt_col, sp_col, "المحصل بعد التساوي"]],
+                        moved[[id_col, account_col, product_col, debt_col, status_col, sp_col, "المحصل بعد التساوي"]],
                         use_container_width=True
                     )
 
