@@ -132,6 +132,7 @@ def build_new_collector_targets(df, choice, new_sp_name,
 
 def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
                         status_col, included_statuses,
+                        payment_col=None, move_paid_accounts=True,
                         max_amount_diff=10000, max_iterations=20000):
     df = df.copy()
     new_col = "المحصل بعد التساوي"
@@ -141,6 +142,11 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
     sp_products = df.groupby(sp_col)[product_col].apply(set)
     sp_cohort = {sp: ("كامل" if prods == all_products else "جزئي") for sp, prods in sp_products.items()}
     df["_فئة_المحصل"] = df[sp_col].map(sp_cohort)
+
+    if payment_col:
+        df["_عليه_سداد"] = df[payment_col].notna() & (df[payment_col] != 0)
+    else:
+        df["_عليه_سداد"] = False
 
     summary_rows = []
 
@@ -160,12 +166,14 @@ def equalize_portfolio(df, id_col, account_col, sp_col, product_col, debt_col,
             ).reindex(salespeople, fill_value=0)
 
         client_units = {}
-        fixed_index = []
         for cid, grp in cdf_full.groupby(id_col):
             statuses = set(grp[status_col].unique())
             if not statuses.issubset(set(included_statuses)):
-                fixed_index.extend(grp.index.tolist())
-                continue
+                continue  # فيه حساب بحالة مش مختارة -> يفضل ثابت
+
+            if not move_paid_accounts and grp["_عليه_سداد"].any():
+                continue  # العميل عنده حساب مسدد ومختار إنه يفضل ثابت خالص
+
             per_product = grp.groupby(product_col).agg(
                 count=(account_col, "count"), amount=(debt_col, "sum")
             ).to_dict("index")
@@ -3225,6 +3233,22 @@ elif page == "التوزيع":
                     status_values, key="eq_statuses"
                 )
 
+                                payment_col = st.selectbox("عمود السداد", cols, key="eq_payment")
+
+                paid_behavior = st.radio(
+                    "الحسابات اللي عليها سداد",
+                    ["وزّعها لو فيه إمكانية", "متتحركش خالص، تفضل مع محصلها الحالي"],
+                    horizontal=True, key="eq_paid_behavior"
+                )
+                move_paid_accounts = paid_behavior.startswith("وزّعها")
+
+                max_amount_diff = st.number_input(
+                    "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل منتج)",
+                    min_value=0, value=10000, step=1000, key="eq_max_diff"
+                )
+
+                submitted = st.form_submit_button("نفذ التساوي", key="eq_submit_btn")
+
                 
 
                 max_amount_diff = st.number_input(
@@ -3241,7 +3265,9 @@ elif page == "التوزيع":
                     df_eq_clean = df_eq.dropna(subset=[account_col])
                     result_df, summary_df = equalize_portfolio(
                         df_eq_clean, id_col, account_col, sp_col, product_col, debt_col,
-                        status_col, included_statuses, max_amount_diff=max_amount_diff
+                        status_col, included_statuses,
+                        payment_col=payment_col, move_paid_accounts=move_paid_accounts,
+                        max_amount_diff=max_amount_diff
                     )
 
                     st.success("تم التساوي")
