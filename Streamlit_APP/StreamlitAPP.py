@@ -3225,7 +3225,7 @@ elif page == "التوزيع":
                     status_values, key="eq_statuses"
                 )
 
-                submitted = st.form_submit_button("نفذ التساوي")
+                
 
                 max_amount_diff = st.number_input(
                     "أقصى فرق مسموح في متبقي المديونية بين أي محصلين (لكل منتج)",
