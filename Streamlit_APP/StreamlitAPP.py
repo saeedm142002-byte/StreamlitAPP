@@ -42,6 +42,96 @@ from io import BytesIO
 def load_excel(file):
     return pd.read_excel(file)
 
+
+@st.cache_data(show_spinner="جاري تجهيز المحصلين الجدد...")
+def build_new_collectors(main_df, neglect_df,
+                          main_id_col, main_collector_col, main_supervisor_col, main_account_col, main_debt_col,
+                          neg_id_col, neg_account_col, neg_debt_col,
+                          new_collectors, new_supervisors):
+
+    main = main_df.copy()
+    main[main_id_col] = main[main_id_col].astype(str)
+    neglect = neglect_df.copy()
+    neglect[neg_id_col] = neglect[neg_id_col].astype(str)
+
+    # 1) الهدف = متوسط المحصلين الحاليين (اللي مش هيتلمسوا)
+    per_collector = main.groupby(main_collector_col).agg(
+        debt=(main_debt_col, "sum"),
+        accounts=(main_account_col, "count"),
+        ids=(main_id_col, "nunique"),
+    )
+    target_debt = per_collector["debt"].mean()
+    target_accounts = per_collector["accounts"].mean()
+    target_ids = per_collector["ids"].mean()
+
+    # 2) تجميع ملف الاهمال على مستوى العميل (نفس الهوية تتاخد مع بعض)
+    groups = []
+    for cid, g in neglect.groupby(neg_id_col):
+        groups.append({
+            "id": cid,
+            "debt": g[neg_debt_col].sum(),
+            "accounts": len(g),
+            "rows": g.index.tolist(),
+        })
+    groups.sort(key=lambda x: x["debt"], reverse=True)  # LPT
+
+    # 3) توزيع على المحصلين الجداد بس، لحد ما كل واحد يوصل للهدف
+    bins = {c: {"debt": 0.0, "accounts": 0, "ids": 0, "rows": [], "done": False} for c in new_collectors}
+
+    for grp in groups:
+        open_bins = {c: b for c, b in bins.items() if not b["done"]}
+        if not open_bins:
+            break
+        target_c = min(open_bins, key=lambda c: open_bins[c]["debt"])
+        bins[target_c]["debt"] += grp["debt"]
+        bins[target_c]["accounts"] += grp["accounts"]
+        bins[target_c]["ids"] += 1
+        bins[target_c]["rows"].extend(grp["rows"])
+        if (bins[target_c]["debt"] >= target_debt and
+                bins[target_c]["accounts"] >= target_accounts and
+                bins[target_c]["ids"] >= target_ids):
+            bins[target_c]["done"] = True
+
+    # 4) الحسابات اللي اتسحبت من ملف الاهمال
+    pulled_rows_idx = [r for b in bins.values() for r in b["rows"]]
+    pulled = neglect.loc[pulled_rows_idx].copy()
+
+    pulled_accounts = set(pulled[neg_account_col].astype(str))
+    row_to_new_collector = {r: c for c, b in bins.items() for r in b["rows"]}
+    pulled["__new_collector__"] = pulled.index.map(row_to_new_collector)
+
+    sup_map = {c: s for c, s in zip(new_collectors, new_supervisors)}
+
+    # 5) شيل الحسابات دي من صاحبها الأصلي في المحفظة الحالية (لو موجودة فيها)
+    main_cleaned = main[~main[main_account_col].astype(str).isin(pulled_accounts)].copy()
+
+    # 6) بناء صفوف المحصلين الجدد بنفس شكل أعمدة المحفظة الحالية
+    new_rows = pd.DataFrame(index=pulled.index, columns=main.columns)
+    for col in main.columns:
+        if col in pulled.columns:
+            new_rows[col] = pulled[col]
+    new_rows[main_collector_col] = pulled["__new_collector__"].map(lambda c: c)
+    new_rows[main_supervisor_col] = pulled["__new_collector__"].map(sup_map)
+    if main_account_col not in new_rows.columns or new_rows[main_account_col].isna().all():
+        new_rows[main_account_col] = pulled[neg_account_col].values
+    if main_id_col not in pulled.columns:
+        new_rows[main_id_col] = pulled[neg_id_col].values
+    if main_debt_col not in pulled.columns:
+        new_rows[main_debt_col] = pulled[neg_debt_col].values
+
+    final_df = pd.concat([main_cleaned, new_rows], ignore_index=True)
+
+    summary = per_collector.reset_index().rename(columns={main_collector_col: "المحصل"})
+    summary["المحصل"] = summary["المحصل"]
+    new_summary = pd.DataFrame([
+        {"المحصل": c, "debt": b["debt"], "accounts": b["accounts"], "ids": b["ids"]}
+        for c, b in bins.items()
+    ])
+    full_summary = pd.concat([summary, new_summary], ignore_index=True).rename(
+        columns={"debt": "اجمالي المديونية", "accounts": "عدد الحسابات", "ids": "عدد الهويات"}
+    )
+    return final_df, full_summary
+
 @st.cache_data(show_spinner="جاري موازنة المحفظة...")
 def balance_portfolio(df, id_col, collector_col, supervisor_col, account_col, debt_col,
                        new_collectors, new_supervisors):
@@ -3711,30 +3801,44 @@ elif page == "التوزيع":
                                         file_name="portfolio_equalized.xlsx")
 
 elif page == "اضافة محصلين جدد":
-    st.subheader("➕ اضافة محصلين جدد وتوازن المحفظة")
+    st.subheader("➕ اضافة محصلين جدد من ملف الاهمال")
 
-    uploaded = st.file_uploader("ارفع ملف المحفظة", type=["xlsx"], key="new_collectors_file")
+    c_up1, c_up2 = st.columns(2)
+    with c_up1:
+        main_file = st.file_uploader("ملف المحفظة الحالية", type=["xlsx"], key="main_file")
+    with c_up2:
+        neglect_file = st.file_uploader("ملف الاهمال (المصدر)", type=["xlsx"], key="neglect_file")
 
-    if uploaded:
-        df = load_excel(uploaded)
-        st.success(f"تم تحميل {len(df):,} صف")
+    if main_file and neglect_file:
+        main_df = load_excel(main_file)
+        neglect_df = load_excel(neglect_file)
+        st.success(f"المحفظة الحالية: {len(main_df):,} صف | ملف الاهمال: {len(neglect_df):,} صف")
 
-        cols = df.columns.tolist()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            id_col = st.selectbox("عمود رقم الهوية", cols, key="idc")
-            collector_col = st.selectbox("عمود المحصل", cols, key="colc")
-        with c2:
-            supervisor_col = st.selectbox("عمود المشرف", cols, key="supc")
-            account_col = st.selectbox("عمود رقم الحساب", cols, key="accc")
-        with c3:
-            debt_col = st.selectbox("عمود مبلغ المديونية", cols, key="debtc")
+        st.markdown("##### أعمدة المحفظة الحالية")
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            main_id_col = st.selectbox("رقم الهوية", main_df.columns, key="m_id")
+            main_collector_col = st.selectbox("المحصل", main_df.columns, key="m_col")
+        with m2:
+            main_supervisor_col = st.selectbox("المشرف", main_df.columns, key="m_sup")
+            main_account_col = st.selectbox("رقم الحساب", main_df.columns, key="m_acc")
+        with m3:
+            main_debt_col = st.selectbox("مبلغ المديونية", main_df.columns, key="m_debt")
+
+        st.markdown("##### أعمدة ملف الاهمال")
+        n1, n2, n3 = st.columns(3)
+        with n1:
+            neg_id_col = st.selectbox("رقم الهوية", neglect_df.columns, key="n_id")
+        with n2:
+            neg_account_col = st.selectbox("رقم الحساب", neglect_df.columns, key="n_acc")
+        with n3:
+            neg_debt_col = st.selectbox("مبلغ المديونية", neglect_df.columns, key="n_debt")
 
         n_new = st.number_input("عدد المحصلين الجدد", min_value=1, max_value=20, value=2, step=1)
 
         st.markdown("##### بيانات المحصلين الجدد")
         new_collectors, new_supervisors = [], []
-        existing_sups = sorted(df[supervisor_col].dropna().unique().tolist())
+        existing_sups = sorted(main_df[main_supervisor_col].dropna().unique().tolist())
         for i in range(int(n_new)):
             cc1, cc2 = st.columns(2)
             with cc1:
@@ -3746,33 +3850,31 @@ elif page == "اضافة محصلين جدد":
             new_collectors.append(name.strip())
             new_supervisors.append((sup or "").strip())
 
-        if st.button("🔄 نفذ التوازن", type="primary"):
+        if st.button("🔄 كوّن المحصلين الجدد", type="primary"):
             if any(n == "" for n in new_collectors):
                 st.error("لازم تدخل اسم لكل محصل جديد")
             else:
-                result, summary = balance_portfolio(
-                    df, id_col, collector_col, supervisor_col, account_col, debt_col,
+                final_df, summary = build_new_collectors(
+                    main_df, neglect_df,
+                    main_id_col, main_collector_col, main_supervisor_col, main_account_col, main_debt_col,
+                    neg_id_col, neg_account_col, neg_debt_col,
                     new_collectors, new_supervisors
                 )
-                st.session_state["balanced_result"] = result
-                st.session_state["balanced_summary"] = summary
+                st.session_state["nc_result"] = final_df
+                st.session_state["nc_summary"] = summary
 
-        if "balanced_summary" in st.session_state:
-            st.markdown("##### ملخص المحفظة بعد التوازن")
-            st.dataframe(st.session_state["balanced_summary"], use_container_width=True)
-
-            avg_debt = st.session_state["balanced_summary"]["اجمالي المديونية"].mean()
-            max_dev = (st.session_state["balanced_summary"]["اجمالي المديونية"] - avg_debt).abs().max()
-            st.caption(f"أقصى فرق عن متوسط المديونية بين المحصلين: {max_dev:,.2f}")
+        if "nc_summary" in st.session_state:
+            st.markdown("##### ملخص المحفظة بعد اضافة المحصلين الجدد")
+            st.dataframe(st.session_state["nc_summary"], use_container_width=True)
 
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                st.session_state["balanced_result"].to_excel(writer, sheet_name="المحفظة الكاملة", index=False)
-                st.session_state["balanced_summary"].to_excel(writer, sheet_name="ملخص المحصلين", index=False)
+                st.session_state["nc_result"].to_excel(writer, sheet_name="المحفظة الكاملة", index=False)
+                st.session_state["nc_summary"].to_excel(writer, sheet_name="ملخص المحصلين", index=False)
             st.download_button(
-                "⬇️ تحميل المحفظة الكاملة بعد التوازن",
+                "⬇️ تحميل المحفظة الكاملة",
                 data=buffer.getvalue(),
-                file_name="المحفظة_بعد_التوازن.xlsx",
+                file_name="المحفظة_بعد_اضافة_محصلين.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
