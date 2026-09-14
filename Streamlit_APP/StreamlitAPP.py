@@ -3738,21 +3738,21 @@ elif page == "التقرير اليومي للسدادات":
         lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
     )
 
-    # ============ تصنيف نوع السداد (الجديد) ============
+    # ============ تصنيف نوع السداد (حسب طلبك بالظبط) ============
     def classify_payment(row):
-        method = str(row.get("Collection Method", "") or "").strip()
-        ctype = str(row.get("Collection Type", "") or "").strip()
-        text = (method + " " + ctype).lower()
+        method = str(row.get("Collection Method", "") or "")
+        ctype = str(row.get("Collection Type", "") or "")
 
         # 1) الجدولة أولاً
-        if "جدولة" in text or "جدوله" in text:
+        text = (method + " " + ctype)
+        if "جدولة" in text or "جدوله" in text or "الجدولة" in text:
             return "جدولة"
 
-        # 2) ناجز (ناجز أو محكمة أو المحكمة)
-        if any(word in text for word in ["ناجز", "محكمة", "المحكمة"]):
+        # 2) ناجز = أي حاجة فيها "سداد المحكمة" أو كلمة "ناجز" في Collection Method
+        if "سداد المحكمة" in method or "ناجز" in method:
             return "ناجز"
 
-        # 3) الباقي كاش
+        # 3) الباقي كله كاش
         return "كاش"
 
     payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
@@ -3821,7 +3821,7 @@ elif page == "التقرير اليومي للسدادات":
     TOTAL_JADWALA = float(collectors_summary["جدولة"].sum())
 
     st.info(f"**إجمالي سبتمبر الموحد: {TOTAL_SEP:,.2f} ريال**")
-    st.write(f"كاش: {TOTAL_CASH:,.2f} | ناجز: {TOTAL_NAJIZ:,.2f} | جدولة: {TOTAL_JADWALA:,.2f}")
+    st.write(f"كاش: **{TOTAL_CASH:,.2f}** | ناجز: **{TOTAL_NAJIZ:,.2f}** | جدولة: **{TOTAL_JADWALA:,.2f}**")
 
     # ============ نسبة النمو ============
     st.markdown("### 2) نسبة النمو (فواز وطارق فقط)")
@@ -3901,7 +3901,6 @@ elif page == "التقرير اليومي للسدادات":
         if "Collector" in wb.sheetnames:
             ws = wb["Collector"]
             updated = 0
-            sum_check = 0.0
 
             for row in range(14, 80):
                 name_cell = ws[f"C{row}"].value
@@ -3917,10 +3916,11 @@ elif page == "التقرير اليومي للسدادات":
 
                 if matched:
                     data = collector_data[matched]
-                    ws[f"F{row}"] = data["إجمالي"]
+                    ws[f"F{row}"] = data["إجمالي"]          # المحصل
                     ws[f"H{row}"] = data["ناجز"] if data["ناجز"] else None
                     ws[f"G{row}"] = data["جدولة"] if data["جدولة"] else None
-                    sum_check += data["إجمالي"]
+                    # عمود الكاش بيتحدث بالـ formula عادة، بس لو عايز ن강제:
+                    # ws[f"I{row}"] = data["كاش"]
                     updated += 1
 
             updated_sheets.append(f"Collector ({updated} محصل)")
@@ -3961,26 +3961,21 @@ elif page == "التقرير اليومي للسدادات":
         for sheet_name in ["growth rate", "growth rate (2)"]:
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-                for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
-                    for cell in row:
-                        if cell.value is None:
-                            continue
-                        val_str = str(cell.value).upper()
-                        if "SEP" in val_str or "سبتمبر" in val_str:
-                            next_cell = ws.cell(row=cell.row, column=cell.column + 4)
-                            if next_cell.value is not None:
-                                next_cell.value = TOTAL_SEP
 
-                for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
+                # نحدث صف SEP
+                for row in ws.iter_rows(min_row=1, max_row=25, max_col=10):
                     for cell in row:
-                        if isinstance(cell.value, (int, float)):
-                            if abs(cell.value - 497276) < 5000 or abs(cell.value - 1080741) < 5000:
-                                cell.value = TOTAL_SEP
+                        if cell.value and ("SEP" in str(cell.value).upper() or "سبتمبر" in str(cell.value)):
+                            # نفترض الترتيب: الشهر | الكاش | ناجز | الجدولة | الإجمالي
+                            ws.cell(row=cell.row, column=2).value = TOTAL_CASH
+                            ws.cell(row=cell.row, column=3).value = TOTAL_NAJIZ
+                            ws.cell(row=cell.row, column=4).value = TOTAL_JADWALA if TOTAL_JADWALA > 0 else "-"
+                            ws.cell(row=cell.row, column=5).value = TOTAL_SEP
 
                 updated_sheets.append(sheet_name)
 
         st.success("✅ تم التحديث في: " + " | ".join(updated_sheets))
-        st.success(f"**الإجمالي الموحد: {TOTAL_SEP:,.2f} ريال**")
+        st.success(f"**الإجمالي الموحد: {TOTAL_SEP:,.2f} | كاش: {TOTAL_CASH:,.2f} | ناجز: {TOTAL_NAJIZ:,.2f}**")
 
         output = io.BytesIO()
         wb.save(output)
@@ -3998,8 +3993,6 @@ elif page == "التقرير اليومي للسدادات":
     except Exception as e:
         st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
         st.exception(e)
-
-
 
 
 
