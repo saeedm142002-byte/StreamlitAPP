@@ -3738,14 +3738,21 @@ elif page == "التقرير اليومي للسدادات":
         lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
     )
 
-    # ============ تصنيف نوع السداد ============
+    # ============ تصنيف نوع السداد (الجديد) ============
     def classify_payment(row):
-        method = str(row.get("Collection Method", "") or "")
-        ctype = str(row.get("Collection Type", "") or "")
-        if "سداد المحكمة" in method or "سداد من منصة ناجز" in ctype:
-            return "ناجز"
-        if "جدولة" in method or "جدوله" in method:
+        method = str(row.get("Collection Method", "") or "").strip()
+        ctype = str(row.get("Collection Type", "") or "").strip()
+        text = (method + " " + ctype).lower()
+
+        # 1) الجدولة أولاً
+        if "جدولة" in text or "جدوله" in text:
             return "جدولة"
+
+        # 2) ناجز (ناجز أو محكمة أو المحكمة)
+        if any(word in text for word in ["ناجز", "محكمة", "المحكمة"]):
+            return "ناجز"
+
+        # 3) الباقي كاش
         return "كاش"
 
     payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
@@ -3814,6 +3821,7 @@ elif page == "التقرير اليومي للسدادات":
     TOTAL_JADWALA = float(collectors_summary["جدولة"].sum())
 
     st.info(f"**إجمالي سبتمبر الموحد: {TOTAL_SEP:,.2f} ريال**")
+    st.write(f"كاش: {TOTAL_CASH:,.2f} | ناجز: {TOTAL_NAJIZ:,.2f} | جدولة: {TOTAL_JADWALA:,.2f}")
 
     # ============ نسبة النمو ============
     st.markdown("### 2) نسبة النمو (فواز وطارق فقط)")
@@ -3889,7 +3897,7 @@ elif page == "التقرير اليومي للسدادات":
         wb = load_workbook(report_file)
         updated_sheets = []
 
-        # ====================== 1) ورقة Collector ======================
+        # 1) Collector
         if "Collector" in wb.sheetnames:
             ws = wb["Collector"]
             updated = 0
@@ -3901,8 +3909,6 @@ elif page == "التقرير اليومي للسدادات":
                     continue
 
                 name = str(name_cell).strip()
-
-                # مطابقة مرنة (بتشيل المسافات الزائدة)
                 matched = None
                 for key in collector_data:
                     if key.replace(" ", "") == name.replace(" ", "") or key in name or name in key:
@@ -3917,16 +3923,9 @@ elif page == "التقرير اليومي للسدادات":
                     sum_check += data["إجمالي"]
                     updated += 1
 
-            # إجبار صف الإجمالي في Collector يبقى = TOTAL_SEP
-            for row in range(40, 80):
-                val = ws[f"F{row}"].value
-                if val is not None and isinstance(val, (int, float)) and abs(val - sum_check) < 10:
-                    ws[f"F{row}"] = TOTAL_SEP
-                    break
+            updated_sheets.append(f"Collector ({updated} محصل)")
 
-            updated_sheets.append(f"Collector ({updated} محصل) | مجموع = {sum_check:,.2f}")
-
-        # ====================== 2) ورقة SNB ======================
+        # 2) SNB
         if "SNB" in wb.sheetnames:
             ws = wb["SNB"]
             for row in range(13, 30):
@@ -3941,16 +3940,14 @@ elif page == "التقرير اليومي للسدادات":
                             ws[f"E{row}"] = float(match["الإجمالي"].values[0])
                             break
 
-                # الإجمالي العام
                 if "إجمالي" in str(sup_name):
                     ws[f"E{row}"] = TOTAL_SEP
 
             updated_sheets.append("SNB")
 
-        # ====================== 3) ورقة متابعه تحقيق التارجت ======================
+        # 3) متابعه تحقيق التارجت
         if "متابعه تحقيق التارجت" in wb.sheetnames:
             ws = wb["متابعه تحقيق التارجت"]
-
             product_cells = {"PF": "D13", "AL": "D14", "CC": "D15"}
             for prod, cell in product_cells.items():
                 if prod in product_data:
@@ -3958,27 +3955,22 @@ elif page == "التقرير اليومي للسدادات":
 
             ws["D16"] = TOTAL_JADWALA
             ws["D17"] = TOTAL_SEP
-
             updated_sheets.append("متابعه تحقيق التارجت")
 
-        # ====================== 4) ورقة growth rate ======================
+        # 4) growth rate
         for sheet_name in ["growth rate", "growth rate (2)"]:
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-
-                # ندور على صف SEP أو سبتمبر ونحدثه
                 for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
                     for cell in row:
                         if cell.value is None:
                             continue
                         val_str = str(cell.value).upper()
-                        if "SEP" in val_str or "سبتمبر" in val_str or "SEPTEMBER" in val_str:
-                            # العمود اللي جنبه غالبًا فيه الإجمالي
+                        if "SEP" in val_str or "سبتمبر" in val_str:
                             next_cell = ws.cell(row=cell.row, column=cell.column + 4)
                             if next_cell.value is not None:
                                 next_cell.value = TOTAL_SEP
 
-                # تحديث أي رقم كبير قديم (زي 497276 أو 1080741)
                 for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
                     for cell in row:
                         if isinstance(cell.value, (int, float)):
@@ -3988,15 +3980,14 @@ elif page == "التقرير اليومي للسدادات":
                 updated_sheets.append(sheet_name)
 
         st.success("✅ تم التحديث في: " + " | ".join(updated_sheets))
-        st.success(f"**الإجمالي الموحد في كل الشيتات: {TOTAL_SEP:,.2f} ريال**")
+        st.success(f"**الإجمالي الموحد: {TOTAL_SEP:,.2f} ريال**")
 
-        # حفظ
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
 
         st.download_button(
-            label="⬇️ تحميل تقرير الأداء اليومي (محدث + إجمالي موحد)",
+            label="⬇️ تحميل تقرير الأداء اليومي (محدث)",
             data=output.getvalue(),
             file_name=f"تقرير_الاداء_اليومي_محدث_{datetime.today().date()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -4007,7 +3998,6 @@ elif page == "التقرير اليومي للسدادات":
     except Exception as e:
         st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
         st.exception(e)
-
 
 
 
