@@ -34,6 +34,61 @@ def load_model():
 tokenizer, model = load_model()
 
 
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+
+@st.cache_data(show_spinner="جاري تحميل الملف...")
+def load_excel(file):
+    return pd.read_excel(file)
+
+@st.cache_data(show_spinner="جاري موازنة المحفظة...")
+def balance_portfolio(df, id_col, collector_col, supervisor_col, account_col, debt_col,
+                       new_collectors, new_supervisors):
+    work = df.copy()
+    work[id_col] = work[id_col].astype(str)
+
+    # تجميع كل عميل (نفس الهوية) في كتلة واحدة عشان ميتقسمش بين محصلين
+    groups = []
+    for cid, g in work.groupby(id_col):
+        groups.append({
+            "id": cid,
+            "debt": g[debt_col].sum(),
+            "accounts": len(g),
+            "rows": g.index.tolist(),
+        })
+    groups.sort(key=lambda x: x["debt"], reverse=True)  # LPT
+
+    existing_collectors = sorted(work[collector_col].dropna().unique().tolist())
+    all_collectors = existing_collectors + new_collectors
+
+    sup_map = {c: work.loc[work[collector_col] == c, supervisor_col].mode().iat[0]
+               for c in existing_collectors}
+    for c, s in zip(new_collectors, new_supervisors):
+        sup_map[c] = s
+
+    bins = {c: {"debt": 0.0, "accounts": 0, "ids": 0, "rows": []} for c in all_collectors}
+
+    for grp in groups:
+        target = min(bins, key=lambda c: bins[c]["debt"])  # اقل واحد مديونية ياخد
+        bins[target]["debt"] += grp["debt"]
+        bins[target]["accounts"] += grp["accounts"]
+        bins[target]["ids"] += 1
+        bins[target]["rows"].extend(grp["rows"])
+
+    row_to_collector = {r: c for c, b in bins.items() for r in b["rows"]}
+    result = work.copy()
+    result[collector_col] = result.index.map(row_to_collector)
+    result[supervisor_col] = result[collector_col].map(sup_map)
+
+    summary = pd.DataFrame([
+        {"المحصل": c, "المشرف": sup_map[c], "عدد الحسابات": b["accounts"],
+         "عدد الهويات": b["ids"], "اجمالي المديونية": round(b["debt"], 2)}
+        for c, b in bins.items()
+    ]).sort_values("المحصل").reset_index(drop=True)
+
+    return result, summary
+
 import torch
 
 def predict_text(text):
@@ -92,6 +147,9 @@ def build_new_collector_targets(df, choice, new_sp_name,
                   else sub_df.groupby(sp_col)[amount_col].sum())
         share = totals / totals.sum()
         return share * amount_to_take
+
+
+
 
     rows_new, rows_existing = [], []
     cc_df = df[df[product_col] == cc_label]
@@ -719,7 +777,7 @@ pages = [
     ("الاهمال", "⚠️"),
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
-   
+   ("اضافة محصلين جدد", "⚡"),
     ("التدوير", "🔄") 
     
 ]
@@ -3652,8 +3710,71 @@ elif page == "التوزيع":
                     st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
                                         file_name="portfolio_equalized.xlsx")
 
-elif page == "اخطاء الحالات":
-    st.subheader("❌ اخطاء الحالات")
+elif page == "اضافة محصلين جدد":
+    st.subheader("➕ اضافة محصلين جدد وتوازن المحفظة")
+
+    uploaded = st.file_uploader("ارفع ملف المحفظة", type=["xlsx"], key="new_collectors_file")
+
+    if uploaded:
+        df = load_excel(uploaded)
+        st.success(f"تم تحميل {len(df):,} صف")
+
+        cols = df.columns.tolist()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            id_col = st.selectbox("عمود رقم الهوية", cols, key="idc")
+            collector_col = st.selectbox("عمود المحصل", cols, key="colc")
+        with c2:
+            supervisor_col = st.selectbox("عمود المشرف", cols, key="supc")
+            account_col = st.selectbox("عمود رقم الحساب", cols, key="accc")
+        with c3:
+            debt_col = st.selectbox("عمود مبلغ المديونية", cols, key="debtc")
+
+        n_new = st.number_input("عدد المحصلين الجدد", min_value=1, max_value=20, value=2, step=1)
+
+        st.markdown("##### بيانات المحصلين الجدد")
+        new_collectors, new_supervisors = [], []
+        existing_sups = sorted(df[supervisor_col].dropna().unique().tolist())
+        for i in range(int(n_new)):
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                name = st.text_input(f"اسم المحصل الجديد {i+1}", key=f"newcol_{i}")
+            with cc2:
+                sup = st.selectbox(f"مشرف المحصل {i+1}", existing_sups + ["مشرف جديد"], key=f"newsup_{i}")
+                if sup == "مشرف جديد":
+                    sup = st.text_input(f"اسم المشرف الجديد {i+1}", key=f"newsupname_{i}")
+            new_collectors.append(name.strip())
+            new_supervisors.append((sup or "").strip())
+
+        if st.button("🔄 نفذ التوازن", type="primary"):
+            if any(n == "" for n in new_collectors):
+                st.error("لازم تدخل اسم لكل محصل جديد")
+            else:
+                result, summary = balance_portfolio(
+                    df, id_col, collector_col, supervisor_col, account_col, debt_col,
+                    new_collectors, new_supervisors
+                )
+                st.session_state["balanced_result"] = result
+                st.session_state["balanced_summary"] = summary
+
+        if "balanced_summary" in st.session_state:
+            st.markdown("##### ملخص المحفظة بعد التوازن")
+            st.dataframe(st.session_state["balanced_summary"], use_container_width=True)
+
+            avg_debt = st.session_state["balanced_summary"]["اجمالي المديونية"].mean()
+            max_dev = (st.session_state["balanced_summary"]["اجمالي المديونية"] - avg_debt).abs().max()
+            st.caption(f"أقصى فرق عن متوسط المديونية بين المحصلين: {max_dev:,.2f}")
+
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                st.session_state["balanced_result"].to_excel(writer, sheet_name="المحفظة الكاملة", index=False)
+                st.session_state["balanced_summary"].to_excel(writer, sheet_name="ملخص المحصلين", index=False)
+            st.download_button(
+                "⬇️ تحميل المحفظة الكاملة بعد التوازن",
+                data=buffer.getvalue(),
+                file_name="المحفظة_بعد_التوازن.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
 elif page == "الاوتودايلر":
     st.subheader("📞 الاوتودايلر")
