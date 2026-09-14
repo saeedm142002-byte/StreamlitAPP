@@ -3672,163 +3672,163 @@ elif page == "التوزيع":
 
 
 
-import streamlit as st
-import pandas as pd
-import io
-from datetime import datetime
+elif page == "التقرير اليومي للسدادات":
+    st.subheader("📞 التقرير اليومي للسدادات")
 
-st.set_page_config(page_title="التقرير اليومي للسدادات", layout="wide")
-st.title("📞 التقرير اليومي للسدادات")
-
-# ============ 1) رفع الملفات ============
-col1, col2 = st.columns(2)
-with col1:
-    portfolio_file = st.file_uploader(
-        "📁 ارفع ملف المحفظة (فيه Sales Team و Salesperson)",
-        type=["xlsx"],
-        key="portfolio"
-    )
-with col2:
-    payments_file = st.file_uploader(
-        "📁 ارفع ملف السدادات",
-        type=["xlsx"],
-        key="payments"
-    )
-
-if not portfolio_file or not payments_file:
-    st.info("من فضلك ارفع ملف المحفظة وملف السدادات عشان تكمل.")
-    st.stop()
-
-# ============ 2) تحميل البيانات ============
-@st.cache_data(show_spinner="جاري قراءة الملفات...")
-def load_data(portfolio_file, payments_file):
-    portfolio = pd.read_excel(portfolio_file, sheet_name="Sheet1")
-    portfolio = portfolio.dropna(subset=["Salesperson", "Sales Team"])
-
-    payments = pd.read_excel(payments_file, sheet_name="Sheet1")
-    payments = payments.dropna(subset=["Collected By"])
-    payments["Date of Receipt"] = pd.to_datetime(payments["Date of Receipt"], errors="coerce")
-    # شيل صف الإجمالي لو موجود
-    payments = payments[~payments["Name"].astype(str).str.startswith("SNB (")]
-    return portfolio, payments
-
-portfolio_df, payments_df = load_data(portfolio_file, payments_file)
-
-# ============ 3) خريطة المحصل → المشرف ============
-collector_supervisor_map = (
-    portfolio_df.groupby("Salesperson")["Sales Team"]
-    .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[0])
-    .to_dict()
-)
-
-FAWAZ_TEAM = "SNB II Fawaz"
-TARIQ_TEAM = "SNB II Alsarhan II Tariq"
-CUTOFF_DATE = pd.Timestamp("2026-09-12")
-
-def get_supervisor(collector, payment_date):
-    real_supervisor = collector_supervisor_map.get(collector, "غير معروف بالمحفظة")
-    if "المدينة" in str(collector):
-        if pd.notna(payment_date) and payment_date <= CUTOFF_DATE:
-            return FAWAZ_TEAM
-        return real_supervisor
-    return real_supervisor
-
-payments_df["المشرف"] = payments_df.apply(
-    lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
-)
-
-# ============ 4) تصنيف نوع السداد ============
-def classify_payment(row):
-    method = str(row.get("Collection Method", "") or "")
-    ctype = str(row.get("Collection Type", "") or "")
-    if "سداد المحكمة" in method or "سداد من منصة ناجز" in ctype:
-        return "ناجز"
-    if "جدولة" in method or "جدوله" in method:
-        return "جدولة"
-    return "كاش"
-
-payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
-
-# ============ 5) تجميع المحصلين ============
-collectors_summary = (
-    payments_df.pivot_table(
-        index=["المشرف", "Collected By"],
-        columns="نوع السداد",
-        values="Payment",
-        aggfunc="sum",
-        fill_value=0,
-    )
-    .reset_index()
-    .rename(columns={"Collected By": "المحصل"})
-)
-
-for col in ["كاش", "ناجز", "جدولة"]:
-    if col not in collectors_summary.columns:
-        collectors_summary[col] = 0
-
-collectors_summary["الإجمالي"] = (
-    collectors_summary["كاش"] + collectors_summary["ناجز"] + collectors_summary["جدولة"]
-)
-collectors_summary = collectors_summary.sort_values("الإجمالي", ascending=False)
-
-# ============ 6) تجميع المشرفين ============
-supervisors_summary = (
-    collectors_summary.groupby("المشرف")[["كاش", "ناجز", "جدولة", "الإجمالي"]]
-    .sum()
-    .reset_index()
-    .sort_values("الإجمالي", ascending=False)
-)
-
-# نسبة النمو (اختياري)
-growth_supervisors = [FAWAZ_TEAM, TARIQ_TEAM]
-st.markdown("### 📈 نسبة النمو (فواز وطارق فقط)")
-prev_values = {}
-with st.expander("أدخل إجمالي الفترة السابقة (اختياري)"):
-    for sup in growth_supervisors:
-        prev_values[sup] = st.number_input(
-            f"إجمالي الفترة السابقة - {sup}",
-            min_value=0.0,
-            value=0.0,
-            step=1000.0,
-            key=f"prev_{sup}"
+    st.markdown("### 1) رفع الملفات")
+    col1, col2 = st.columns(2)
+    with col1:
+        portfolio_file = st.file_uploader(
+            "📁 ارفع ملف المحفظة (فيه Sales Team و Salesperson)",
+            type=["xlsx"],
+            key="portfolio_daily"
+        )
+    with col2:
+        payments_file = st.file_uploader(
+            "📁 ارفع ملف السدادات",
+            type=["xlsx"],
+            key="payments_daily"
         )
 
-def calc_growth(row):
-    if row["المشرف"] in growth_supervisors and prev_values.get(row["المشرف"], 0) > 0:
-        prev = prev_values[row["المشرف"]]
-        return round(((row["الإجمالي"] - prev) / prev) * 100, 1)
-    return "-"
+    if not portfolio_file or not payments_file:
+        st.info("من فضلك ارفع ملف المحفظة وملف السدادات عشان تكمل.")
+        st.stop()
 
-supervisors_summary["نسبة النمو %"] = supervisors_summary.apply(calc_growth, axis=1)
+    # ============ تحميل البيانات ============
+    @st.cache_data(show_spinner="جاري قراءة الملفات...")
+    def load_data(portfolio_file, payments_file):
+        portfolio = pd.read_excel(portfolio_file, sheet_name="Sheet1")
+        portfolio = portfolio.dropna(subset=["Salesperson", "Sales Team"])
 
-# ============ 7) عرض سريع ============
-st.markdown("### 👤 ملخص المشرفين")
-st.dataframe(supervisors_summary, use_container_width=True, hide_index=True)
+        payments = pd.read_excel(payments_file, sheet_name="Sheet1")
+        payments = payments.dropna(subset=["Collected By"])
+        payments["Date of Receipt"] = pd.to_datetime(payments["Date of Receipt"], errors="coerce")
+        payments = payments[~payments["Name"].astype(str).str.startswith("SNB (")]
+        return portfolio, payments
 
-st.markdown("### 🧑‍💼 تفصيل المحصلين")
-st.dataframe(collectors_summary, use_container_width=True, hide_index=True)
+    portfolio_df, payments_df = load_data(portfolio_file, payments_file)
 
-# KPIs
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("إجمالي الكاش", f"{collectors_summary['كاش'].sum():,.0f}")
-k2.metric("إجمالي ناجز", f"{collectors_summary['ناجز'].sum():,.0f}")
-k3.metric("إجمالي الجدولة", f"{collectors_summary['جدولة'].sum():,.0f}")
-k4.metric("الإجمالي الكلي", f"{collectors_summary['الإجمالي'].sum():,.0f}")
+    st.success(f"تم تحميل البيانات — عدد السدادات: {len(payments_df):,}")
 
-# ============ 8) تحميل الإكسيل المحدث ============
-output = io.BytesIO()
-with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    collectors_summary.to_excel(writer, sheet_name="تفصيل المحصلين", index=False)
-    supervisors_summary.to_excel(writer, sheet_name="ملخص المشرفين", index=False)
+    # ============ خريطة المحصل → المشرف ============
+    collector_supervisor_map = (
+        portfolio_df.groupby("Salesperson")["Sales Team"]
+        .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[0])
+        .to_dict()
+    )
 
-st.download_button(
-    label="⬇️ تحميل التقرير اليومي للسدادات (محدث)",
-    data=output.getvalue(),
-    file_name=f"التقرير_اليومي_للسدادات_{datetime.today().date()}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    type="primary"
-)
+    FAWAZ_TEAM = "SNB II Fawaz"
+    TARIQ_TEAM = "SNB II Alsarhan II Tariq"
+    CUTOFF_DATE = pd.Timestamp("2026-09-12")
 
+    def get_supervisor(collector, payment_date):
+        real_supervisor = collector_supervisor_map.get(collector, "غير معروف بالمحفظة")
+        if "المدينة" in str(collector):
+            if pd.notna(payment_date) and payment_date <= CUTOFF_DATE:
+                return FAWAZ_TEAM
+            return real_supervisor
+        return real_supervisor
+
+    payments_df["المشرف"] = payments_df.apply(
+        lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
+    )
+
+    # ============ تصنيف نوع السداد ============
+    def classify_payment(row):
+        method = str(row.get("Collection Method", "") or "")
+        ctype = str(row.get("Collection Type", "") or "")
+        if "سداد المحكمة" in method or "سداد من منصة ناجز" in ctype:
+            return "ناجز"
+        if "جدولة" in method or "جدوله" in method:
+            return "جدولة"
+        return "كاش"
+
+    payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
+
+    # ============ تجميع المحصلين ============
+    collectors_summary = (
+        payments_df.pivot_table(
+            index=["المشرف", "Collected By"],
+            columns="نوع السداد",
+            values="Payment",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        .reset_index()
+        .rename(columns={"Collected By": "المحصل"})
+    )
+
+    for col in ["كاش", "ناجز", "جدولة"]:
+        if col not in collectors_summary.columns:
+            collectors_summary[col] = 0
+
+    collectors_summary["الإجمالي"] = (
+        collectors_summary["كاش"] + collectors_summary["ناجز"] + collectors_summary["جدولة"]
+    )
+    collectors_summary = collectors_summary.sort_values("الإجمالي", ascending=False)
+
+    # ============ تجميع المشرفين ============
+    supervisors_summary = (
+        collectors_summary.groupby("المشرف")[["كاش", "ناجز", "جدولة", "الإجمالي"]]
+        .sum()
+        .reset_index()
+        .sort_values("الإجمالي", ascending=False)
+    )
+
+    # ============ نسبة النمو (اختياري) ============
+    st.markdown("### 2) نسبة النمو (فواز وطارق فقط)")
+    growth_supervisors = [FAWAZ_TEAM, TARIQ_TEAM]
+    prev_values = {}
+
+    with st.expander("أدخل إجمالي الفترة السابقة (اختياري)"):
+        for sup in growth_supervisors:
+            prev_values[sup] = st.number_input(
+                f"إجمالي الفترة السابقة - {sup}",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                key=f"prev_{sup}"
+            )
+
+    def calc_growth(row):
+        if row["المشرف"] in growth_supervisors and prev_values.get(row["المشرف"], 0) > 0:
+            prev = prev_values[row["المشرف"]]
+            return round(((row["الإجمالي"] - prev) / prev) * 100, 1)
+        return "-"
+
+    supervisors_summary["نسبة النمو %"] = supervisors_summary.apply(calc_growth, axis=1)
+
+    # ============ عرض النتائج ============
+    st.markdown("### 3) النتائج")
+
+    st.markdown("#### 👤 ملخص المشرفين")
+    st.dataframe(supervisors_summary, use_container_width=True, hide_index=True)
+
+    st.markdown("#### 🧑‍💼 تفصيل المحصلين")
+    st.dataframe(collectors_summary, use_container_width=True, hide_index=True)
+
+    # KPIs
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("إجمالي الكاش", f"{collectors_summary['كاش'].sum():,.0f}")
+    k2.metric("إجمالي ناجز", f"{collectors_summary['ناجز'].sum():,.0f}")
+    k3.metric("إجمالي الجدولة", f"{collectors_summary['جدولة'].sum():,.0f}")
+    k4.metric("الإجمالي الكلي", f"{collectors_summary['الإجمالي'].sum():,.0f}")
+
+    # ============ تحميل الإكسيل ============
+    st.markdown("### 4) تحميل التقرير")
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        collectors_summary.to_excel(writer, sheet_name="تفصيل المحصلين", index=False)
+        supervisors_summary.to_excel(writer, sheet_name="ملخص المشرفين", index=False)
+
+    st.download_button(
+        label="⬇️ تحميل التقرير اليومي للسدادات (محدث)",
+        data=output.getvalue(),
+        file_name=f"التقرير_اليومي_للسدادات_{datetime.today().date()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True
+    )
 
 
 elif page == "التدوير":
