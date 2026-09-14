@@ -737,7 +737,7 @@ pages = [
     ("الاهمال", "⚠️"),
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
-   
+   ("التقرير اليومي للسدادات", "⚡"),
     ("التدوير", "🔄") 
     
 ]
@@ -3671,8 +3671,214 @@ elif page == "التوزيع":
                                         file_name="portfolio_equalized.xlsx")
 
 
-elif page == "الاوتودايلر":
-    st.subheader("📞 الاوتودايلر")
+# -*- coding: utf-8 -*-
+"""
+كود التعديل الخاص بصفحة "التقرير اليومي للسدادات"
+انسخ هذا البلوك بالكامل مكان الـ elif القديم في تطبيق Streamlit عندك.
+
+المتطلبات في أعلى ملفك (تأكد إنها موجودة مرة واحدة بس في أول السكريبت):
+    import streamlit as st
+    import pandas as pd
+    import io
+
+المنطق المطبق (حسب طلبك بالظبط):
+    1) من ملف المحفظة: عمود "Sales Team" = المشرف, عمود "Salesperson" = المحصل.
+       -> نبني منها خريطة: كل محصل تحت أي مشرف.
+    2) من ملف السدادات: عمود "Collected By" = المحصل, "Payment" = المبلغ,
+       "Date of Receipt" = تاريخ السداد.
+    3) أي محصل اسمه (آخره) فيه كلمة "المدينة":
+           - لو تاريخ السداد <= 12-09-2026  -> يتحسب مع مشرف "SNB II Fawaz"
+           - لو تاريخ السداد >= 13-09-2026  -> يتحسب مع مشرفه الحقيقي (من المحفظة)
+       أي محصل تاني (مفيهوش "المدينة") -> دايمًا مع مشرفه الحقيقي من المحفظة، بغض النظر عن التاريخ.
+    4) تصنيف نوع السداد لكل صف:
+           - لو عمود "Collection Method" = "سداد المحكمة"
+             أو عمود "Collection Type" فيه "سداد من منصة ناجز"  -> يتحسب "ناجز"
+           - لو عمود "Collection Method" فيه كلمة "جدولة" أو "جدوله"  -> يتحسب "جدولة"
+           - غير كده  -> يتحسب "كاش"
+    5) نسبة النمو تتحسب فقط لمشرفَي "SNB II Fawaz" و "SNB II Alsarhan II Tariq" (فواز وطارق)،
+       باقي المشرفين تظهر لهم "-" في عمود نسبة النمو.
+    6) أعمدة جدول المحصلين وجدول المشرفين قابلة للاختيار يدويًا من قائمة منسدلة (multiselect).
+"""
+
+elif page == "التقرير اليومي للسدادات":
+    st.subheader("📞 التقرير اليومي للسدادات")
+
+    # ============ 1) رفع الملفات ============
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        portfolio_file = st.file_uploader(
+            "📁 ارفع ملف المحفظة (فيه Sales Team و Salesperson)",
+            type=["xlsx"],
+            key="portfolio_daily_payments",
+        )
+    with col_u2:
+        payments_file = st.file_uploader(
+            "📁 ارفع ملف السدادات",
+            type=["xlsx"],
+            key="payments_daily_payments",
+        )
+
+    if not portfolio_file or not payments_file:
+        st.info("من فضلك ارفع ملف المحفظة وملف السدادات عشان تكمل.")
+        st.stop()
+
+    # ============ 2) تحميل البيانات ============
+    @st.cache_data(show_spinner=False)
+    def _load_portfolio(file):
+        df = pd.read_excel(file, sheet_name="Sheet1")
+        df = df.dropna(subset=["Salesperson", "Sales Team"])
+        return df
+
+    @st.cache_data(show_spinner=False)
+    def _load_payments(file):
+        df = pd.read_excel(file, sheet_name="Sheet1")
+        df = df.dropna(subset=["Collected By"])
+        df["Date of Receipt"] = pd.to_datetime(df["Date of Receipt"], errors="coerce")
+        return df
+
+    portfolio_df = _load_portfolio(portfolio_file)
+    payments_df = _load_payments(payments_file)
+
+    # ============ 3) خريطة (محصل -> مشرفه الحقيقي من المحفظة) ============
+    collector_supervisor_map = (
+        portfolio_df.groupby("Salesperson")["Sales Team"]
+        .agg(lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[0])
+        .to_dict()
+    )
+
+    FAWAZ_TEAM = "SNB II Fawaz"
+    TARIQ_TEAM = "SNB II Alsarhan II Tariq"
+    CUTOFF_DATE = pd.Timestamp("2026-09-12")
+
+    def get_supervisor(collector, payment_date):
+        real_supervisor = collector_supervisor_map.get(collector, "غير معروف بالمحفظة")
+        if "المدينة" in str(collector):
+            if pd.notna(payment_date) and payment_date <= CUTOFF_DATE:
+                return FAWAZ_TEAM
+            return real_supervisor
+        return real_supervisor
+
+    payments_df["المشرف"] = payments_df.apply(
+        lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
+    )
+
+    # ============ 4) تصنيف نوع السداد (كاش / ناجز / جدولة) ============
+    def classify_payment(row):
+        method = str(row.get("Collection Method", "") or "")
+        ctype = str(row.get("Collection Type", "") or "")
+        if "سداد المحكمة" in method or "سداد من منصة ناجز" in ctype:
+            return "ناجز"
+        if "جدولة" in method or "جدوله" in method:
+            return "جدولة"
+        return "كاش"
+
+    payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
+
+    # ============ 5) تجميع بيانات المحصلين ============
+    collectors_summary = (
+        payments_df.pivot_table(
+            index=["المشرف", "Collected By"],
+            columns="نوع السداد",
+            values="Payment",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        .reset_index()
+        .rename(columns={"Collected By": "المحصل"})
+    )
+    for col in ["كاش", "ناجز", "جدولة"]:
+        if col not in collectors_summary.columns:
+            collectors_summary[col] = 0
+    collectors_summary["الإجمالي"] = (
+        collectors_summary["كاش"] + collectors_summary["ناجز"] + collectors_summary["جدولة"]
+    )
+    collectors_summary = collectors_summary.sort_values("الإجمالي", ascending=False)
+
+    # ============ 6) تجميع بيانات المشرفين ============
+    supervisors_summary = (
+        collectors_summary.groupby("المشرف")[["كاش", "ناجز", "جدولة", "الإجمالي"]]
+        .sum()
+        .reset_index()
+        .sort_values("الإجمالي", ascending=False)
+    )
+
+    # ============ 7) نسبة النمو (فواز وطارق بس) ============
+    growth_supervisors = [FAWAZ_TEAM, TARIQ_TEAM]
+
+    st.markdown("### 📈 نسبة النمو (تُحسب فقط لمشرفَي فواز وطارق)")
+    prev_values = {}
+    with st.expander("أدخل إجمالي المحصل في الفترة السابقة (للمقارنة)"):
+        for sup in growth_supervisors:
+            prev_values[sup] = st.number_input(
+                f"إجمالي الفترة السابقة - {sup}",
+                min_value=0.0,
+                value=0.0,
+                step=500.0,
+                key=f"prev_total_{sup}",
+            )
+
+    def calc_growth(row):
+        sup = row["المشرف"]
+        if sup in growth_supervisors and prev_values.get(sup, 0):
+            prev = prev_values[sup]
+            return round(((row["الإجمالي"] - prev) / prev) * 100, 1)
+        return None
+
+    supervisors_summary["نسبة النمو %"] = supervisors_summary.apply(calc_growth, axis=1)
+    supervisors_summary["نسبة النمو %"] = supervisors_summary["نسبة النمو %"].apply(
+        lambda v: "-" if pd.isna(v) else v
+    )
+
+    # ============ 8) عرض جدول المشرفين مع اختيار الأعمدة ============
+    st.markdown("### 👤 ملخص المشرفين")
+    supervisor_all_cols = list(supervisors_summary.columns)
+    supervisor_selected_cols = st.multiselect(
+        "اختر الأعمدة اللي تظهر في جدول المشرفين",
+        options=supervisor_all_cols,
+        default=supervisor_all_cols,
+        key="supervisor_cols_select",
+    )
+    if supervisor_selected_cols:
+        st.dataframe(
+            supervisors_summary[supervisor_selected_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # ============ 9) عرض جدول المحصلين مع اختيار الأعمدة ============
+    st.markdown("### 🧑‍💼 ملخص المحصلين")
+    collector_all_cols = list(collectors_summary.columns)
+    collector_selected_cols = st.multiselect(
+        "اختر الأعمدة اللي تظهر في جدول المحصلين",
+        options=collector_all_cols,
+        default=collector_all_cols,
+        key="collector_cols_select",
+    )
+    if collector_selected_cols:
+        st.dataframe(
+            collectors_summary[collector_selected_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # ============ 10) بطاقات سريعة (KPIs) ============
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("إجمالي الكاش", f"{collectors_summary['كاش'].sum():,.0f} ريال")
+    k2.metric("إجمالي ناجز", f"{collectors_summary['ناجز'].sum():,.0f} ريال")
+    k3.metric("إجمالي الجدولة", f"{collectors_summary['جدولة'].sum():,.0f} ريال")
+    k4.metric("الإجمالي الكلي", f"{collectors_summary['الإجمالي'].sum():,.0f} ريال")
+
+    # ============ 11) تحميل التقرير Excel ============
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        collectors_summary.to_excel(writer, sheet_name="تفصيل المحصلين", index=False)
+        supervisors_summary.to_excel(writer, sheet_name="ملخص المشرفين", index=False)
+    st.download_button(
+        "⬇️ تحميل التقرير Excel",
+        data=output.getvalue(),
+        file_name=f"التقرير_اليومي_للسدادات_{pd.Timestamp.today().date()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 elif page == "التدوير":
 
