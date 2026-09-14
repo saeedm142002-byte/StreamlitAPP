@@ -3807,7 +3807,7 @@ elif page == "التقرير اليومي للسدادات":
         .rename(columns={"Payment": "المحصل"})
     )
 
-    # ========== الإجمالي الموحد (مهم جداً) ==========
+    # ========== الإجمالي الموحد ==========
     TOTAL_SEP = float(collectors_summary["الإجمالي"].sum())
     TOTAL_CASH = float(collectors_summary["كاش"].sum())
     TOTAL_NAJIZ = float(collectors_summary["ناجز"].sum())
@@ -3815,7 +3815,7 @@ elif page == "التقرير اليومي للسدادات":
 
     st.info(f"**إجمالي سبتمبر الموحد: {TOTAL_SEP:,.2f} ريال**")
 
-    # ============ نسبة النمو (اختياري) ============
+    # ============ نسبة النمو ============
     st.markdown("### 2) نسبة النمو (فواز وطارق فقط)")
     growth_supervisors = [FAWAZ_TEAM, TARIQ_TEAM]
     prev_values = {}
@@ -3865,7 +3865,7 @@ elif page == "التقرير اليومي للسدادات":
 
     collector_data = {}
     for _, row in collectors_summary.iterrows():
-        name = row["المحصل"]
+        name = str(row["المحصل"]).strip()
         collector_data[name] = {
             "إجمالي": float(row["الإجمالي"]),
             "ناجز": float(row["ناجز"]),
@@ -3874,7 +3874,7 @@ elif page == "التقرير اليومي للسدادات":
         }
 
     product_data = {
-        row["المنتج"]: float(row["المحصل"])
+        str(row["المنتج"]).strip(): float(row["المحصل"])
         for _, row in product_summary.iterrows()
     }
 
@@ -3893,23 +3893,47 @@ elif page == "التقرير اليومي للسدادات":
         if "Collector" in wb.sheetnames:
             ws = wb["Collector"]
             updated = 0
-            for row in range(14, 70):
-                name = ws[f"C{row}"].value
-                if name and name in collector_data:
-                    data = collector_data[name]
+            sum_check = 0.0
+
+            for row in range(14, 80):
+                name_cell = ws[f"C{row}"].value
+                if not name_cell:
+                    continue
+
+                name = str(name_cell).strip()
+
+                # مطابقة مرنة (بتشيل المسافات الزائدة)
+                matched = None
+                for key in collector_data:
+                    if key.replace(" ", "") == name.replace(" ", "") or key in name or name in key:
+                        matched = key
+                        break
+
+                if matched:
+                    data = collector_data[matched]
                     ws[f"F{row}"] = data["إجمالي"]
                     ws[f"H{row}"] = data["ناجز"] if data["ناجز"] else None
                     ws[f"G{row}"] = data["جدولة"] if data["جدولة"] else None
+                    sum_check += data["إجمالي"]
                     updated += 1
-            updated_sheets.append(f"Collector ({updated} محصل)")
+
+            # إجبار صف الإجمالي في Collector يبقى = TOTAL_SEP
+            for row in range(40, 80):
+                val = ws[f"F{row}"].value
+                if val is not None and isinstance(val, (int, float)) and abs(val - sum_check) < 10:
+                    ws[f"F{row}"] = TOTAL_SEP
+                    break
+
+            updated_sheets.append(f"Collector ({updated} محصل) | مجموع = {sum_check:,.2f}")
 
         # ====================== 2) ورقة SNB ======================
         if "SNB" in wb.sheetnames:
             ws = wb["SNB"]
-            for row in range(13, 25):
+            for row in range(13, 30):
                 sup_name = ws[f"C{row}"].value
                 if not sup_name:
                     continue
+
                 for code_name, report_names in supervisor_name_map.items():
                     if any(rn in str(sup_name) for rn in report_names):
                         match = supervisors_summary[supervisors_summary["المشرف"] == code_name]
@@ -3917,11 +3941,9 @@ elif page == "التقرير اليومي للسدادات":
                             ws[f"E{row}"] = float(match["الإجمالي"].values[0])
                             break
 
-            # تحديث الإجمالي العام في SNB
-            for row in range(15, 25):
-                if ws[f"C{row}"].value and "إجمالي" in str(ws[f"C{row}"].value):
+                # الإجمالي العام
+                if "إجمالي" in str(sup_name):
                     ws[f"E{row}"] = TOTAL_SEP
-                    break
 
             updated_sheets.append("SNB")
 
@@ -3929,42 +3951,46 @@ elif page == "التقرير اليومي للسدادات":
         if "متابعه تحقيق التارجت" in wb.sheetnames:
             ws = wb["متابعه تحقيق التارجت"]
 
-            # تحديث حسب المنتج
-            product_cells = {
-                "PF": "D13",
-                "AL": "D14",
-                "CC": "D15",
-            }
+            product_cells = {"PF": "D13", "AL": "D14", "CC": "D15"}
             for prod, cell in product_cells.items():
                 if prod in product_data:
                     ws[cell] = product_data[prod]
 
-            # الجدولة
             ws["D16"] = TOTAL_JADWALA
-
-            # الإجمالي العام
             ws["D17"] = TOTAL_SEP
 
             updated_sheets.append("متابعه تحقيق التارجت")
 
-        # ====================== 4) ورقة ALL (ejaada) أو Sheet3 ======================
-        for sheet_name in ["ALL (ejaada)", "Sheet3 (3)", "Sheet3"]:
+        # ====================== 4) ورقة growth rate ======================
+        for sheet_name in ["growth rate", "growth rate (2)"]:
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-                # نحاول نحدث أي خلية فيها الإجمالي القديم
-                for row in ws.iter_rows(min_row=1, max_row=40, max_col=15):
-                    for cell in row:
-                        if cell.value is not None and isinstance(cell.value, (int, float)):
-                            # لو لقيت رقم قريب من الإجمالي القديم نستبدله
-                            if abs(cell.value - 497276) < 1000 or abs(cell.value - 1080741) < 1000:
-                                cell.value = TOTAL_SEP
-                updated_sheets.append(sheet_name)
-                break
 
-        st.success("✅ تم التحديث في الشيتات: " + " | ".join(updated_sheets))
+                # ندور على صف SEP أو سبتمبر ونحدثه
+                for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
+                    for cell in row:
+                        if cell.value is None:
+                            continue
+                        val_str = str(cell.value).upper()
+                        if "SEP" in val_str or "سبتمبر" in val_str or "SEPTEMBER" in val_str:
+                            # العمود اللي جنبه غالبًا فيه الإجمالي
+                            next_cell = ws.cell(row=cell.row, column=cell.column + 4)
+                            if next_cell.value is not None:
+                                next_cell.value = TOTAL_SEP
+
+                # تحديث أي رقم كبير قديم (زي 497276 أو 1080741)
+                for row in ws.iter_rows(min_row=1, max_row=30, max_col=15):
+                    for cell in row:
+                        if isinstance(cell.value, (int, float)):
+                            if abs(cell.value - 497276) < 5000 or abs(cell.value - 1080741) < 5000:
+                                cell.value = TOTAL_SEP
+
+                updated_sheets.append(sheet_name)
+
+        st.success("✅ تم التحديث في: " + " | ".join(updated_sheets))
         st.success(f"**الإجمالي الموحد في كل الشيتات: {TOTAL_SEP:,.2f} ريال**")
 
-        # حفظ الملف
+        # حفظ
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
@@ -3982,9 +4008,12 @@ elif page == "التقرير اليومي للسدادات":
         st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
         st.exception(e)
 
-    except Exception as e:
-        st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
-        st.exception(e)
+
+
+
+
+
+
 elif page == "التدوير":
 
     import pandas as pd
