@@ -3738,21 +3738,21 @@ elif page == "التقرير اليومي للسدادات":
         lambda r: get_supervisor(r["Collected By"], r["Date of Receipt"]), axis=1
     )
 
-    # ============ تصنيف نوع السداد (حسب طلبك بالظبط) ============
+    # ============ تصنيف نوع السداد ============
     def classify_payment(row):
         method = str(row.get("Collection Method", "") or "")
         ctype = str(row.get("Collection Type", "") or "")
 
         # 1) الجدولة أولاً
-        text = (method + " " + ctype)
-        if "جدولة" in text or "جدوله" in text or "الجدولة" in text:
+        if "جدولة" in method or "جدوله" in method or "الجدولة" in method or \
+           "جدولة" in ctype or "جدوله" in ctype:
             return "جدولة"
 
-        # 2) ناجز = أي حاجة فيها "سداد المحكمة" أو كلمة "ناجز" في Collection Method
+        # 2) ناجز
         if "سداد المحكمة" in method or "ناجز" in method:
             return "ناجز"
 
-        # 3) الباقي كله كاش
+        # 3) الباقي كاش
         return "كاش"
 
     payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
@@ -3868,8 +3868,23 @@ elif page == "التقرير اليومي للسدادات":
     st.markdown("### 4) تحديث ملف تقرير الأداء وتحميله")
 
     from openpyxl import load_workbook
+    from openpyxl.cell.cell import MergedCell
     import io
     from datetime import datetime
+
+    def safe_write(ws, row, col, value):
+        """كتابة آمنة تتجنب الـ MergedCell"""
+        cell = ws.cell(row=row, column=col)
+        if isinstance(cell, MergedCell):
+            # ندور على الخلية الأساسية للـ merge
+            for merged_range in ws.merged_cells.ranges:
+                if cell.coordinate in merged_range:
+                    # الخلية العلوية اليسرى هي القابلة للكتابة
+                    top_left = str(merged_range).split(":")[0]
+                    ws[top_left] = value
+                    return
+        else:
+            cell.value = value
 
     collector_data = {}
     for _, row in collectors_summary.iterrows():
@@ -3916,11 +3931,9 @@ elif page == "التقرير اليومي للسدادات":
 
                 if matched:
                     data = collector_data[matched]
-                    ws[f"F{row}"] = data["إجمالي"]          # المحصل
-                    ws[f"H{row}"] = data["ناجز"] if data["ناجز"] else None
-                    ws[f"G{row}"] = data["جدولة"] if data["جدولة"] else None
-                    # عمود الكاش بيتحدث بالـ formula عادة، بس لو عايز ن강제:
-                    # ws[f"I{row}"] = data["كاش"]
+                    safe_write(ws, row, 6, data["إجمالي"])      # F = المحصل
+                    safe_write(ws, row, 8, data["ناجز"] if data["ناجز"] else None)  # H
+                    safe_write(ws, row, 7, data["جدولة"] if data["جدولة"] else None) # G
                     updated += 1
 
             updated_sheets.append(f"Collector ({updated} محصل)")
@@ -3937,40 +3950,41 @@ elif page == "التقرير اليومي للسدادات":
                     if any(rn in str(sup_name) for rn in report_names):
                         match = supervisors_summary[supervisors_summary["المشرف"] == code_name]
                         if not match.empty:
-                            ws[f"E{row}"] = float(match["الإجمالي"].values[0])
+                            safe_write(ws, row, 5, float(match["الإجمالي"].values[0]))  # E
                             break
 
                 if "إجمالي" in str(sup_name):
-                    ws[f"E{row}"] = TOTAL_SEP
+                    safe_write(ws, row, 5, TOTAL_SEP)
 
             updated_sheets.append("SNB")
 
         # 3) متابعه تحقيق التارجت
         if "متابعه تحقيق التارجت" in wb.sheetnames:
             ws = wb["متابعه تحقيق التارجت"]
-            product_cells = {"PF": "D13", "AL": "D14", "CC": "D15"}
-            for prod, cell in product_cells.items():
+            product_cells = {"PF": (13, 4), "AL": (14, 4), "CC": (15, 4)}  # row, col
+            for prod, (r, c) in product_cells.items():
                 if prod in product_data:
-                    ws[cell] = product_data[prod]
+                    safe_write(ws, r, c, product_data[prod])
 
-            ws["D16"] = TOTAL_JADWALA
-            ws["D17"] = TOTAL_SEP
+            safe_write(ws, 16, 4, TOTAL_JADWALA)
+            safe_write(ws, 17, 4, TOTAL_SEP)
             updated_sheets.append("متابعه تحقيق التارجت")
 
-        # 4) growth rate
+        # 4) growth rate (مع حماية من MergedCell)
         for sheet_name in ["growth rate", "growth rate (2)"]:
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
 
-                # نحدث صف SEP
-                for row in ws.iter_rows(min_row=1, max_row=25, max_col=10):
-                    for cell in row:
+                for row_idx in range(1, 30):
+                    for col_idx in range(1, 10):
+                        cell = ws.cell(row=row_idx, column=col_idx)
                         if cell.value and ("SEP" in str(cell.value).upper() or "سبتمبر" in str(cell.value)):
-                            # نفترض الترتيب: الشهر | الكاش | ناجز | الجدولة | الإجمالي
-                            ws.cell(row=cell.row, column=2).value = TOTAL_CASH
-                            ws.cell(row=cell.row, column=3).value = TOTAL_NAJIZ
-                            ws.cell(row=cell.row, column=4).value = TOTAL_JADWALA if TOTAL_JADWALA > 0 else "-"
-                            ws.cell(row=cell.row, column=5).value = TOTAL_SEP
+                            # نكتب في الأعمدة اللي جنب كلمة SEP
+                            safe_write(ws, row_idx, 2, TOTAL_CASH)      # الكاش
+                            safe_write(ws, row_idx, 3, TOTAL_NAJIZ)     # ناجز
+                            safe_write(ws, row_idx, 4, TOTAL_JADWALA if TOTAL_JADWALA > 0 else "-")
+                            safe_write(ws, row_idx, 5, TOTAL_SEP)      # الإجمالي
+                            break
 
                 updated_sheets.append(sheet_name)
 
@@ -3993,7 +4007,6 @@ elif page == "التقرير اليومي للسدادات":
     except Exception as e:
         st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
         st.exception(e)
-
 
 
 
