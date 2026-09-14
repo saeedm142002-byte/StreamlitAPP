@@ -3671,27 +3671,33 @@ elif page == "التوزيع":
                                         file_name="portfolio_equalized.xlsx")
 
 
-
 elif page == "التقرير اليومي للسدادات":
     st.subheader("📞 التقرير اليومي للسدادات")
 
     st.markdown("### 1) رفع الملفات")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
+
     with col1:
         portfolio_file = st.file_uploader(
-            "📁 ارفع ملف المحفظة (فيه Sales Team و Salesperson)",
+            "📁 ملف المحفظة",
             type=["xlsx"],
             key="portfolio_daily"
         )
     with col2:
         payments_file = st.file_uploader(
-            "📁 ارفع ملف السدادات",
+            "📁 ملف السدادات",
             type=["xlsx"],
             key="payments_daily"
         )
+    with col3:
+        report_file = st.file_uploader(
+            "📁 ملف تقرير الأداء اليومي (اللي هيتحدث)",
+            type=["xlsx"],
+            key="report_daily"
+        )
 
-    if not portfolio_file or not payments_file:
-        st.info("من فضلك ارفع ملف المحفظة وملف السدادات عشان تكمل.")
+    if not portfolio_file or not payments_file or not report_file:
+        st.info("من فضلك ارفع الملفات الثلاثة عشان تكمل.")
         st.stop()
 
     # ============ تحميل البيانات ============
@@ -3707,7 +3713,6 @@ elif page == "التقرير اليومي للسدادات":
         return portfolio, payments
 
     portfolio_df, payments_df = load_data(portfolio_file, payments_file)
-
     st.success(f"تم تحميل البيانات — عدد السدادات: {len(payments_df):,}")
 
     # ============ خريطة المحصل → المشرف ============
@@ -3745,6 +3750,26 @@ elif page == "التقرير اليومي للسدادات":
 
     payments_df["نوع السداد"] = payments_df.apply(classify_payment, axis=1)
 
+    # ============ تصنيف المنتج ============
+    def classify_product(row):
+        # نجرب أكتر من اسم عمود محتمل
+        product = (
+            str(row.get("Claim/نوع المتنج-التمويل", "") or "") or
+            str(row.get("نوع المتنج-التمويل", "") or "") or
+            str(row.get("نوع المنتج", "") or "") or
+            str(row.get("Product", "") or "")
+        ).upper()
+
+        if "PF" in product:
+            return "PF"
+        if "AL" in product:
+            return "AL"
+        if "CC" in product:
+            return "CC"
+        return "أخرى"
+
+    payments_df["المنتج"] = payments_df.apply(classify_product, axis=1)
+
     # ============ تجميع المحصلين ============
     collectors_summary = (
         payments_df.pivot_table(
@@ -3773,6 +3798,14 @@ elif page == "التقرير اليومي للسدادات":
         .sum()
         .reset_index()
         .sort_values("الإجمالي", ascending=False)
+    )
+
+    # ============ تجميع المنتجات ============
+    product_summary = (
+        payments_df.groupby("المنتج")["Payment"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Payment": "المحصل"})
     )
 
     # ============ نسبة النمو (اختياري) ============
@@ -3807,30 +3840,131 @@ elif page == "التقرير اليومي للسدادات":
     st.markdown("#### 🧑‍💼 تفصيل المحصلين")
     st.dataframe(collectors_summary, use_container_width=True, hide_index=True)
 
-    # KPIs
+    st.markdown("#### 📦 ملخص المنتجات")
+    st.dataframe(product_summary, use_container_width=True, hide_index=True)
+
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("إجمالي الكاش", f"{collectors_summary['كاش'].sum():,.0f}")
     k2.metric("إجمالي ناجز", f"{collectors_summary['ناجز'].sum():,.0f}")
     k3.metric("إجمالي الجدولة", f"{collectors_summary['جدولة'].sum():,.0f}")
     k4.metric("الإجمالي الكلي", f"{collectors_summary['الإجمالي'].sum():,.0f}")
 
-    # ============ تحميل الإكسيل ============
-    st.markdown("### 4) تحميل التقرير")
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        collectors_summary.to_excel(writer, sheet_name="تفصيل المحصلين", index=False)
-        supervisors_summary.to_excel(writer, sheet_name="ملخص المشرفين", index=False)
+    # ============ تحديث ملف تقرير الأداء ============
+    st.markdown("### 4) تحديث ملف تقرير الأداء وتحميله")
 
-    st.download_button(
-        label="⬇️ تحميل التقرير اليومي للسدادات (محدث)",
-        data=output.getvalue(),
-        file_name=f"التقرير_اليومي_للسدادات_{datetime.today().date()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True
-    )
+    from openpyxl import load_workbook
+    import io
+    from datetime import datetime
 
+    # بيانات المحصلين
+    collector_data = {}
+    for _, row in collectors_summary.iterrows():
+        name = row["المحصل"]
+        collector_data[name] = {
+            "إجمالي": float(row["الإجمالي"]),
+            "ناجز": float(row["ناجز"]),
+            "جدولة": float(row["جدولة"]),
+            "كاش": float(row["كاش"])
+        }
 
+    # بيانات المنتجات
+    product_data = {
+        row["المنتج"]: float(row["المحصل"])
+        for _, row in product_summary.iterrows()
+    }
+
+    # خريطة أسماء المشرفين
+    supervisor_name_map = {
+        "SNB II Fawaz": ["فواز", "ناصر الفهد"],
+        "SNB II Yousif": ["يوسف محمد"],
+        "SNB II Abdalla": ["عبدالله"],
+        "SNB II Alsarhan II Tariq": ["طارق الشريف"]
+    }
+
+    try:
+        wb = load_workbook(report_file)
+        updated_sheets = []
+
+        # ====================== 1) ورقة Collector ======================
+        if "Collector" in wb.sheetnames:
+            ws = wb["Collector"]
+            updated = 0
+            for row in range(14, 70):
+                name = ws[f"C{row}"].value
+                if name and name in collector_data:
+                    data = collector_data[name]
+                    ws[f"F{row}"] = data["إجمالي"]
+                    ws[f"H{row}"] = data["ناجز"] if data["ناجز"] else None
+                    ws[f"G{row}"] = data["جدولة"] if data["جدولة"] else None
+                    updated += 1
+            updated_sheets.append(f"Collector ({updated} محصل)")
+
+        # ====================== 2) ورقة SNB ======================
+        if "SNB" in wb.sheetnames:
+            ws = wb["SNB"]
+            for row in range(13, 25):
+                sup_name = ws[f"C{row}"].value
+                if not sup_name:
+                    continue
+                for code_name, report_names in supervisor_name_map.items():
+                    if any(rn in str(sup_name) for rn in report_names):
+                        match = supervisors_summary[supervisors_summary["المشرف"] == code_name]
+                        if not match.empty:
+                            ws[f"E{row}"] = float(match["الإجمالي"].values[0])
+                            break
+            updated_sheets.append("SNB")
+
+        # ====================== 3) ورقة متابعه تحقيق التارجت ======================
+        if "متابعه تحقيق التارجت" in wb.sheetnames:
+            ws = wb["متابعه تحقيق التارجت"]
+
+            # تحديث المحصل حسب المنتج (D13 = PF, D14 = AL, D15 = CC, D16 = جدولة)
+            # بناءً على الهيكل الشائع في الملفات السابقة
+            product_cells = {
+                "PF": "D13",
+                "AL": "D14",
+                "CC": "D15",
+            }
+
+            for prod, cell in product_cells.items():
+                if prod in product_data:
+                    ws[cell] = product_data[prod]
+
+            # لو في جدولة
+            if "جدولة" in collectors_summary.columns:
+                total_jadwala = float(collectors_summary["جدولة"].sum())
+                ws["D16"] = total_jadwala
+
+            updated_sheets.append("متابعه تحقيق التارجت")
+
+        # ====================== 4) ورقة ALL (ejaada) أو Sheet3 ======================
+        for sheet_name in ["ALL (ejaada)", "Sheet3 (3)", "Sheet3"]:
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                # محاولة تحديث الإجماليات لو موجودة
+                # (حسب الهيكل المتغير بنحدث اللي نلاقيه)
+                updated_sheets.append(sheet_name)
+                break
+
+        st.success("✅ تم التحديث في الشيتات: " + " | ".join(updated_sheets))
+
+        # حفظ الملف
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        st.download_button(
+            label="⬇️ تحميل تقرير الأداء اليومي (محدث بالكامل)",
+            data=output.getvalue(),
+            file_name=f"تقرير_الاداء_اليومي_محدث_{datetime.today().date()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+
+    except Exception as e:
+        st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
+        st.exception(e)
 elif page == "التدوير":
 
     import pandas as pd
