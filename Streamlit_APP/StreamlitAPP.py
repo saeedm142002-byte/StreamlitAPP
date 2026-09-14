@@ -3752,7 +3752,6 @@ elif page == "التقرير اليومي للسدادات":
 
     # ============ تصنيف المنتج ============
     def classify_product(row):
-        # نجرب أكتر من اسم عمود محتمل
         product = (
             str(row.get("Claim/نوع المتنج-التمويل", "") or "") or
             str(row.get("نوع المتنج-التمويل", "") or "") or
@@ -3808,6 +3807,14 @@ elif page == "التقرير اليومي للسدادات":
         .rename(columns={"Payment": "المحصل"})
     )
 
+    # ========== الإجمالي الموحد (مهم جداً) ==========
+    TOTAL_SEP = float(collectors_summary["الإجمالي"].sum())
+    TOTAL_CASH = float(collectors_summary["كاش"].sum())
+    TOTAL_NAJIZ = float(collectors_summary["ناجز"].sum())
+    TOTAL_JADWALA = float(collectors_summary["جدولة"].sum())
+
+    st.info(f"**إجمالي سبتمبر الموحد: {TOTAL_SEP:,.2f} ريال**")
+
     # ============ نسبة النمو (اختياري) ============
     st.markdown("### 2) نسبة النمو (فواز وطارق فقط)")
     growth_supervisors = [FAWAZ_TEAM, TARIQ_TEAM]
@@ -3844,10 +3851,10 @@ elif page == "التقرير اليومي للسدادات":
     st.dataframe(product_summary, use_container_width=True, hide_index=True)
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("إجمالي الكاش", f"{collectors_summary['كاش'].sum():,.0f}")
-    k2.metric("إجمالي ناجز", f"{collectors_summary['ناجز'].sum():,.0f}")
-    k3.metric("إجمالي الجدولة", f"{collectors_summary['جدولة'].sum():,.0f}")
-    k4.metric("الإجمالي الكلي", f"{collectors_summary['الإجمالي'].sum():,.0f}")
+    k1.metric("إجمالي الكاش", f"{TOTAL_CASH:,.0f}")
+    k2.metric("إجمالي ناجز", f"{TOTAL_NAJIZ:,.0f}")
+    k3.metric("إجمالي الجدولة", f"{TOTAL_JADWALA:,.0f}")
+    k4.metric("الإجمالي الكلي", f"{TOTAL_SEP:,.0f}")
 
     # ============ تحديث ملف تقرير الأداء ============
     st.markdown("### 4) تحديث ملف تقرير الأداء وتحميله")
@@ -3856,7 +3863,6 @@ elif page == "التقرير اليومي للسدادات":
     import io
     from datetime import datetime
 
-    # بيانات المحصلين
     collector_data = {}
     for _, row in collectors_summary.iterrows():
         name = row["المحصل"]
@@ -3867,13 +3873,11 @@ elif page == "التقرير اليومي للسدادات":
             "كاش": float(row["كاش"])
         }
 
-    # بيانات المنتجات
     product_data = {
         row["المنتج"]: float(row["المحصل"])
         for _, row in product_summary.iterrows()
     }
 
-    # خريطة أسماء المشرفين
     supervisor_name_map = {
         "SNB II Fawaz": ["فواز", "ناصر الفهد"],
         "SNB II Yousif": ["يوسف محمد"],
@@ -3912,28 +3916,34 @@ elif page == "التقرير اليومي للسدادات":
                         if not match.empty:
                             ws[f"E{row}"] = float(match["الإجمالي"].values[0])
                             break
+
+            # تحديث الإجمالي العام في SNB
+            for row in range(15, 25):
+                if ws[f"C{row}"].value and "إجمالي" in str(ws[f"C{row}"].value):
+                    ws[f"E{row}"] = TOTAL_SEP
+                    break
+
             updated_sheets.append("SNB")
 
         # ====================== 3) ورقة متابعه تحقيق التارجت ======================
         if "متابعه تحقيق التارجت" in wb.sheetnames:
             ws = wb["متابعه تحقيق التارجت"]
 
-            # تحديث المحصل حسب المنتج (D13 = PF, D14 = AL, D15 = CC, D16 = جدولة)
-            # بناءً على الهيكل الشائع في الملفات السابقة
+            # تحديث حسب المنتج
             product_cells = {
                 "PF": "D13",
                 "AL": "D14",
                 "CC": "D15",
             }
-
             for prod, cell in product_cells.items():
                 if prod in product_data:
                     ws[cell] = product_data[prod]
 
-            # لو في جدولة
-            if "جدولة" in collectors_summary.columns:
-                total_jadwala = float(collectors_summary["جدولة"].sum())
-                ws["D16"] = total_jadwala
+            # الجدولة
+            ws["D16"] = TOTAL_JADWALA
+
+            # الإجمالي العام
+            ws["D17"] = TOTAL_SEP
 
             updated_sheets.append("متابعه تحقيق التارجت")
 
@@ -3941,12 +3951,18 @@ elif page == "التقرير اليومي للسدادات":
         for sheet_name in ["ALL (ejaada)", "Sheet3 (3)", "Sheet3"]:
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-                # محاولة تحديث الإجماليات لو موجودة
-                # (حسب الهيكل المتغير بنحدث اللي نلاقيه)
+                # نحاول نحدث أي خلية فيها الإجمالي القديم
+                for row in ws.iter_rows(min_row=1, max_row=40, max_col=15):
+                    for cell in row:
+                        if cell.value is not None and isinstance(cell.value, (int, float)):
+                            # لو لقيت رقم قريب من الإجمالي القديم نستبدله
+                            if abs(cell.value - 497276) < 1000 or abs(cell.value - 1080741) < 1000:
+                                cell.value = TOTAL_SEP
                 updated_sheets.append(sheet_name)
                 break
 
         st.success("✅ تم التحديث في الشيتات: " + " | ".join(updated_sheets))
+        st.success(f"**الإجمالي الموحد في كل الشيتات: {TOTAL_SEP:,.2f} ريال**")
 
         # حفظ الملف
         output = io.BytesIO()
@@ -3954,13 +3970,17 @@ elif page == "التقرير اليومي للسدادات":
         output.seek(0)
 
         st.download_button(
-            label="⬇️ تحميل تقرير الأداء اليومي (محدث بالكامل)",
+            label="⬇️ تحميل تقرير الأداء اليومي (محدث + إجمالي موحد)",
             data=output.getvalue(),
             file_name=f"تقرير_الاداء_اليومي_محدث_{datetime.today().date()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
             use_container_width=True
         )
+
+    except Exception as e:
+        st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
+        st.exception(e)
 
     except Exception as e:
         st.error(f"حصل خطأ أثناء تحديث الملف: {e}")
