@@ -30,15 +30,6 @@ from priority_path_engine import build_priority_path_ui, run_priority_balancing
 
 NONE_OPT = "— بدون —"
 
-"""
-حط السطور دي مرة واحدة بس فوق ملف StreamlitAPP.py، مع باقي الـ imports
-اللي في أول الملف (فوق أول "if page == ..." بتاعك) — مش جوه سلسلة الـ if/elif.
-"""
-
-from priority_path_engine import build_priority_path_ui, run_priority_balancing
-
-NONE_OPT = "— بدون —"
-
 
 def _col_or_none(label, cols, key):
     return st.selectbox(label, [NONE_OPT] + list(cols), key=key)
