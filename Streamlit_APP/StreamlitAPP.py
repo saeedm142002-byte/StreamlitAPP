@@ -3712,29 +3712,28 @@ elif page == "النشاط":
 
 
 elif page == "التوزيع":
-    st.subheader("👥 توزيع المحافظ")
+    st.subheader("👥 توزيع المحافظ (حسب المستهدفات)")
 
-    classification_mode = st.radio(
-        "تصنيف المحفظة", ["SNB", "NPL & Dpd60"], horizontal=True, key="classification_mode"
-    )
     distribution_type = st.radio(
-        "نوع التوزيع", ["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"], horizontal=True
+        "نوع التوزيع",
+        ["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"],
+        horizontal=True,
+        key="dist_type_v2",
     )
 
     # ================================================================
-    # Cache: قراءة ملفات الإكسيل
+    # Cache قراءة الملفات
     # ================================================================
     @st.cache_data(show_spinner="جاري قراءة الملف...")
     def _load_excel_bytes(file_bytes: bytes) -> pd.DataFrame:
         return pd.read_excel(io.BytesIO(file_bytes))
 
     # ================================================================
-    # اختيار الأعمدة الأساسية + أي أعمدة إضافية
+    # اختيار الأعمدة
     # ================================================================
-    def pick_core_and_extra_columns(df: pd.DataFrame, key_prefix: str) -> dict:
+    def pick_columns(df: pd.DataFrame, key_prefix: str) -> dict:
         cols = list(df.columns)
-
-        st.markdown("### 1) الأعمدة الأساسية (إجبارية)")
+        st.markdown("### اختيار الأعمدة")
         c1, c2 = st.columns(2)
         with c1:
             sp_col = st.selectbox("عمود اسم المحصل", cols, key=f"{key_prefix}_sp")
@@ -3742,493 +3741,531 @@ elif page == "التوزيع":
             acc_col = st.selectbox("عمود رقم الحساب", cols, key=f"{key_prefix}_acc")
         with c2:
             amt_col = st.selectbox("عمود مبلغ المديونية", cols, key=f"{key_prefix}_amt")
+            product_col = st.selectbox("عمود نوع المنتج", cols, key=f"{key_prefix}_product")
             supervisor_col = st.selectbox("عمود المشرف", cols, key=f"{key_prefix}_supervisor")
 
-        used = {sp_col, id_col, acc_col, amt_col, supervisor_col}
-        remaining_cols = [c for c in cols if c not in used]
-
-        st.markdown("### 2) أعمدة إضافية (اختياري) — للتوازن / التوزيع")
-        st.caption(
-            "اختار أي عمود زيادة عايز تساوي أو توزع على أساسه "
-            "(مثلاً: نوع المنتج، التصنيف، عمر الدين، حالة الحساب...)."
-        )
-        extra_cols = st.multiselect(
-            "الأعمدة الإضافية",
-            options=remaining_cols,
-            default=[],
-            key=f"{key_prefix}_extra",
-        )
-
-        extra_specs = []
-        if extra_cols:
-            st.markdown("#### حدد نوع كل عمود إضافي")
-            for col in extra_cols:
-                kind = st.radio(
-                    f"نوع العمود «{col}»",
-                    [
-                        "تجميع (Stratify) — يتوازن جوه كل قيمة لوحدها",
-                        "اتزان (Balance) — يتوزع عشان الأرقام تتقارب",
-                    ],
-                    key=f"{key_prefix}_kind_{col}",
-                    horizontal=True,
-                )
-                if "تجميع" in kind:
-                    extra_specs.append({"col": col, "kind": "stratify", "agg": None})
-                else:
-                    agg = st.selectbox(
-                        f"طريقة الاتزان لـ «{col}»",
-                        ["count", "sum", "nunique", "mean"],
-                        key=f"{key_prefix}_agg_{col}",
-                        help="count = عدد الصفوف | sum = مجموع القيم | nunique = عدد القيم المميزة | mean = المتوسط",
-                    )
-                    extra_specs.append({"col": col, "kind": "balance", "agg": agg})
+        has_class = st.checkbox("فيه عمود تصنيف (NPL / Dpd60)؟", key=f"{key_prefix}_has_class")
+        classification_col = None
+        if has_class:
+            classification_col = st.selectbox(
+                "عمود التصنيف", cols, key=f"{key_prefix}_class"
+            )
 
         return {
             "sp_col": sp_col,
             "id_col": id_col,
             "acc_col": acc_col,
             "amt_col": amt_col,
+            "product_col": product_col,
             "supervisor_col": supervisor_col,
-            "extra_specs": extra_specs,
+            "classification_col": classification_col,
         }
 
     # ================================================================
-    # بناء path + col_map + criteria محلي (من غير ما نلمس الـ global)
+    # قراءة وتنظيف شيت المستهدفات
     # ================================================================
-    def build_path_and_col_map(core: dict, extra_specs: list):
-        path = []
-        col_map = {
-            "عدد العملاء": core["id_col"],
-            "عدد الحسابات": core["acc_col"],
-            "مبلغ المديونية": core["amt_col"],
-        }
-        local_criteria = {
-            "عدد العملاء": {"kind": "balance", "agg": "nunique_id"},
-            "عدد الحسابات": {"kind": "balance", "agg": "count_acc"},
-            "مبلغ المديونية": {"kind": "balance", "agg": "sum_amount"},
-        }
-    
-        # التجميع (Stratify) الأول
-        for spec in extra_specs:
-            if spec["kind"] == "stratify":
-                path.append(spec["col"])
-                col_map[spec["col"]] = spec["col"]
-                local_criteria[spec["col"]] = {"kind": "stratify"}
-    
-        # ===== أولوية عنيفة للحسابات + العملاء =====
-        path.append("عدد الحسابات")   # أعلى أولوية
-        path.append("عدد العملاء")    # تاني أعلى
-        path.append("مبلغ المديونية") # بعد كده
-    
-        for spec in extra_specs:
-            if spec["kind"] == "balance":
-                path.append(spec["col"])
-                col_map[spec["col"]] = spec["col"]
-                local_criteria[spec["col"]] = {"kind": "balance", "agg": spec["agg"]}
-    
-        return path, col_map, local_criteria
+    def load_targets(targets_df: pd.DataFrame, has_classification: bool) -> pd.DataFrame:
+        """
+        يتوقع أعمدة:
+        المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية
+        """
+        required = ["المحصل", "نوع المنتج", "عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]
+        if has_classification:
+            required.append("التصنيف")
+
+        missing = [c for c in required if c not in targets_df.columns]
+        if missing:
+            raise ValueError(f"أعمدة ناقصة في شيت المستهدفات: {missing}")
+
+        t = targets_df.copy()
+        t["المحصل"] = t["المحصل"].astype(str).str.strip()
+        t["نوع المنتج"] = t["نوع المنتج"].astype(str).str.strip()
+        if has_classification:
+            t["التصنيف"] = t["التصنيف"].astype(str).str.strip()
+
+        for col in ["عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]:
+            t[col] = (
+                t[col].astype(str).str.replace(",", "", regex=False).str.strip()
+            )
+            t[col] = pd.to_numeric(t[col], errors="coerce").fillna(0)
+
+        t["عدد الحسابات"] = t["عدد الحسابات"].astype(int)
+        t["عدد العملاء"] = t["عدد العملاء"].astype(int)
+        return t
 
     # ================================================================
-    # نسخة محلية من resolve + run عشان ما نعتمدش على تعديل CRITERIA_DEFS العالمي
+    # التوزيع حسب المستهدفات (عميل = كتلة واحدة)
     # ================================================================
-    def resolve_path_columns_local(path, col_map, local_criteria):
-        stratify_cols, balance_specs = [], []
-        for crit in path:
-            definition = local_criteria.get(crit)
-            if not definition:
-                continue
-            col = col_map.get(crit)
-            if col is None:
-                continue
-            if definition["kind"] == "stratify":
-                stratify_cols.append(col)
+    def distribute_by_targets(
+        pool_df: pd.DataFrame,
+        targets: pd.DataFrame,
+        sp_col: str,
+        id_col: str,
+        acc_col: str,
+        amt_col: str,
+        product_col: str,
+        classification_col: str | None = None,
+        amount_tolerance: float = 50_000,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, list]:
+        """
+        يوزّع حسابات pool_df على المحصلين حسب المستهدفات.
+        - العميل (رقم الهوية) ينتقل كاملًا.
+        - الأولوية: عدد الحسابات → عدد العملاء → المبلغ.
+        - أي بواقي في الآخر تتوزع على أي محصل.
+        بيرجع: (النتيجة, ملخص التنفيذ, قائمة نواقص)
+        """
+        pool = pool_df.copy()
+        pool[sp_col] = pool[sp_col].astype(object)
+
+        group_cols = [product_col]
+        if classification_col:
+            group_cols = [classification_col, product_col]
+
+        # بناء قاموس المستهدفات
+        # key = (product,) أو (classification, product)
+        target_map = {}  # {collector: {group_key: {count, clients, amount}}}
+        for _, row in targets.iterrows():
+            sp = row["المحصل"]
+            if classification_col:
+                gkey = (str(row["التصنيف"]).strip(), str(row["نوع المنتج"]).strip())
             else:
-                balance_specs.append((col, definition["agg"]))
-        return stratify_cols, balance_specs
+                gkey = (str(row["نوع المنتج"]).strip(),)
 
-    def run_priority_balancing_local(
-        df, sp_col, id_col, acc_col, amt_col, age_col,
-        path, col_map, local_criteria,
-        target_collectors=None, age_unit="years",
-        pool_df=None, reference_collectors=None,
-    ):
-        """نفس منطق run_priority_balancing لكن بمعايير محلية"""
-        df = df.copy()
-        pool_df = df if pool_df is None else pool_df.copy()
+            if sp not in target_map:
+                target_map[sp] = {}
+            target_map[sp][gkey] = {
+                "count": int(row["عدد الحسابات"]),
+                "clients": int(row["عدد العملاء"]),
+                "amount": float(row["مبلغ المديونية"]),
+            }
 
-        # عمر الدين (لو موجود ضمن المعايير)
-        if "عمر الدين" in path and col_map.get("عمر الدين"):
-            raw_age_col = col_map["عمر الدين"]
-            for frame in (df, pool_df):
-                age_years = frame[raw_age_col] / 365 if age_unit == "days" else frame[raw_age_col]
-                frame["__عمر_الدين_فئة__"] = bucket_debt_age(age_years)
-            col_map = {**col_map, "عمر الدين": "__عمر_الدين_فئة__"}
+        collectors = list(target_map.keys())
+        if not collectors:
+            raise ValueError("شيت المستهدفات فاضي")
 
-        stratify_cols, balance_specs = resolve_path_columns_local(path, col_map, local_criteria)
-        target_collectors = target_collectors or sorted(df[sp_col].dropna().unique())
-        reference_collectors = reference_collectors or target_collectors
+        # عدّاد التنفيذ الحالي
+        done = {
+            sp: {
+                g: {"count": 0, "clients": 0, "amount": 0.0}
+                for g in target_map[sp]
+            }
+            for sp in collectors
+        }
 
-        if not stratify_cols:
-            scores = collector_scores(df, sp_col, balance_specs, id_col)
-            result = assign_pool_by_client_units(
-                pool_df, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
-                balance_specs, scores, reference_collectors,
-            )
-            return result.drop(columns=["__عمر_الدين_فئة__"], errors="ignore")
+        # كل العملاء في الـ pool كوحدات
+        # groupby حسب المجموعة (منتج / منتج×تصنيف) ثم حسب الهوية
+        assigned_rows = []
+        shortage = []
 
-        results = []
-        grouped_pool = pool_df.groupby(stratify_cols)
-        for group_vals, sub_pool in grouped_pool:
-            mask = np.ones(len(df), dtype=bool)
-            gv = group_vals if isinstance(group_vals, tuple) else (group_vals,)
-            for col, val in zip(stratify_cols, gv):
-                mask &= (df[col] == val)
-            sub_ref = df[mask]
+        def make_group_key(row):
+            if classification_col:
+                return (str(row[classification_col]).strip(), str(row[product_col]).strip())
+            return (str(row[product_col]).strip(),)
 
-            scores = collector_scores(sub_ref, sp_col, balance_specs, id_col)
-            results.append(
-                assign_pool_by_client_units(
-                    sub_pool, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
-                    balance_specs, scores, reference_collectors,
+        # نشتغل مجموعة مجموعة
+        if classification_col:
+            grouped = pool.groupby([classification_col, product_col], dropna=False)
+        else:
+            grouped = pool.groupby(product_col, dropna=False)
+
+        for gvals, sub in grouped:
+            gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+            gkey = tuple(str(x).strip() for x in gkey)
+
+            # وحدات العملاء داخل المجموعة
+            units = []
+            for cid, grp in sub.groupby(id_col):
+                units.append({
+                    "id": cid,
+                    "count": len(grp),
+                    "amount": float(grp[amt_col].sum()),
+                    "rows": grp,
+                })
+            # الأكبر أولًا
+            units.sort(key=lambda u: (u["count"], u["amount"]), reverse=True)
+
+            for unit in units:
+                best_sp = None
+                best_score = float("-inf")
+
+                for sp in collectors:
+                    t = target_map[sp].get(gkey)
+                    if t is None:
+                        # المحصل ده ملهوش مستهدف للمجموعة دي → نتخطاه إلا في البواقي
+                        continue
+
+                    d = done[sp].setdefault(
+                        gkey, {"count": 0, "clients": 0, "amount": 0.0}
+                    )
+
+                    # هل لسه محتاج حسابات/عملاء؟
+                    need_count = t["count"] - d["count"]
+                    need_clients = t["clients"] - d["clients"]
+                    need_amount = t["amount"] - d["amount"]
+
+                    # لو خلاص وصل للمستهدف في الحسابات والعملاء، ندي أولوية أقل
+                    # (نسمح بتجاوز بسيط في المبلغ في حدود الـ tolerance)
+                    score_count = need_count / max(t["count"], 1)
+                    score_clients = need_clients / max(t["clients"], 1)
+                    score_amount = need_amount / max(t["amount"], 1.0)
+
+                    # أولوية عنيفة للحسابات ثم العملاء ثم المبلغ
+                    score = (
+                        1_000_000 * score_count
+                        + 10_000 * score_clients
+                        + score_amount
+                    )
+
+                    # لو العدد هيعدّي المستهدف بأكتر من 3 نرفضه
+                    if d["count"] + unit["count"] > t["count"] + 3:
+                        score -= 1_000_000_000
+                    if d["clients"] + 1 > t["clients"] + 3:
+                        score -= 1_000_000_000
+
+                    if score > best_score:
+                        best_score = score
+                        best_sp = sp
+
+                # لو مفيش حد مناسب → نوزّع على أي محصل موجود في المستهدفات
+                if best_sp is None:
+                    best_sp = min(
+                        collectors,
+                        key=lambda s: done[s].get(gkey, {"count": 0})["count"],
+                    )
+
+                # خصص
+                part = unit["rows"].copy()
+                part[sp_col] = best_sp
+                assigned_rows.append(part)
+
+                d = done[best_sp].setdefault(
+                    gkey, {"count": 0, "clients": 0, "amount": 0.0}
                 )
-            )
-        result = pd.concat(results, ignore_index=True)
-        return result.drop(columns=["__عمر_الدين_فئة__"], errors="ignore")
+                d["count"] += unit["count"]
+                d["clients"] += 1
+                d["amount"] += unit["amount"]
+
+        if not assigned_rows:
+            result = pool.iloc[0:0].copy()
+        else:
+            result = pd.concat(assigned_rows, ignore_index=True)
+
+        # ملخص التنفيذ مقابل المستهدف
+        summary_rows = []
+        for sp in collectors:
+            for gkey, t in target_map[sp].items():
+                d = done[sp].get(gkey, {"count": 0, "clients": 0, "amount": 0.0})
+                row = {
+                    "المحصل": sp,
+                    "نوع المنتج": gkey[-1],
+                    "عدد الحسابات (مستهدف)": t["count"],
+                    "عدد الحسابات (فعلي)": d["count"],
+                    "فرق الحسابات": d["count"] - t["count"],
+                    "عدد العملاء (مستهدف)": t["clients"],
+                    "عدد العملاء (فعلي)": d["clients"],
+                    "فرق العملاء": d["clients"] - t["clients"],
+                    "مبلغ المديونية (مستهدف)": t["amount"],
+                    "مبلغ المديونية (فعلي)": round(d["amount"], 2),
+                    "فرق المبلغ": round(d["amount"] - t["amount"], 2),
+                }
+                if classification_col:
+                    row["التصنيف"] = gkey[0]
+                summary_rows.append(row)
+
+                # تسجيل نواقص واضحة
+                if d["count"] < t["count"] or d["clients"] < t["clients"]:
+                    shortage.append({
+                        "المحصل": sp,
+                        "المجموعة": gkey,
+                        "ناقص حسابات": max(0, t["count"] - d["count"]),
+                        "ناقص عملاء": max(0, t["clients"] - d["clients"]),
+                    })
+
+        summary = pd.DataFrame(summary_rows)
+        return result, summary, shortage
 
     # ================================================================
     # سيناريو 1: محصل هيمشي
     # ================================================================
     if distribution_type == "محصل هيمشي":
-        uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx"], key="portfolio_file")
-        if uploaded_file:
-            df_raw = _load_excel_bytes(uploaded_file.getvalue())
-            core = pick_core_and_extra_columns(df_raw, "leaving")
+        st.markdown("#### 1) ارفع ملف المحفظة")
+        portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="leave_port")
 
-            df = df_raw.dropna(subset=[core["acc_col"]])
-
-            overview_cols = [core["sp_col"], core["supervisor_col"]] + [
-                s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
-            ]
-            # نتأكد إن الأعمدة موجودة قبل الـ groupby
-            overview_cols = [c for c in overview_cols if c in df.columns]
-            if overview_cols:
-                overview = (
-                    df.groupby(overview_cols)
-                    .agg(
-                        عدد_الحسابات=(core["acc_col"], "count"),
-                        إجمالي_المبلغ=(core["amt_col"], "sum"),
-                    )
-                    .reset_index()
-                )
-                st.dataframe(overview, use_container_width=True)
+        if portfolio_file:
+            df_raw = _load_excel_bytes(portfolio_file.getvalue())
+            core = pick_columns(df_raw, "leave")
+            df = df_raw.dropna(subset=[core["acc_col"]]).copy()
 
             leaving_sp = st.selectbox(
-                "اختر المحصل اللي هيمشي", sorted(df[core["sp_col"]].dropna().unique())
+                "اختر المحصل اللي هيمشي",
+                sorted(df[core["sp_col"]].dropna().unique()),
+                key="leaving_sp_select",
             )
-            remaining_sps = [s for s in sorted(df[core["sp_col"]].dropna().unique()) if s != leaving_sp]
 
-            path, col_map, local_criteria = build_path_and_col_map(core, core["extra_specs"])
-            st.caption(f"المسار الحالي: {' → '.join(path)}")
+            st.markdown("#### 2) ارفع شيت المستهدفات (للمحصلين الباقيين فقط)")
+            st.caption(
+                "الأعمدة المطلوبة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+            )
+            targets_file = st.file_uploader(
+                "شيت المستهدفات", type=["xlsx"], key="leave_targets"
+            )
 
-            if st.button("نفذ التوزيع", type="primary"):
-                leaving_df = df[df[core["sp_col"]] == leaving_sp]
-                remaining_df = df[df[core["sp_col"]].isin(remaining_sps)]
-
-                with st.spinner("جاري التوزيع..."):
-                    # بعد ما تبني path و col_map و local_criteria
-                    stratify_cols, balance_specs = resolve_path_columns_local(path, col_map, local_criteria)
-                    
-                    leaving_df = df[df[core["sp_col"]] == leaving_sp]
-                    remaining_df = df[df[core["sp_col"]].isin(remaining_sps)]
-                    
-                    # لو مفيش stratify → نوزّع كل محفظة المستقيل كعملاء كاملين
-                    if not stratify_cols:
-                        scores = collector_scores(remaining_df, core["sp_col"], balance_specs, core["id_col"])
-                        assigned = assign_pool_by_client_units(
-                            leaving_df,
-                            remaining_sps,
-                            core["sp_col"],
-                            core["id_col"],
-                            core["acc_col"],
-                            core["amt_col"],
-                            balance_specs,
-                            scores,
-                            reference_collectors=remaining_sps,
-                        )
-                    else:
-                        # لو فيه stratify: نوزّع جوه كل فئة بنفس أسلوب العميل الكامل
-                        results = []
-                        for group_vals, sub_pool in leaving_df.groupby(stratify_cols):
-                            mask = np.ones(len(remaining_df), dtype=bool)
-                            gv = group_vals if isinstance(group_vals, tuple) else (group_vals,)
-                            for col, val in zip(stratify_cols, gv):
-                                mask &= (remaining_df[col] == val)
-                            sub_ref = remaining_df[mask]
-                            scores = collector_scores(sub_ref, core["sp_col"], balance_specs, core["id_col"])
-                            results.append(
-                                assign_pool_by_client_units(
-                                    sub_pool, remaining_sps,
-                                    core["sp_col"], core["id_col"], core["acc_col"], core["amt_col"],
-                                    balance_specs, scores, remaining_sps,
-                                )
-                            )
-                        assigned = pd.concat(results, ignore_index=True) if results else leaving_df.iloc[0:0]
-                    
-                    new_df = pd.concat([remaining_df, assigned], ignore_index=True)
-
-                new_df = pd.concat([remaining_df, assigned], ignore_index=True)
-
-                summary_cols = [core["sp_col"]] + [
-                    s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
-                ]
-                summary_cols = [c for c in summary_cols if c in new_df.columns]
-                summary = (
-                    new_df.groupby(summary_cols)
-                    .agg(
-                        عدد_الحسابات=(core["acc_col"], "count"),
-                        إجمالي_المبلغ=(core["amt_col"], "sum"),
+            if targets_file and st.button("نفذ التوزيع", type="primary", key="leave_run"):
+                try:
+                    targets_raw = _load_excel_bytes(targets_file.getvalue())
+                    targets = load_targets(
+                        targets_raw, has_classification=bool(core["classification_col"])
                     )
-                    .reset_index()
-                )
 
-                st.success("تم التوزيع")
-                st.markdown("### النتيجة: كل محصل معاه كام")
-                st.dataframe(summary, use_container_width=True)
+                    # نتأكد إن المستقيل مش موجود في المستهدفات
+                    if leaving_sp in set(targets["المحصل"]):
+                        st.warning(
+                            f"المحصل المستقيل «{leaving_sp}» موجود في شيت المستهدفات — "
+                            "يفضّل تشيله. هكمّل بعد حذفه تلقائيًا."
+                        )
+                        targets = targets[targets["المحصل"] != leaving_sp]
 
-                totals = (
-                    new_df.groupby(core["sp_col"])
-                    .agg(عدد_الحسابات=(core["acc_col"], "count"), إجمالي_المبلغ=(core["amt_col"], "sum"))
-                    .reset_index()
-                )
-                st.dataframe(totals, use_container_width=True)
+                    pool = df[df[core["sp_col"]] == leaving_sp].copy()
+                    remaining = df[df[core["sp_col"]] != leaving_sp].copy()
 
-                output = io.BytesIO()
-                new_df.to_excel(output, index=False)
-                st.download_button(
-                    "تحميل الملف بعد التوزيع",
-                    output.getvalue(),
-                    file_name="portfolio_after_distribution.xlsx",
-                )
+                    if pool.empty:
+                        st.error("مفيش حسابات للمحصل المستقيل")
+                        st.stop()
+
+                    with st.spinner("جاري التوزيع حسب المستهدفات..."):
+                        assigned, summary, shortage = distribute_by_targets(
+                            pool_df=pool,
+                            targets=targets,
+                            sp_col=core["sp_col"],
+                            id_col=core["id_col"],
+                            acc_col=core["acc_col"],
+                            amt_col=core["amt_col"],
+                            product_col=core["product_col"],
+                            classification_col=core["classification_col"],
+                            amount_tolerance=50_000,
+                        )
+
+                    new_df = pd.concat([remaining, assigned], ignore_index=True)
+
+                    st.success("تم التوزيع")
+                    st.markdown("### ملخص التنفيذ مقابل المستهدف")
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
+
+                    if shortage:
+                        st.warning("فيه مستهدفات متكملتش (نقص في الحسابات/العملاء):")
+                        st.dataframe(pd.DataFrame(shortage), use_container_width=True)
+
+                    # ملخص سريع بعد التوزيع
+                    final_cols = [core["sp_col"], core["product_col"]]
+                    if core["classification_col"]:
+                        final_cols.append(core["classification_col"])
+                    final_summary = (
+                        new_df.groupby(final_cols)
+                        .agg(
+                            عدد_الحسابات=(core["acc_col"], "count"),
+                            عدد_العملاء=(core["id_col"], "nunique"),
+                            إجمالي_المبلغ=(core["amt_col"], "sum"),
+                        )
+                        .reset_index()
+                    )
+                    st.markdown("### المحفظة بعد التوزيع")
+                    st.dataframe(final_summary, use_container_width=True)
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        new_df.to_excel(writer, index=False, sheet_name="بعد التوزيع")
+                        summary.to_excel(writer, index=False, sheet_name="ملخص مقابل المستهدف")
+                        final_summary.to_excel(writer, index=False, sheet_name="ملخص نهائي")
+                    st.download_button(
+                        "تحميل الملف بعد التوزيع",
+                        output.getvalue(),
+                        file_name="portfolio_after_leaving.xlsx",
+                    )
+                except Exception as e:
+                    st.error(f"حصل خطأ: {e}")
+                    st.exception(e)
 
     # ================================================================
     # سيناريو 2: محصل جديد جاي
     # ================================================================
     elif distribution_type == "محصل جديد جاي":
-        st.markdown("### ارفع ملف المحفظة")
-        portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
+        st.markdown("#### 1) ارفع ملف المحفظة الحالية")
+        portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="new_port")
 
-        portfolio_df = None
-        core = None
-        if portfolio_file_new:
-            portfolio_raw = _load_excel_bytes(portfolio_file_new.getvalue())
-            core = pick_core_and_extra_columns(portfolio_raw, "new")
-            portfolio_df = portfolio_raw.dropna(subset=[core["acc_col"]])
+        st.markdown("#### 2) ارفع ملف المصدر (إهمال / الحالات اللي هياخد منها)")
+        source_file = st.file_uploader("ملف المصدر", type=["xlsx"], key="new_source")
 
-        st.markdown("### بيانات المحصل الجديد")
-        new_sp_name = st.text_input("اسم المحصل الجديد").strip()
+        if portfolio_file and source_file:
+            df_port = _load_excel_bytes(portfolio_file.getvalue())
+            core = pick_columns(df_port, "newc")
 
-        if portfolio_df is not None and core is not None:
-            sales_teams = sorted(portfolio_df[core["supervisor_col"]].dropna().unique())
-            new_sp_team = st.selectbox("المشرف / Sales Team", sales_teams)
-            reference_sps = st.multiselect(
-                "قارن أداء المحصل الجديد بمين (المتوسط المستهدف)",
-                sorted(portfolio_df[core["sp_col"]].dropna().unique()),
-                default=sorted(
-                    portfolio_df.loc[
-                        portfolio_df[core["supervisor_col"]] == new_sp_team, core["sp_col"]
-                    ].dropna().unique()
-                ),
+            source_df = _load_excel_bytes(source_file.getvalue())
+            # نتأكد إن أعمدة المصدر موجودة
+            for col_key in ["sp_col", "id_col", "acc_col", "amt_col", "product_col"]:
+                col_name = core[col_key]
+                if col_name not in source_df.columns:
+                    st.error(f"عمود «{col_name}» مش موجود في ملف المصدر")
+                    st.stop()
+
+            new_sp_name = st.text_input("اسم المحصل الجديد").strip()
+
+            st.markdown("#### 3) ارفع شيت المستهدفات")
+            st.caption(
+                "المستهدفات تشمل المحصل الجديد + أي محصلين تانيين لو هيتاخد منهم. "
+                "الأعمدة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
             )
-        else:
-            st.info("ارفع ملف المحفظة الأول")
-            new_sp_team, reference_sps = None, []
-
-        st.markdown("### ارفع ملف الاهمال")
-        neglect_file = st.file_uploader(
-            "ملف الاهمال (نفس أسماء الأعمدة اللي فوق)", type=["xlsx"], key="neglect_new"
-        )
-
-        if portfolio_df is not None and core is not None:
-            path, col_map, local_criteria = build_path_and_col_map(core, core["extra_specs"])
-            st.caption(f"المسار الحالي: {' → '.join(path)}")
-
-        if (
-            portfolio_df is not None
-            and neglect_file
-            and new_sp_name
-            and new_sp_team
-            and reference_sps
-            and core is not None
-            and st.button("نفذ توزيع المحصل الجديد", type="primary")
-        ):
-            neglect_df = _load_excel_bytes(neglect_file.getvalue()).dropna(subset=[core["acc_col"]])
-
-            with st.spinner("جاري توزيع المحصل الجديد..."):
-                assigned = run_priority_balancing_local(
-                    df=portfolio_df,
-                    sp_col=core["sp_col"],
-                    id_col=core["id_col"],
-                    acc_col=core["acc_col"],
-                    amt_col=core["amt_col"],
-                    age_col=None,
-                    path=path,
-                    col_map=col_map,
-                    local_criteria=local_criteria,
-                    target_collectors=[new_sp_name],
-                    pool_df=neglect_df,
-                    reference_collectors=reference_sps,
-                )
-
-            st.success(f"تم تجهيز محفظة المحصل الجديد: {new_sp_name} ({new_sp_team})")
-
-            summary_cols = [s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"]
-            if not summary_cols:
-                summary_cols = [core["sp_col"]]
-            summary_cols = [c for c in summary_cols if c in assigned.columns]
-
-            assignment_summary = (
-                assigned.groupby(summary_cols)
-                .agg(
-                    عدد_الحسابات=(core["acc_col"], "count"),
-                    إجمالي_المبلغ=(core["amt_col"], "sum"),
-                )
-                .reset_index()
+            targets_file = st.file_uploader(
+                "شيت المستهدفات", type=["xlsx"], key="new_targets"
             )
-            st.dataframe(assignment_summary, use_container_width=True)
 
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                assigned.to_excel(writer, index=False, sheet_name="محفظة المحصل الجديد")
-                assignment_summary.to_excel(writer, index=False, sheet_name="ملخص")
-            st.download_button(
-                "تحميل ملف المحصل الجديد",
-                output.getvalue(),
-                file_name=f"new_collector_{new_sp_name}.xlsx",
-            )
+            if (
+                targets_file
+                and new_sp_name
+                and st.button("نفذ توزيع المحصل الجديد", type="primary", key="new_run")
+            ):
+                try:
+                    targets = load_targets(
+                        _load_excel_bytes(targets_file.getvalue()),
+                        has_classification=bool(core["classification_col"]),
+                    )
+
+                    # المصدر = اللي هيتوزّع (عادةً الإهمال)
+                    pool = source_df.dropna(subset=[core["acc_col"]]).copy()
+
+                    with st.spinner("جاري التوزيع..."):
+                        assigned, summary, shortage = distribute_by_targets(
+                            pool_df=pool,
+                            targets=targets,
+                            sp_col=core["sp_col"],
+                            id_col=core["id_col"],
+                            acc_col=core["acc_col"],
+                            amt_col=core["amt_col"],
+                            product_col=core["product_col"],
+                            classification_col=core["classification_col"],
+                        )
+
+                    st.success(f"تم تجهيز محفظة: {new_sp_name}")
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
+
+                    if shortage:
+                        st.warning("مستهدفات متكملتش:")
+                        st.dataframe(pd.DataFrame(shortage), use_container_width=True)
+
+                    # محفظة المحصل الجديد فقط
+                    new_portfolio = assigned[assigned[core["sp_col"]] == new_sp_name].copy()
+                    others = assigned[assigned[core["sp_col"]] != new_sp_name].copy()
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        new_portfolio.to_excel(
+                            writer, index=False, sheet_name="محفظة المحصل الجديد"
+                        )
+                        if not others.empty:
+                            others.to_excel(
+                                writer, index=False, sheet_name="توزيع باقي المحصلين"
+                            )
+                        summary.to_excel(
+                            writer, index=False, sheet_name="ملخص مقابل المستهدف"
+                        )
+                    st.download_button(
+                        "تحميل النتيجة",
+                        output.getvalue(),
+                        file_name=f"new_collector_{new_sp_name}.xlsx",
+                    )
+                except Exception as e:
+                    st.error(f"حصل خطأ: {e}")
+                    st.exception(e)
 
     # ================================================================
     # سيناريو 3: تساوي المحفظة
     # ================================================================
     else:
-        st.markdown("### ارفع ملف المحفظة الحالية")
-        equal_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="equalize_file")
+        st.markdown("#### 1) ارفع ملف المحفظة")
+        portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="eq_port")
 
-        if equal_file:
-            df_eq = _load_excel_bytes(equal_file.getvalue())
-            core = pick_core_and_extra_columns(df_eq, "equalize")
+        if portfolio_file:
+            df_raw = _load_excel_bytes(portfolio_file.getvalue())
+            core = pick_columns(df_raw, "eq")
+            df = df_raw.dropna(subset=[core["acc_col"]]).copy()
 
-            with st.form("equalize_settings_form"):
-                # عمود الحالة
-                status_candidates = (
-                    [s["col"] for s in core["extra_specs"]]
-                    + (["Sub State"] if "Sub State" in df_eq.columns else [])
-                    + list(df_eq.columns)
-                )
-                # نشيل التكرار مع الحفاظ على الترتيب
-                seen = set()
-                status_candidates = [c for c in status_candidates if not (c in seen or seen.add(c))]
+            st.markdown("#### 2) ارفع شيت المستهدفات (لكل المحصلين)")
+            st.caption(
+                "الأعمدة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+            )
+            targets_file = st.file_uploader(
+                "شيت المستهدفات", type=["xlsx"], key="eq_targets"
+            )
 
-                status_col = st.selectbox(
-                    "عمود حالة الحساب (للحسابات القابلة للنقل)",
-                    status_candidates,
-                    key="eq_status",
-                )
-                status_values = sorted(df_eq[status_col].dropna().astype(str).unique().tolist())
+            # اختياري: الحالات القابلة للنقل
+            status_col = st.selectbox(
+                "عمود حالة الحساب (اختياري — لتحديد إيه اللي يتحرك)",
+                ["— بدون —"] + list(df.columns),
+                key="eq_status_col",
+            )
+            included_statuses = []
+            if status_col != "— بدون —":
+                statuses = sorted(df[status_col].dropna().astype(str).unique())
                 included_statuses = st.multiselect(
-                    "اختار الحالات اللي هيتساوى بيها فقط (أي حالة تانية هتفضل ثابتة)",
-                    status_values,
+                    "الحالات اللي يُسمح بنقلها فقط",
+                    statuses,
                     key="eq_statuses",
                 )
 
-                payment_col = st.selectbox(
-                    "عمود السداد (لو موجود)",
-                    ["— بدون —"] + list(df_eq.columns),
-                    key="eq_payment",
-                )
-                payment_col = None if payment_col == "— بدون —" else payment_col
+            if targets_file and st.button("نفذ التساوي", type="primary", key="eq_run"):
+                try:
+                    targets = load_targets(
+                        _load_excel_bytes(targets_file.getvalue()),
+                        has_classification=bool(core["classification_col"]),
+                    )
 
-                paid_behavior = st.radio(
-                    "الحسابات اللي عليها سداد",
-                    ["وزّعها لو فيه إمكانية", "متتحركش خالص، تفضل مع محصلها الحالي"],
-                    horizontal=True,
-                    key="eq_paid_behavior",
-                )
-                move_paid_accounts = paid_behavior.startswith("وزّعها")
+                    # تحديد الحسابات القابلة للنقل
+                    if status_col != "— بدون —" and included_statuses:
+                        movable = df[df[status_col].astype(str).isin(included_statuses)].copy()
+                        fixed = df[~df[status_col].astype(str).isin(included_statuses)].copy()
+                    else:
+                        movable = df.copy()
+                        fixed = df.iloc[0:0].copy()
 
-                submitted = st.form_submit_button("نفذ التساوي", type="primary")
-
-            path, col_map, local_criteria = build_path_and_col_map(core, core["extra_specs"])
-            st.caption(f"المسار الحالي: {' → '.join(path)}")
-
-            if submitted:
-                if not included_statuses:
-                    st.warning("اختار حالة واحدة على الأقل")
-                else:
-                    df_eq_clean = df_eq.dropna(subset=[core["acc_col"]])
-
-                    movable_mask = df_eq_clean[status_col].astype(str).isin(included_statuses)
-                    if payment_col and not move_paid_accounts:
-                        movable_mask &= df_eq_clean[payment_col].isna() | (
-                            df_eq_clean[payment_col] == 0
-                        )
-                    movable_df = df_eq_clean[movable_mask]
-                    fixed_df = df_eq_clean[~movable_mask]
-
-                    with st.spinner("جاري التساوي..."):
-                        reassigned = run_priority_balancing_local(
-                            df=df_eq_clean,
+                    with st.spinner("جاري التساوي حسب المستهدفات..."):
+                        reassigned, summary, shortage = distribute_by_targets(
+                            pool_df=movable,
+                            targets=targets,
                             sp_col=core["sp_col"],
                             id_col=core["id_col"],
                             acc_col=core["acc_col"],
                             amt_col=core["amt_col"],
-                            age_col=None,
-                            path=path,
-                            col_map=col_map,
-                            local_criteria=local_criteria,
-                            target_collectors=sorted(df_eq_clean[core["sp_col"]].dropna().unique()),
-                            pool_df=movable_df,
+                            product_col=core["product_col"],
+                            classification_col=core["classification_col"],
                         )
 
-                    result_df = pd.concat([fixed_df, reassigned], ignore_index=True)
-                    result_df["المحصل بعد التساوي"] = result_df[core["sp_col"]]
-                    original_sp = df_eq_clean.set_index(core["acc_col"])[core["sp_col"]]
-                    result_df["المحصل قبل التساوي"] = result_df[core["acc_col"]].map(original_sp)
-
-                    summary_cols = [core["sp_col"]] + [
-                        s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
-                    ]
-                    summary_cols = [c for c in summary_cols if c in result_df.columns]
-                    summary_df = (
-                        result_df.groupby(summary_cols)
-                        .agg(
-                            عدد_الحسابات=(core["acc_col"], "count"),
-                            إجمالي_المديونية=(core["amt_col"], "sum"),
-                        )
-                        .reset_index()
-                    )
+                    result_df = pd.concat([fixed, reassigned], ignore_index=True)
 
                     st.success("تم التساوي")
-                    st.markdown("### ملخص بعد التساوي لكل محصل ولكل مستوى")
-                    st.dataframe(summary_df, use_container_width=True)
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
 
-                    moved = result_df[
-                        result_df["المحصل قبل التساوي"] != result_df[core["sp_col"]]
-                    ]
-                    st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
-                    if len(moved) > 0:
-                        st.dataframe(moved, use_container_width=True)
+                    if shortage:
+                        st.warning("مستهدفات متكملتش:")
+                        st.dataframe(pd.DataFrame(shortage), use_container_width=True)
 
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                        result_df.to_excel(writer, index=False, sheet_name="المحفظة بعد التساوي")
-                        summary_df.to_excel(writer, index=False, sheet_name="ملخص")
-                        if len(moved) > 0:
-                            moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
+                        result_df.to_excel(
+                            writer, index=False, sheet_name="بعد التساوي"
+                        )
+                        summary.to_excel(
+                            writer, index=False, sheet_name="ملخص مقابل المستهدف"
+                        )
                     st.download_button(
-                        "تحميل ملف المحفظة بعد التساوي",
+                        "تحميل الملف بعد التساوي",
                         output.getvalue(),
                         file_name="portfolio_equalized.xlsx",
                     )
+                except Exception as e:
+                    st.error(f"حصل خطأ: {e}")
+                    st.exception(e)
+
+
+
 
 
 elif page == "التقرير اليومي للسدادات":
