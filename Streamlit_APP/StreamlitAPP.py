@@ -3712,24 +3712,27 @@ elif page == "التوزيع":
             "عدد الحسابات": {"kind": "balance", "agg": "count_acc"},
             "مبلغ المديونية": {"kind": "balance", "agg": "sum_amount"},
         }
-
-        # stratify أولاً
+    
+        # 1) التجميع (Stratify) الأول — كل فئة تتوازن لوحدها
         for spec in extra_specs:
             if spec["kind"] == "stratify":
                 path.append(spec["col"])
                 col_map[spec["col"]] = spec["col"]
                 local_criteria[spec["col"]] = {"kind": "stratify"}
-
-        # معايير الاتزان الأساسية
-        path.extend(["عدد العملاء", "عدد الحسابات", "مبلغ المديونية"])
-
-        # balance إضافية
+    
+        # 2) معايير الاتزان — عدد الحسابات أولًا وبفارق كبير في الوزن
+        #    الترتيب هنا = الأولوية (اللي فوق بياخد وزن أعلى بكتير)
+        path.append("عدد الحسابات")          # ← أهم حاجة عندك
+        path.append("مبلغ المديونية")        # بعد كده المبلغ
+        path.append("عدد العملاء")           # بعد كده عدد العملاء
+    
+        # 3) أي أعمدة balance إضافية في الآخر
         for spec in extra_specs:
             if spec["kind"] == "balance":
                 path.append(spec["col"])
                 col_map[spec["col"]] = spec["col"]
                 local_criteria[spec["col"]] = {"kind": "balance", "agg": spec["agg"]}
-
+    
         return path, col_map, local_criteria
 
     # ================================================================
