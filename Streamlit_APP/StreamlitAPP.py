@@ -3627,83 +3627,188 @@ elif page == "التوزيع":
     )
 
     # ================================================================
+    # دالة مساعدة: اختيار الأعمدة الأساسية + أي أعمدة إضافية
+    # ================================================================
+    def pick_core_and_extra_columns(df, key_prefix):
+        cols = list(df.columns)
+
+        st.markdown("### 1) الأعمدة الأساسية (إجبارية)")
+        c1, c2 = st.columns(2)
+        with c1:
+            sp_col = st.selectbox("عمود اسم المحصل", cols, key=f"{key_prefix}_sp")
+            id_col = st.selectbox("عمود رقم الهوية", cols, key=f"{key_prefix}_id")
+            acc_col = st.selectbox("عمود رقم الحساب", cols, key=f"{key_prefix}_acc")
+        with c2:
+            amt_col = st.selectbox("عمود مبلغ المديونية", cols, key=f"{key_prefix}_amt")
+            # المشرف اختياري في بعض السيناريوهات، لكنه أساسي حسب طلبك
+            supervisor_col = st.selectbox("عمود المشرف", cols, key=f"{key_prefix}_supervisor")
+
+        # باقي الأعمدة المتاحة للإضافة
+        used = {sp_col, id_col, acc_col, amt_col, supervisor_col}
+        remaining_cols = [c for c in cols if c not in used]
+
+        st.markdown("### 2) أعمدة إضافية (اختياري) — هتستخدمها في التوازن/التوزيع")
+        st.caption(
+            "اختار أي عمود زيادة عايز تساوي أو توزع على أساسه "
+            "(مثلاً: نوع المنتج، التصنيف، عمر الدين، حالة الحساب...)."
+        )
+        extra_cols = st.multiselect(
+            "الأعمدة الإضافية",
+            options=remaining_cols,
+            default=[],
+            key=f"{key_prefix}_extra"
+        )
+
+        # تحديد نوع كل عمود إضافي (تجميع / اتزان)
+        extra_specs = []
+        if extra_cols:
+            st.markdown("#### حدد نوع كل عمود إضافي")
+            for col in extra_cols:
+                kind = st.radio(
+                    f"نوع العمود «{col}»",
+                    ["تجميع (Stratify) — يتوازن جوه كل قيمة لوحدها",
+                     "اتزان (Balance) — يتوزع عشان الأرقام تتقارب"],
+                    key=f"{key_prefix}_kind_{col}",
+                    horizontal=True
+                )
+                if "تجميع" in kind:
+                    extra_specs.append({"col": col, "kind": "stratify", "agg": None})
+                else:
+                    agg = st.selectbox(
+                        f"طريقة الاتزان لـ «{col}»",
+                        ["count", "sum", "nunique", "mean"],
+                        key=f"{key_prefix}_agg_{col}",
+                        help="count = عدد الصفوف | sum = مجموع القيم | nunique = عدد القيم المميزة | mean = المتوسط"
+                    )
+                    extra_specs.append({"col": col, "kind": "balance", "agg": agg})
+
+        return {
+            "sp_col": sp_col,
+            "id_col": id_col,
+            "acc_col": acc_col,
+            "amt_col": amt_col,
+            "supervisor_col": supervisor_col,
+            "extra_specs": extra_specs,
+        }
+
+    # ================================================================
+    # تحويل الأعمدة المختارة لمسار أولوية متوافق مع run_priority_balancing
+    # ================================================================
+    def build_path_and_col_map(core, extra_specs):
+        """
+        بنبني path + col_map من الأعمدة اللي اختارها المستخدم.
+        المعايير الأساسية (عدد العملاء / عدد الحسابات / مبلغ المديونية)
+        بتتحط دايمًا، والأعمدة الإضافية بتتحط حسب اختيار المستخدم.
+        """
+        path = []
+        col_map = {
+            "عدد العملاء": core["id_col"],
+            "عدد الحسابات": core["acc_col"],
+            "مبلغ المديونية": core["amt_col"],
+        }
+
+        # الأعمدة الإضافية من نوع stratify أولًا
+        for spec in extra_specs:
+            if spec["kind"] == "stratify":
+                # نستخدم اسم العمود نفسه كمعيار منطقي
+                path.append(spec["col"])
+                col_map[spec["col"]] = spec["col"]
+                # نسجّل التعريف مؤقتًا عشان resolve_path_columns يشتغل
+                CRITERIA_DEFS[spec["col"]] = {"kind": "stratify"}
+
+        # معايير الاتزان الأساسية (بترتيب أولوية افتراضي)
+        path.extend(["عدد العملاء", "عدد الحسابات", "مبلغ المديونية"])
+
+        # الأعمدة الإضافية من نوع balance
+        for spec in extra_specs:
+            if spec["kind"] == "balance":
+                path.append(spec["col"])
+                col_map[spec["col"]] = spec["col"]
+                CRITERIA_DEFS[spec["col"]] = {"kind": "balance", "agg": spec["agg"]}
+
+        return path, col_map
+
+    # ================================================================
     # سيناريو 1: محصل هيمشي
     # ================================================================
     if distribution_type == "محصل هيمشي":
         uploaded_file = st.file_uploader("ارفع ملف المحفظة (Excel)", type=["xlsx"], key="portfolio_file")
         if uploaded_file:
             df_raw = pd.read_excel(uploaded_file)
-            cols = list(df_raw.columns)
+            core = pick_core_and_extra_columns(df_raw, "leaving")
 
-            st.markdown("### اختار الأعمدة")
-            c1, c2 = st.columns(2)
-            with c1:
-                id_col = st.selectbox("عمود رقم الهوية", cols, key="leaving_id_col")
-                sp_col = st.selectbox("عمود اسم المحصل", cols, key="leaving_sp_col")
-                product_col = st.selectbox("عمود نوع المنتج", cols, key="leaving_product_col")
-            with c2:
-                acc_col = st.selectbox("عمود رقم الحساب", cols, key="leaving_acc_col")
-                amt_col = st.selectbox("عمود المبلغ / متبقي المديونية", cols, key="leaving_amt_col")
-                classification_col = None
-                if classification_mode == "NPL & Dpd60":
-                    classification_col = st.selectbox("عمود التصنيف (NPL / Dpd60)", cols, key="leaving_class_col")
+            df = df_raw.dropna(subset=[core["acc_col"]])
 
-            age_col = _resolve(_col_or_none("عمود عمر الدين (لو موجود)", cols, "leaving_age_col"))
-            age_unit = "years"
-            if age_col:
-                age_unit = st.radio("وحدة عمر الدين", ["years", "days"], horizontal=True, key="leaving_age_unit")
-
-            df = df_raw.dropna(subset=[acc_col])
-
-            col_map = {
-                "نوع المنتج": product_col,
-                "التصنيف (NPL/Dpd60)": classification_col,
-                "عمر الدين": age_col,
-                "عدد العملاء": id_col,
-                "عدد الحسابات": acc_col,
-                "مبلغ المديونية": amt_col,
-            }
-
-            overview_cols = [sp_col, product_col] + ([classification_col] if classification_col else [])
-            overview = (df.groupby(overview_cols)
-                          .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
-                          .reset_index())
+            overview_cols = [core["sp_col"], core["supervisor_col"]] + [
+                s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
+            ]
+            overview = (
+                df.groupby(overview_cols)
+                .agg(
+                    عدد_الحسابات=(core["acc_col"], "count"),
+                    إجمالي_المبلغ=(core["amt_col"], "sum"),
+                )
+                .reset_index()
+            )
             st.dataframe(overview, use_container_width=True)
 
-            leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df[sp_col].unique()))
-            remaining_sps = [s for s in sorted(df[sp_col].unique()) if s != leaving_sp]
+            leaving_sp = st.selectbox("اختر المحصل اللي هيمشي", sorted(df[core["sp_col"]].unique()))
+            remaining_sps = [s for s in sorted(df[core["sp_col"]].unique()) if s != leaving_sp]
 
-            path = build_priority_path_ui("leaving")
+            # مسار الأولوية (لو عايز تعدّل ترتيب المعايير الأساسية)
+            st.markdown("### 3) ترتيب أولوية التوازن (اختياري)")
+            path, col_map = build_path_and_col_map(core, core["extra_specs"])
+            st.caption(f"المسار الحالي: {' → '.join(path)}")
 
             if st.button("نفذ التوزيع"):
-                leaving_df = df[df[sp_col] == leaving_sp]
-                remaining_df = df[df[sp_col].isin(remaining_sps)]
+                leaving_df = df[df[core["sp_col"]] == leaving_sp]
+                remaining_df = df[df[core["sp_col"]].isin(remaining_sps)]
 
                 assigned = run_priority_balancing(
-                    df=remaining_df, sp_col=sp_col, id_col=id_col, acc_col=acc_col,
-                    amt_col=amt_col, age_col=age_col, path=path, col_map=col_map,
-                    target_collectors=remaining_sps, pool_df=leaving_df, age_unit=age_unit,
+                    df=remaining_df,
+                    sp_col=core["sp_col"],
+                    id_col=core["id_col"],
+                    acc_col=core["acc_col"],
+                    amt_col=core["amt_col"],
+                    age_col=None,
+                    path=path,
+                    col_map=col_map,
+                    target_collectors=remaining_sps,
+                    pool_df=leaving_df,
+                    age_unit="years",
                 )
 
                 new_df = pd.concat([remaining_df, assigned], ignore_index=True)
 
-                summary_cols = [sp_col, product_col] + ([classification_col] if classification_col else [])
-                summary = (new_df.groupby(summary_cols)
-                             .agg(عدد_الحسابات=(acc_col, "count"), إجمالي_المبلغ=(amt_col, "sum"))
-                             .reset_index())
+                summary_cols = [core["sp_col"]] + [
+                    s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
+                ]
+                summary = (
+                    new_df.groupby(summary_cols)
+                    .agg(
+                        عدد_الحسابات=(core["acc_col"], "count"),
+                        إجمالي_المبلغ=(core["amt_col"], "sum"),
+                    )
+                    .reset_index()
+                )
 
                 st.success("تم التوزيع")
                 st.markdown("### النتيجة: كل محصل معاه كام")
                 st.dataframe(summary, use_container_width=True)
 
-                totals = new_df.groupby(sp_col)[[acc_col]].count().rename(columns={acc_col: "عدد_الحسابات"})
-                totals["إجمالي_المبلغ"] = new_df.groupby(sp_col)[amt_col].sum()
+                totals = new_df.groupby(core["sp_col"])[[core["acc_col"]]].count().rename(
+                    columns={core["acc_col"]: "عدد_الحسابات"}
+                )
+                totals["إجمالي_المبلغ"] = new_df.groupby(core["sp_col"])[core["amt_col"]].sum()
                 st.dataframe(totals.reset_index(), use_container_width=True)
 
                 output = io.BytesIO()
                 new_df.to_excel(output, index=False)
-                st.download_button("تحميل الملف بعد التوزيع", output.getvalue(),
-                                    file_name="portfolio_after_distribution.xlsx")
+                st.download_button(
+                    "تحميل الملف بعد التوزيع",
+                    output.getvalue(),
+                    file_name="portfolio_after_distribution.xlsx",
+                )
 
     # ================================================================
     # سيناريو 2: محصل جديد جاي
@@ -3713,87 +3818,89 @@ elif page == "التوزيع":
         portfolio_file_new = st.file_uploader("ملف المحفظة", type=["xlsx"], key="portfolio_new")
 
         portfolio_df = None
+        core = None
         if portfolio_file_new:
             portfolio_raw = pd.read_excel(portfolio_file_new)
-            cols_p = list(portfolio_raw.columns)
-
-            st.markdown("### اختار الأعمدة")
-            c1, c2 = st.columns(2)
-            with c1:
-                sp_col_new = st.selectbox("عمود اسم المحصل", cols_p, key="new_sp_col")
-                product_col_new = st.selectbox("عمود نوع المنتج", cols_p, key="new_product_col")
-                acc_col_new = st.selectbox("عمود رقم الحساب", cols_p, key="new_acc_col")
-            with c2:
-                amt_col_new = st.selectbox("عمود المبلغ", cols_p, key="new_amt_col")
-                default_team_index = cols_p.index("Sales Team") if "Sales Team" in cols_p else 0
-                team_col_new = st.selectbox("عمود Sales Team", cols_p, index=default_team_index, key="new_team_col")
-                classification_col_new = None
-                if classification_mode == "NPL & Dpd60":
-                    classification_col_new = st.selectbox("عمود التصنيف (NPL / Dpd60)", cols_p, key="new_class_col")
-
-            id_col_new = _resolve(_col_or_none("عمود رقم الهوية (لو عايز توازن عدد العملاء)", cols_p, "new_id_col"))
-            age_col_new = _resolve(_col_or_none("عمود عمر الدين (لو موجود)", cols_p, "new_age_col"))
-            age_unit_new = "years"
-            if age_col_new:
-                age_unit_new = st.radio("وحدة عمر الدين", ["years", "days"], horizontal=True, key="new_age_unit")
-
-            portfolio_df = portfolio_raw.dropna(subset=[acc_col_new])
+            core = pick_core_and_extra_columns(portfolio_raw, "new")
+            portfolio_df = portfolio_raw.dropna(subset=[core["acc_col"]])
 
         st.markdown("### بيانات المحصل الجديد")
         new_sp_name = st.text_input("اسم المحصل الجديد").strip()
 
-        if portfolio_df is not None:
-            sales_teams = sorted(portfolio_df[team_col_new].dropna().unique())
-            new_sp_team = st.selectbox("Sales Team", sales_teams)
+        if portfolio_df is not None and core is not None:
+            sales_teams = sorted(portfolio_df[core["supervisor_col"]].dropna().unique())
+            new_sp_team = st.selectbox("المشرف / Sales Team", sales_teams)
             reference_sps = st.multiselect(
                 "قارن أداء المحصل الجديد بمين (المتوسط المستهدف)",
-                sorted(portfolio_df[sp_col_new].unique()),
-                default=sorted(portfolio_df.loc[portfolio_df[team_col_new] == new_sp_team, sp_col_new].unique())
+                sorted(portfolio_df[core["sp_col"]].unique()),
+                default=sorted(
+                    portfolio_df.loc[
+                        portfolio_df[core["supervisor_col"]] == new_sp_team, core["sp_col"]
+                    ].unique()
+                ),
             )
         else:
             st.info("ارفع ملف المحفظة الأول")
             new_sp_team, reference_sps = None, []
 
         st.markdown("### ارفع ملف الاهمال")
-        neglect_file = st.file_uploader("ملف الاهمال (نفس أسماء الأعمدة اللي فوق)", type=["xlsx"], key="neglect_new")
+        neglect_file = st.file_uploader(
+            "ملف الاهمال (نفس أسماء الأعمدة اللي فوق)", type=["xlsx"], key="neglect_new"
+        )
 
-        path = build_priority_path_ui("new")
+        if portfolio_df is not None and core is not None:
+            path, col_map = build_path_and_col_map(core, core["extra_specs"])
+            st.caption(f"المسار الحالي: {' → '.join(path)}")
 
-        if (portfolio_df is not None and neglect_file and new_sp_name and new_sp_team
-                and reference_sps and st.button("نفذ توزيع المحصل الجديد")):
-
-            neglect_df = pd.read_excel(neglect_file).dropna(subset=[acc_col_new])
-
-            col_map = {
-                "نوع المنتج": product_col_new,
-                "التصنيف (NPL/Dpd60)": classification_col_new,
-                "عمر الدين": age_col_new,
-                "عدد العملاء": id_col_new,
-                "عدد الحسابات": acc_col_new,
-                "مبلغ المديونية": amt_col_new,
-            }
+        if (
+            portfolio_df is not None
+            and neglect_file
+            and new_sp_name
+            and new_sp_team
+            and reference_sps
+            and core is not None
+            and st.button("نفذ توزيع المحصل الجديد")
+        ):
+            neglect_df = pd.read_excel(neglect_file).dropna(subset=[core["acc_col"]])
 
             assigned = run_priority_balancing(
-                df=portfolio_df, sp_col=sp_col_new, id_col=id_col_new, acc_col=acc_col_new,
-                amt_col=amt_col_new, age_col=age_col_new, path=path, col_map=col_map,
-                target_collectors=[new_sp_name], pool_df=neglect_df,
-                reference_collectors=reference_sps, age_unit=age_unit_new,
+                df=portfolio_df,
+                sp_col=core["sp_col"],
+                id_col=core["id_col"],
+                acc_col=core["acc_col"],
+                amt_col=core["amt_col"],
+                age_col=None,
+                path=path,
+                col_map=col_map,
+                target_collectors=[new_sp_name],
+                pool_df=neglect_df,
+                reference_collectors=reference_sps,
+                age_unit="years",
             )
 
             st.success(f"تم تجهيز محفظة المحصل الجديد: {new_sp_name} ({new_sp_team})")
-            summary_cols = [product_col_new] + ([classification_col_new] if classification_col_new else [])
-            assignment_summary = (assigned.groupby(summary_cols)
-                                    .agg(عدد_الحسابات=(acc_col_new, "count"),
-                                         إجمالي_المبلغ=(amt_col_new, "sum"))
-                                    .reset_index())
+            summary_cols = [s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"] or [
+                core["sp_col"]
+            ]
+            assignment_summary = (
+                assigned.groupby(summary_cols)
+                .agg(
+                    عدد_الحسابات=(core["acc_col"], "count"),
+                    إجمالي_المبلغ=(core["amt_col"], "sum"),
+                )
+                .reset_index()
+            )
             st.dataframe(assignment_summary, use_container_width=True)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 assigned.to_excel(writer, index=False, sheet_name="محفظة المحصل الجديد")
                 assignment_summary.to_excel(writer, index=False, sheet_name="ملخص")
-            st.download_button("تحميل ملف المحصل الجديد", output.getvalue(),
-                                file_name=f"new_collector_{new_sp_name}.xlsx")
+            st.download_button(
+                "تحميل ملف المحصل الجديد",
+                output.getvalue(),
+                file_name=f"new_collector_{new_sp_name}.xlsx",
+            )
 
     # ================================================================
     # سيناريو 3: تساوي المحفظة
@@ -3808,90 +3915,98 @@ elif page == "التوزيع":
 
         if equal_file:
             df_eq = load_equalize_file(equal_file.getvalue())
-            cols = list(df_eq.columns)
+            core = pick_core_and_extra_columns(df_eq, "equalize")
 
             with st.form("equalize_settings_form"):
-                st.markdown("### اختار الأعمدة")
-                id_col = st.selectbox("عمود رقم الهوية", cols, key="eq_id")
-                account_col = st.selectbox("عمود رقم الحساب", cols, key="eq_account")
-                sp_col = st.selectbox("عمود اسم المحصل", cols, key="eq_sp")
-                product_col = st.selectbox("عمود نوع المنتج", cols, key="eq_product")
-                debt_col = st.selectbox("عمود متبقي المديونية", cols, key="eq_debt")
-                default_status_index = cols.index("Sub State") if "Sub State" in cols else 0
-                status_col = st.selectbox("عمود حالة الحساب", cols, index=default_status_index, key="eq_status")
-
-                classification_col_eq = None
-                if classification_mode == "NPL & Dpd60":
-                    classification_col_eq = st.selectbox("عمود التصنيف (NPL / Dpd60)", cols, key="eq_classification")
-
-                age_col_eq = _resolve(_col_or_none("عمود عمر الدين (لو موجود)", cols, "eq_age_col"))
-                age_unit_eq = "years"
-                if age_col_eq:
-                    age_unit_eq = st.radio("وحدة عمر الدين", ["years", "days"], horizontal=True, key="eq_age_unit")
-
+                status_values = sorted(df_eq[core["sp_col"]].dropna().unique().tolist())
+                # لو في عمود حالة ضمن الأعمدة الإضافية، نستخدمه؛ وإلا نستخدم Sub State لو موجود
+                status_col_candidates = [
+                    s["col"] for s in core["extra_specs"]
+                ] + (["Sub State"] if "Sub State" in df_eq.columns else [])
+                status_col = st.selectbox(
+                    "عمود حالة الحساب (للحسابات القابلة للنقل)",
+                    status_col_candidates or list(df_eq.columns),
+                    key="eq_status",
+                )
                 status_values = sorted(df_eq[status_col].dropna().unique().tolist())
                 included_statuses = st.multiselect(
                     "اختار الحالات اللي هيتساوى بيها فقط (أي حالة تانية هتفضل ثابتة)",
-                    status_values, key="eq_statuses"
+                    status_values,
+                    key="eq_statuses",
                 )
 
-                payment_col = st.selectbox("عمود السداد", cols, key="eq_payment")
+                payment_col = st.selectbox(
+                    "عمود السداد (لو موجود)",
+                    ["— بدون —"] + list(df_eq.columns),
+                    key="eq_payment",
+                )
+                payment_col = None if payment_col == "— بدون —" else payment_col
+
                 paid_behavior = st.radio(
                     "الحسابات اللي عليها سداد",
                     ["وزّعها لو فيه إمكانية", "متتحركش خالص، تفضل مع محصلها الحالي"],
-                    horizontal=True, key="eq_paid_behavior"
+                    horizontal=True,
+                    key="eq_paid_behavior",
                 )
                 move_paid_accounts = paid_behavior.startswith("وزّعها")
 
                 submitted = st.form_submit_button("نفذ التساوي", key="eq_submit_btn")
 
-            path = build_priority_path_ui("equalize")
+            path, col_map = build_path_and_col_map(core, core["extra_specs"])
+            st.caption(f"المسار الحالي: {' → '.join(path)}")
 
             if submitted:
                 if not included_statuses:
                     st.warning("اختار حالة واحدة على الأقل")
                 else:
-                    df_eq_clean = df_eq.dropna(subset=[account_col])
+                    df_eq_clean = df_eq.dropna(subset=[core["acc_col"]])
 
                     movable_mask = df_eq_clean[status_col].isin(included_statuses)
-                    if not move_paid_accounts:
-                        movable_mask &= df_eq_clean[payment_col].isna() | (df_eq_clean[payment_col] == 0)
+                    if payment_col and not move_paid_accounts:
+                        movable_mask &= df_eq_clean[payment_col].isna() | (
+                            df_eq_clean[payment_col] == 0
+                        )
                     movable_df = df_eq_clean[movable_mask]
                     fixed_df = df_eq_clean[~movable_mask]
 
-                    col_map = {
-                        "نوع المنتج": product_col,
-                        "التصنيف (NPL/Dpd60)": classification_col_eq,
-                        "عمر الدين": age_col_eq,
-                        "عدد العملاء": id_col,
-                        "عدد الحسابات": account_col,
-                        "مبلغ المديونية": debt_col,
-                    }
-
                     reassigned = run_priority_balancing(
-                        df=df_eq_clean, sp_col=sp_col, id_col=id_col, acc_col=account_col,
-                        amt_col=debt_col, age_col=age_col_eq, path=path, col_map=col_map,
-                        target_collectors=sorted(df_eq_clean[sp_col].dropna().unique()),
-                        pool_df=movable_df, age_unit=age_unit_eq,
+                        df=df_eq_clean,
+                        sp_col=core["sp_col"],
+                        id_col=core["id_col"],
+                        acc_col=core["acc_col"],
+                        amt_col=core["amt_col"],
+                        age_col=None,
+                        path=path,
+                        col_map=col_map,
+                        target_collectors=sorted(df_eq_clean[core["sp_col"]].dropna().unique()),
+                        pool_df=movable_df,
+                        age_unit="years",
                     )
 
                     result_df = pd.concat([fixed_df, reassigned], ignore_index=True)
-                    result_df["المحصل بعد التساوي"] = result_df[sp_col]
-                    # استرجاع اسم المحصل الأصلي من النسخة الأصلية للمقارنة
-                    original_sp = df_eq_clean.set_index(account_col)[sp_col]
-                    result_df["المحصل قبل التساوي"] = result_df[account_col].map(original_sp)
+                    result_df["المحصل بعد التساوي"] = result_df[core["sp_col"]]
+                    original_sp = df_eq_clean.set_index(core["acc_col"])[core["sp_col"]]
+                    result_df["المحصل قبل التساوي"] = result_df[core["acc_col"]].map(original_sp)
 
-                    summary_cols = [product_col] + ([classification_col_eq] if classification_col_eq else [])
-                    summary_df = (result_df.groupby([sp_col] + summary_cols)
-                                    .agg(عدد_الحسابات=(account_col, "count"),
-                                         إجمالي_المديونية=(debt_col, "sum"))
-                                    .reset_index())
+                    summary_cols = [core["sp_col"]] + [
+                        s["col"] for s in core["extra_specs"] if s["kind"] == "stratify"
+                    ]
+                    summary_df = (
+                        result_df.groupby(summary_cols)
+                        .agg(
+                            عدد_الحسابات=(core["acc_col"], "count"),
+                            إجمالي_المديونية=(core["amt_col"], "sum"),
+                        )
+                        .reset_index()
+                    )
 
                     st.success("تم التساوي")
-                    st.markdown("### ملخص بعد التساوي لكل محصل ولكل مستوى (منتج / تصنيف)")
+                    st.markdown("### ملخص بعد التساوي لكل محصل ولكل مستوى")
                     st.dataframe(summary_df, use_container_width=True)
 
-                    moved = result_df[result_df["المحصل قبل التساوي"] != result_df[sp_col]]
+                    moved = result_df[
+                        result_df["المحصل قبل التساوي"] != result_df[core["sp_col"]]
+                    ]
                     st.markdown(f"### عدد الحسابات اللي اتحركت: {len(moved)}")
                     if len(moved) > 0:
                         st.dataframe(moved, use_container_width=True)
@@ -3902,9 +4017,11 @@ elif page == "التوزيع":
                         summary_df.to_excel(writer, index=False, sheet_name="ملخص")
                         if len(moved) > 0:
                             moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
-                    st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
-                                        file_name="portfolio_equalized.xlsx")
-
+                    st.download_button(
+                        "تحميل ملف المحفظة بعد التساوي",
+                        output.getvalue(),
+                        file_name="portfolio_equalized.xlsx",
+                    )
 
 
 
