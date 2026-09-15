@@ -167,6 +167,93 @@ def collector_scores(df, sp_col, balance_specs, id_col=None):
     return out.fillna(0)
 
 
+
+def assign_pool_by_client_units(
+    pool_df, target_collectors, sp_col, id_col, acc_col, amt_col,
+    balance_specs, current_scores, reference_collectors=None
+):
+    """
+    بيوزّع كل عميل (رقم هوية) بكل حساباته ككتلة واحدة.
+    الأولوية العنيفة لعدد الحسابات ثم عدد العملاء ثم المبلغ.
+    """
+    reference_collectors = reference_collectors or target_collectors
+    n = max(len(balance_specs), 1)
+
+    weights = []
+    for i in range(n):
+        if i == 0:
+            weights.append(1_000_000_000)   # عدد الحسابات
+        elif i == 1:
+            weights.append(10_000_000)      # عدد العملاء
+        else:
+            weights.append(100 ** max(n - i - 1, 0))
+
+    scores = current_scores.copy()
+    for col, agg in balance_specs:
+        key = f"{col}__{agg}"
+        if key not in scores.columns:
+            scores[key] = 0.0
+
+    # تجميع العملاء كوحدات
+    client_units = []
+    for cid, grp in pool_df.groupby(id_col):
+        client_units.append({
+            "id": cid,
+            "count": len(grp),
+            "amount": float(grp[amt_col].sum()),
+            "rows": grp,
+        })
+    # الأكبر أولًا عشان التوازن يبقى أحسن
+    client_units.sort(key=lambda x: (x["count"], x["amount"]), reverse=True)
+
+    assigned_parts = []
+
+    for unit in client_units:
+        best_sp, best_penalty = None, None
+
+        for sp in target_collectors:
+            penalty = 0.0
+            for w, (col, agg) in zip(weights, balance_specs):
+                key = f"{col}__{agg}"
+                current_val = scores.loc[sp, key] if sp in scores.index else 0.0
+                ref_idx = [s for s in reference_collectors if s in scores.index]
+                target_avg = scores.loc[ref_idx, key].mean() if ref_idx else 0.0
+
+                if agg == "nunique_id":
+                    delta = 1
+                elif agg == "count_acc":
+                    delta = unit["count"]
+                elif agg == "sum_amount":
+                    delta = unit["amount"]
+                else:
+                    delta = 0
+
+                projected = current_val + delta
+                penalty += w * abs(projected - target_avg)
+
+            if best_penalty is None or penalty < best_penalty:
+                best_penalty, best_sp = penalty, sp
+
+        # تحديث السكور
+        for col, agg in balance_specs:
+            key = f"{col}__{agg}"
+            if agg == "sum_amount":
+                scores.loc[best_sp, key] = scores.loc[best_sp, key] + unit["amount"]
+            elif agg == "count_acc":
+                scores.loc[best_sp, key] = scores.loc[best_sp, key] + unit["count"]
+            elif agg == "nunique_id":
+                scores.loc[best_sp, key] = scores.loc[best_sp, key] + 1
+
+        part = unit["rows"].copy()
+        part[sp_col] = best_sp
+        assigned_parts.append(part)
+
+    if not assigned_parts:
+        return pool_df.iloc[0:0].copy()
+    return pd.concat(assigned_parts, ignore_index=True)
+
+
+
 # ------------------------------------------------------------------
 # 3) التوزيع الموزون بالأولوية (Greedy Weighted Assignment)
 # ------------------------------------------------------------------
@@ -185,7 +272,15 @@ def assign_pool_by_priority(pool_df, target_collectors, sp_col, id_col, acc_col,
     reference_collectors = reference_collectors or target_collectors
     # وزن كل معيار يقل بشكل كبير كل ما ننزل رتبة، عشان الأعلى يسيطر
     n = max(len(balance_specs), 1)
-    weights = [100 ** (n - i - 1) for i in range(n)]
+    # أول معيارين (حسابات + عملاء) أوزان خرافية، الباقي ضعيف
+    weights = []
+    for i in range(n):
+        if i == 0:          # عدد الحسابات
+            weights.append(1_000_000_000)
+        elif i == 1:        # عدد العملاء
+            weights.append(10_000_000)
+        else:
+            weights.append(100 ** max(n - i - 1, 0))
 
     scores = current_scores.copy()
     for col, agg in balance_specs:
@@ -263,7 +358,7 @@ def run_priority_balancing(df, sp_col, id_col, acc_col, amt_col, age_col,
 
     if not stratify_cols:
         scores = collector_scores(df, sp_col, balance_specs, id_col)
-        result = assign_pool_by_priority(
+        result = assign_pool_by_client_units(
             pool_df, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
             balance_specs, scores, reference_collectors
         )
@@ -281,7 +376,7 @@ def run_priority_balancing(df, sp_col, id_col, acc_col, amt_col, age_col,
 
         scores = collector_scores(sub_ref, sp_col, balance_specs, id_col)
         results.append(
-            assign_pool_by_priority(
+            assign_pool_by_client_units(
                 sub_pool, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
                 balance_specs, scores, reference_collectors
             )
@@ -3713,20 +3808,18 @@ elif page == "التوزيع":
             "مبلغ المديونية": {"kind": "balance", "agg": "sum_amount"},
         }
     
-        # 1) التجميع (Stratify) الأول — كل فئة تتوازن لوحدها
+        # التجميع (Stratify) الأول
         for spec in extra_specs:
             if spec["kind"] == "stratify":
                 path.append(spec["col"])
                 col_map[spec["col"]] = spec["col"]
                 local_criteria[spec["col"]] = {"kind": "stratify"}
     
-        # 2) معايير الاتزان — عدد الحسابات أولًا وبفارق كبير في الوزن
-        #    الترتيب هنا = الأولوية (اللي فوق بياخد وزن أعلى بكتير)
-        path.append("عدد الحسابات")          # ← أهم حاجة عندك
-        path.append("مبلغ المديونية")        # بعد كده المبلغ
-        path.append("عدد العملاء")           # بعد كده عدد العملاء
+        # ===== أولوية عنيفة للحسابات + العملاء =====
+        path.append("عدد الحسابات")   # أعلى أولوية
+        path.append("عدد العملاء")    # تاني أعلى
+        path.append("مبلغ المديونية") # بعد كده
     
-        # 3) أي أعمدة balance إضافية في الآخر
         for spec in extra_specs:
             if spec["kind"] == "balance":
                 path.append(spec["col"])
@@ -3777,7 +3870,7 @@ elif page == "التوزيع":
 
         if not stratify_cols:
             scores = collector_scores(df, sp_col, balance_specs, id_col)
-            result = assign_pool_by_priority(
+            result = assign_pool_by_client_units(
                 pool_df, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
                 balance_specs, scores, reference_collectors,
             )
@@ -3794,7 +3887,7 @@ elif page == "التوزيع":
 
             scores = collector_scores(sub_ref, sp_col, balance_specs, id_col)
             results.append(
-                assign_pool_by_priority(
+                assign_pool_by_client_units(
                     sub_pool, target_collectors, sp_col, id_col, acc_col, amt_col, age_col,
                     balance_specs, scores, reference_collectors,
                 )
@@ -3842,19 +3935,46 @@ elif page == "التوزيع":
                 remaining_df = df[df[core["sp_col"]].isin(remaining_sps)]
 
                 with st.spinner("جاري التوزيع..."):
-                    assigned = run_priority_balancing_local(
-                        df=remaining_df,
-                        sp_col=core["sp_col"],
-                        id_col=core["id_col"],
-                        acc_col=core["acc_col"],
-                        amt_col=core["amt_col"],
-                        age_col=None,
-                        path=path,
-                        col_map=col_map,
-                        local_criteria=local_criteria,
-                        target_collectors=remaining_sps,
-                        pool_df=leaving_df,
-                    )
+                    # بعد ما تبني path و col_map و local_criteria
+                    stratify_cols, balance_specs = resolve_path_columns_local(path, col_map, local_criteria)
+                    
+                    leaving_df = df[df[core["sp_col"]] == leaving_sp]
+                    remaining_df = df[df[core["sp_col"]].isin(remaining_sps)]
+                    
+                    # لو مفيش stratify → نوزّع كل محفظة المستقيل كعملاء كاملين
+                    if not stratify_cols:
+                        scores = collector_scores(remaining_df, core["sp_col"], balance_specs, core["id_col"])
+                        assigned = assign_pool_by_client_units(
+                            leaving_df,
+                            remaining_sps,
+                            core["sp_col"],
+                            core["id_col"],
+                            core["acc_col"],
+                            core["amt_col"],
+                            balance_specs,
+                            scores,
+                            reference_collectors=remaining_sps,
+                        )
+                    else:
+                        # لو فيه stratify: نوزّع جوه كل فئة بنفس أسلوب العميل الكامل
+                        results = []
+                        for group_vals, sub_pool in leaving_df.groupby(stratify_cols):
+                            mask = np.ones(len(remaining_df), dtype=bool)
+                            gv = group_vals if isinstance(group_vals, tuple) else (group_vals,)
+                            for col, val in zip(stratify_cols, gv):
+                                mask &= (remaining_df[col] == val)
+                            sub_ref = remaining_df[mask]
+                            scores = collector_scores(sub_ref, core["sp_col"], balance_specs, core["id_col"])
+                            results.append(
+                                assign_pool_by_client_units(
+                                    sub_pool, remaining_sps,
+                                    core["sp_col"], core["id_col"], core["acc_col"], core["amt_col"],
+                                    balance_specs, scores, remaining_sps,
+                                )
+                            )
+                        assigned = pd.concat(results, ignore_index=True) if results else leaving_df.iloc[0:0]
+                    
+                    new_df = pd.concat([remaining_df, assigned], ignore_index=True)
 
                 new_df = pd.concat([remaining_df, assigned], ignore_index=True)
 
