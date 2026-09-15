@@ -30,6 +30,23 @@ from priority_path_engine import build_priority_path_ui, run_priority_balancing
 
 NONE_OPT = "— بدون —"
 
+"""
+حط السطور دي مرة واحدة بس فوق ملف StreamlitAPP.py، مع باقي الـ imports
+اللي في أول الملف (فوق أول "if page == ..." بتاعك) — مش جوه سلسلة الـ if/elif.
+"""
+
+from priority_path_engine import build_priority_path_ui, run_priority_balancing
+
+NONE_OPT = "— بدون —"
+
+
+def _col_or_none(label, cols, key):
+    return st.selectbox(label, [NONE_OPT] + list(cols), key=key)
+
+
+def _resolve(v):
+    return None if v == NONE_OPT else v
+
 
 def _col_or_none(label, cols, key):
     return st.selectbox(label, [NONE_OPT] + list(cols), key=key)
@@ -3901,6 +3918,11 @@ elif page == "التوزيع":
                             moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
                     st.download_button("تحميل ملف المحفظة بعد التساوي", output.getvalue(),
                                         file_name="portfolio_equalized.xlsx")
+
+
+
+
+
 
 elif page == "التقرير اليومي للسدادات":
     st.subheader("📞 التقرير اليومي للسدادات")
