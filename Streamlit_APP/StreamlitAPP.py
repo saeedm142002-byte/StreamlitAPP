@@ -23,7 +23,20 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import streamlit as st
 
 
+import io
+import pandas as pd
+import streamlit as st
+from priority_path_engine import build_priority_path_ui, run_priority_balancing
 
+NONE_OPT = "— بدون —"
+
+
+def _col_or_none(label, cols, key):
+    return st.selectbox(label, [NONE_OPT] + list(cols), key=key)
+
+
+def _resolve(v):
+    return None if v == NONE_OPT else v
 
 """
 محرك التوازن متعدد المعايير مع أولوية (Priority Path)
@@ -3598,20 +3611,6 @@ elif page == "النشاط":
 # استبدل بيه كتلة "elif page == 'التوزيع':" بالكامل
 # ==========================================================================
 
-import io
-import pandas as pd
-import streamlit as st
-from priority_path_engine import build_priority_path_ui, run_priority_balancing
-
-NONE_OPT = "— بدون —"
-
-
-def _col_or_none(label, cols, key):
-    return st.selectbox(label, [NONE_OPT] + list(cols), key=key)
-
-
-def _resolve(v):
-    return None if v == NONE_OPT else v
 
 
 elif page == "التوزيع":
