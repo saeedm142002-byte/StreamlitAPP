@@ -41,11 +41,7 @@ def _resolve(v):
 
 
 
-"""
-محرك التوازن متعدد المعايير مع أولوية (Priority Path)
-=====================================================
-يُستخدم بدل الأعمدة الهاردكودد في الثلاث سيناريوهات (هيمشي / جديد جاي / تساوي المحفظة).
-"""
+
 
 import streamlit as st
 import pandas as pd
@@ -3728,6 +3724,14 @@ elif page == "التوزيع":
     def _load_excel_bytes(file_bytes: bytes) -> pd.DataFrame:
         return pd.read_excel(io.BytesIO(file_bytes))
 
+    def _safe_sheet_name(name: str) -> str:
+        """Excel بيرفض أسماء شيتات أطول من 31 حرف أو فيها رموز معينة."""
+        bad_chars = ["\\", "/", "*", "[", "]", ":", "?"]
+        clean = str(name)
+        for ch in bad_chars:
+            clean = clean.replace(ch, "_")
+        return clean[:31] if clean else "sheet"
+
     # ================================================================
     # اختيار الأعمدة
     # ================================================================
@@ -3741,14 +3745,27 @@ elif page == "التوزيع":
             acc_col = st.selectbox("عمود رقم الحساب", cols, key=f"{key_prefix}_acc")
         with c2:
             amt_col = st.selectbox("عمود مبلغ المديونية", cols, key=f"{key_prefix}_amt")
-            product_col = st.selectbox("عمود نوع المنتج", cols, key=f"{key_prefix}_product")
             supervisor_col = st.selectbox("عمود المشرف", cols, key=f"{key_prefix}_supervisor")
 
-        has_class = st.checkbox("فيه عمود تصنيف (NPL / Dpd60)؟", key=f"{key_prefix}_has_class")
+        has_product = st.checkbox(
+            "فيه عمود نوع منتج؟", value=True, key=f"{key_prefix}_has_product"
+        )
+        product_col = None
         classification_col = None
-        if has_class:
-            classification_col = st.selectbox(
-                "عمود التصنيف", cols, key=f"{key_prefix}_class"
+
+        if has_product:
+            product_col = st.selectbox("عمود نوع المنتج", cols, key=f"{key_prefix}_product")
+
+            has_class = st.checkbox(
+                "فيه عمود تصنيف (NPL / Dpd60)؟", key=f"{key_prefix}_has_class"
+            )
+            if has_class:
+                classification_col = st.selectbox(
+                    "عمود التصنيف", cols, key=f"{key_prefix}_class"
+                )
+        else:
+            st.caption(
+                "من غير عمود نوع منتج، التصنيف مينفعش يتحدد لوحده (التصنيف بييجي كتفصيل تحت المنتج)."
             )
 
         return {
@@ -3764,12 +3781,19 @@ elif page == "التوزيع":
     # ================================================================
     # قراءة وتنظيف شيت المستهدفات
     # ================================================================
-    def load_targets(targets_df: pd.DataFrame, has_classification: bool) -> pd.DataFrame:
+    def load_targets(
+        targets_df: pd.DataFrame,
+        has_product: bool,
+        has_classification: bool,
+    ) -> pd.DataFrame:
         """
         يتوقع أعمدة:
-        المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية
+        المحصل | [نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية
+        (نوع المنتج والتصنيف اختياريين)
         """
-        required = ["المحصل", "نوع المنتج", "عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]
+        required = ["المحصل", "عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]
+        if has_product:
+            required.append("نوع المنتج")
         if has_classification:
             required.append("التصنيف")
 
@@ -3779,7 +3803,8 @@ elif page == "التوزيع":
 
         t = targets_df.copy()
         t["المحصل"] = t["المحصل"].astype(str).str.strip()
-        t["نوع المنتج"] = t["نوع المنتج"].astype(str).str.strip()
+        if has_product:
+            t["نوع المنتج"] = t["نوع المنتج"].astype(str).str.strip()
         if has_classification:
             t["التصنيف"] = t["التصنيف"].astype(str).str.strip()
 
@@ -3803,7 +3828,7 @@ elif page == "التوزيع":
         id_col: str,
         acc_col: str,
         amt_col: str,
-        product_col: str,
+        product_col: str | None = None,
         classification_col: str | None = None,
         amount_tolerance: float = 50_000,
     ) -> tuple[pd.DataFrame, pd.DataFrame, list]:
@@ -3812,24 +3837,45 @@ elif page == "التوزيع":
         - العميل (رقم الهوية) ينتقل كاملًا.
         - الأولوية: عدد الحسابات → عدد العملاء → المبلغ.
         - أي بواقي في الآخر تتوزع على أي محصل.
+        - نوع المنتج والتصنيف اختياريين: لو مش موجودين، التوزيع بيبقى على مستوى
+          المحصل كله من غير تقسيم لمجموعات.
         بيرجع: (النتيجة, ملخص التنفيذ, قائمة نواقص)
         """
         pool = pool_df.copy()
         pool[sp_col] = pool[sp_col].astype(object)
 
-        group_cols = [product_col]
-        if classification_col:
-            group_cols = [classification_col, product_col]
+        use_class = classification_col is not None
+        use_product = product_col is not None
+
+        # ترتيب ثابت للمفاتيح: التصنيف أولًا ثم المنتج
+        group_labels = []
+        if use_class:
+            group_labels.append("التصنيف")
+        if use_product:
+            group_labels.append("نوع المنتج")
+
+        df_group_cols = []
+        if use_class:
+            df_group_cols.append(classification_col)
+        if use_product:
+            df_group_cols.append(product_col)
+
+        def target_key(row) -> tuple:
+            parts = []
+            if use_class:
+                parts.append(str(row["التصنيف"]).strip())
+            if use_product:
+                parts.append(str(row["نوع المنتج"]).strip())
+            if not parts:
+                parts = ["__ALL__"]
+            return tuple(parts)
 
         # بناء قاموس المستهدفات
-        # key = (product,) أو (classification, product)
+        # key = (تصنيف, منتج) أو (منتج,) أو (تصنيف,) أو ("__ALL__",)
         target_map = {}  # {collector: {group_key: {count, clients, amount}}}
         for _, row in targets.iterrows():
             sp = row["المحصل"]
-            if classification_col:
-                gkey = (str(row["التصنيف"]).strip(), str(row["نوع المنتج"]).strip())
-            else:
-                gkey = (str(row["نوع المنتج"]).strip(),)
+            gkey = target_key(row)
 
             if sp not in target_map:
                 target_map[sp] = {}
@@ -3852,21 +3898,15 @@ elif page == "التوزيع":
             for sp in collectors
         }
 
-        # كل العملاء في الـ pool كوحدات
-        # groupby حسب المجموعة (منتج / منتج×تصنيف) ثم حسب الهوية
         assigned_rows = []
         shortage = []
 
-        def make_group_key(row):
-            if classification_col:
-                return (str(row[classification_col]).strip(), str(row[product_col]).strip())
-            return (str(row[product_col]).strip(),)
-
-        # نشتغل مجموعة مجموعة
-        if classification_col:
-            grouped = pool.groupby([classification_col, product_col], dropna=False)
+        # كل العملاء في الـ pool كوحدات، مجموعة مجموعة
+        if df_group_cols:
+            grouped = pool.groupby(df_group_cols, dropna=False)
         else:
-            grouped = pool.groupby(product_col, dropna=False)
+            # مفيش تقسيم لمجموعات → المحفظة كلها مجموعة واحدة
+            grouped = [(("__ALL__",), pool)]
 
         for gvals, sub in grouped:
             gkey = gvals if isinstance(gvals, tuple) else (gvals,)
@@ -3898,25 +3938,20 @@ elif page == "التوزيع":
                         gkey, {"count": 0, "clients": 0, "amount": 0.0}
                     )
 
-                    # هل لسه محتاج حسابات/عملاء؟
                     need_count = t["count"] - d["count"]
                     need_clients = t["clients"] - d["clients"]
                     need_amount = t["amount"] - d["amount"]
 
-                    # لو خلاص وصل للمستهدف في الحسابات والعملاء، ندي أولوية أقل
-                    # (نسمح بتجاوز بسيط في المبلغ في حدود الـ tolerance)
                     score_count = need_count / max(t["count"], 1)
                     score_clients = need_clients / max(t["clients"], 1)
                     score_amount = need_amount / max(t["amount"], 1.0)
 
-                    # أولوية عنيفة للحسابات ثم العملاء ثم المبلغ
                     score = (
                         1_000_000 * score_count
                         + 10_000 * score_clients
                         + score_amount
                     )
 
-                    # لو العدد هيعدّي المستهدف بأكتر من 3 نرفضه
                     if d["count"] + unit["count"] > t["count"] + 3:
                         score -= 1_000_000_000
                     if d["clients"] + 1 > t["clients"] + 3:
@@ -3933,7 +3968,6 @@ elif page == "التوزيع":
                         key=lambda s: done[s].get(gkey, {"count": 0})["count"],
                     )
 
-                # خصص
                 part = unit["rows"].copy()
                 part[sp_col] = best_sp
                 assigned_rows.append(part)
@@ -3955,9 +3989,9 @@ elif page == "التوزيع":
         for sp in collectors:
             for gkey, t in target_map[sp].items():
                 d = done[sp].get(gkey, {"count": 0, "clients": 0, "amount": 0.0})
+                gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
                 row = {
                     "المحصل": sp,
-                    "نوع المنتج": gkey[-1],
                     "عدد الحسابات (مستهدف)": t["count"],
                     "عدد الحسابات (فعلي)": d["count"],
                     "فرق الحسابات": d["count"] - t["count"],
@@ -3968,11 +4002,12 @@ elif page == "التوزيع":
                     "مبلغ المديونية (فعلي)": round(d["amount"], 2),
                     "فرق المبلغ": round(d["amount"] - t["amount"], 2),
                 }
-                if classification_col:
-                    row["التصنيف"] = gkey[0]
+                if use_product:
+                    row["نوع المنتج"] = gkey_dict.get("نوع المنتج", "")
+                if use_class:
+                    row["التصنيف"] = gkey_dict.get("التصنيف", "")
                 summary_rows.append(row)
 
-                # تسجيل نواقص واضحة
                 if d["count"] < t["count"] or d["clients"] < t["clients"]:
                     shortage.append({
                         "المحصل": sp,
@@ -3985,7 +4020,7 @@ elif page == "التوزيع":
         return result, summary, shortage
 
     # ================================================================
-    # سيناريو 1: محصل هيمشي
+    # سيناريو 1: محصل/محصلين هيمشوا
     # ================================================================
     if distribution_type == "محصل هيمشي":
         st.markdown("#### 1) ارفع ملف المحفظة")
@@ -3996,40 +4031,47 @@ elif page == "التوزيع":
             core = pick_columns(df_raw, "leave")
             df = df_raw.dropna(subset=[core["acc_col"]]).copy()
 
-            leaving_sp = st.selectbox(
-                "اختر المحصل اللي هيمشي",
+            leaving_sps = st.multiselect(
+                "اختر المحصل/المحصلين اللي هيمشوا (تقدر تختار أكتر من واحد)",
                 sorted(df[core["sp_col"]].dropna().unique()),
                 key="leaving_sp_select",
             )
 
             st.markdown("#### 2) ارفع شيت المستهدفات (للمحصلين الباقيين فقط)")
             st.caption(
-                "الأعمدة المطلوبة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+                "الأعمدة المطلوبة: المحصل | [نوع المنتج] | [التصنيف] | "
+                "عدد الحسابات | عدد العملاء | مبلغ المديونية"
             )
             targets_file = st.file_uploader(
                 "شيت المستهدفات", type=["xlsx"], key="leave_targets"
             )
 
-            if targets_file and st.button("نفذ التوزيع", type="primary", key="leave_run"):
+            if not leaving_sps:
+                st.info("اختر محصل واحد على الأقل هيمشي.")
+
+            if targets_file and leaving_sps and st.button("نفذ التوزيع", type="primary", key="leave_run"):
                 try:
                     targets_raw = _load_excel_bytes(targets_file.getvalue())
                     targets = load_targets(
-                        targets_raw, has_classification=bool(core["classification_col"])
+                        targets_raw,
+                        has_product=bool(core["product_col"]),
+                        has_classification=bool(core["classification_col"]),
                     )
 
-                    # نتأكد إن المستقيل مش موجود في المستهدفات
-                    if leaving_sp in set(targets["المحصل"]):
+                    # نتأكد إن المستقيلين مش موجودين في المستهدفات
+                    still_present = [sp for sp in leaving_sps if sp in set(targets["المحصل"])]
+                    if still_present:
                         st.warning(
-                            f"المحصل المستقيل «{leaving_sp}» موجود في شيت المستهدفات — "
-                            "يفضّل تشيله. هكمّل بعد حذفه تلقائيًا."
+                            f"المحصلين المستقيلين «{', '.join(still_present)}» موجودين في شيت "
+                            "المستهدفات — يفضّل تشيلهم. هكمّل بعد حذفهم تلقائيًا."
                         )
-                        targets = targets[targets["المحصل"] != leaving_sp]
+                        targets = targets[~targets["المحصل"].isin(leaving_sps)]
 
-                    pool = df[df[core["sp_col"]] == leaving_sp].copy()
-                    remaining = df[df[core["sp_col"]] != leaving_sp].copy()
+                    pool = df[df[core["sp_col"]].isin(leaving_sps)].copy()
+                    remaining = df[~df[core["sp_col"]].isin(leaving_sps)].copy()
 
                     if pool.empty:
-                        st.error("مفيش حسابات للمحصل المستقيل")
+                        st.error("مفيش حسابات للمحصلين المستقيلين")
                         st.stop()
 
                     with st.spinner("جاري التوزيع حسب المستهدفات..."):
@@ -4055,8 +4097,9 @@ elif page == "التوزيع":
                         st.warning("فيه مستهدفات متكملتش (نقص في الحسابات/العملاء):")
                         st.dataframe(pd.DataFrame(shortage), use_container_width=True)
 
-                    # ملخص سريع بعد التوزيع
-                    final_cols = [core["sp_col"], core["product_col"]]
+                    final_cols = [core["sp_col"]]
+                    if core["product_col"]:
+                        final_cols.append(core["product_col"])
                     if core["classification_col"]:
                         final_cols.append(core["classification_col"])
                     final_summary = (
@@ -4086,7 +4129,7 @@ elif page == "التوزيع":
                     st.exception(e)
 
     # ================================================================
-    # سيناريو 2: محصل جديد جاي
+    # سيناريو 2: محصل/محصلين جداد جايين
     # ================================================================
     elif distribution_type == "محصل جديد جاي":
         st.markdown("#### 1) ارفع ملف المحفظة الحالية")
@@ -4101,33 +4144,53 @@ elif page == "التوزيع":
 
             source_df = _load_excel_bytes(source_file.getvalue())
             # نتأكد إن أعمدة المصدر موجودة
-            for col_key in ["sp_col", "id_col", "acc_col", "amt_col", "product_col"]:
+            check_keys = ["sp_col", "id_col", "acc_col", "amt_col"]
+            if core["product_col"]:
+                check_keys.append("product_col")
+            for col_key in check_keys:
                 col_name = core[col_key]
                 if col_name not in source_df.columns:
                     st.error(f"عمود «{col_name}» مش موجود في ملف المصدر")
                     st.stop()
 
-            new_sp_name = st.text_input("اسم المحصل الجديد").strip()
+            new_names_raw = st.text_area(
+                "أسماء المحصلين الجداد (اكتب اسم في كل سطر — ممكن تضيف أكتر من محصل مرة واحدة)",
+                key="new_sp_names_area",
+            )
+            new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
 
             st.markdown("#### 3) ارفع شيت المستهدفات")
             st.caption(
-                "المستهدفات تشمل المحصل الجديد + أي محصلين تانيين لو هيتاخد منهم. "
-                "الأعمدة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+                "المستهدفات تشمل المحصلين الجداد + أي محصلين تانيين لو هيتاخد منهم. "
+                "الأعمدة: المحصل | [نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
             )
             targets_file = st.file_uploader(
                 "شيت المستهدفات", type=["xlsx"], key="new_targets"
             )
 
+            if not new_sp_names:
+                st.info("اكتب اسم محصل جديد واحد على الأقل، اسم في كل سطر.")
+
             if (
                 targets_file
-                and new_sp_name
-                and st.button("نفذ توزيع المحصل الجديد", type="primary", key="new_run")
+                and new_sp_names
+                and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run")
             ):
                 try:
                     targets = load_targets(
                         _load_excel_bytes(targets_file.getvalue()),
+                        has_product=bool(core["product_col"]),
                         has_classification=bool(core["classification_col"]),
                     )
+
+                    missing_targets = [
+                        n for n in new_sp_names if n not in set(targets["المحصل"])
+                    ]
+                    if missing_targets:
+                        st.warning(
+                            f"تنبيه: المحصلين «{', '.join(missing_targets)}» مش موجودين "
+                            "في شيت المستهدفات، مش هياخدوا حسابات."
+                        )
 
                     # المصدر = اللي هيتوزّع (عادةً الإهمال)
                     pool = source_df.dropna(subset=[core["acc_col"]]).copy()
@@ -4144,22 +4207,22 @@ elif page == "التوزيع":
                             classification_col=core["classification_col"],
                         )
 
-                    st.success(f"تم تجهيز محفظة: {new_sp_name}")
+                    st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
                     if shortage:
                         st.warning("مستهدفات متكملتش:")
                         st.dataframe(pd.DataFrame(shortage), use_container_width=True)
 
-                    # محفظة المحصل الجديد فقط
-                    new_portfolio = assigned[assigned[core["sp_col"]] == new_sp_name].copy()
-                    others = assigned[assigned[core["sp_col"]] != new_sp_name].copy()
+                    others = assigned[~assigned[core["sp_col"]].isin(new_sp_names)].copy()
 
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                        new_portfolio.to_excel(
-                            writer, index=False, sheet_name="محفظة المحصل الجديد"
-                        )
+                        for name in new_sp_names:
+                            portion = assigned[assigned[core["sp_col"]] == name].copy()
+                            portion.to_excel(
+                                writer, index=False, sheet_name=_safe_sheet_name(f"محفظة {name}")
+                            )
                         if not others.empty:
                             others.to_excel(
                                 writer, index=False, sheet_name="توزيع باقي المحصلين"
@@ -4167,10 +4230,16 @@ elif page == "التوزيع":
                         summary.to_excel(
                             writer, index=False, sheet_name="ملخص مقابل المستهدف"
                         )
+
+                    if len(new_sp_names) == 1:
+                        out_name = f"new_collector_{new_sp_names[0]}.xlsx"
+                    else:
+                        out_name = "new_collectors.xlsx"
+
                     st.download_button(
                         "تحميل النتيجة",
                         output.getvalue(),
-                        file_name=f"new_collector_{new_sp_name}.xlsx",
+                        file_name=out_name,
                     )
                 except Exception as e:
                     st.error(f"حصل خطأ: {e}")
@@ -4190,7 +4259,7 @@ elif page == "التوزيع":
 
             st.markdown("#### 2) ارفع شيت المستهدفات (لكل المحصلين)")
             st.caption(
-                "الأعمدة: المحصل | نوع المنتج | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+                "الأعمدة: المحصل | [نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
             )
             targets_file = st.file_uploader(
                 "شيت المستهدفات", type=["xlsx"], key="eq_targets"
@@ -4215,10 +4284,10 @@ elif page == "التوزيع":
                 try:
                     targets = load_targets(
                         _load_excel_bytes(targets_file.getvalue()),
+                        has_product=bool(core["product_col"]),
                         has_classification=bool(core["classification_col"]),
                     )
 
-                    # تحديد الحسابات القابلة للنقل
                     if status_col != "— بدون —" and included_statuses:
                         movable = df[df[status_col].astype(str).isin(included_statuses)].copy()
                         fixed = df[~df[status_col].astype(str).isin(included_statuses)].copy()
@@ -4263,8 +4332,6 @@ elif page == "التوزيع":
                 except Exception as e:
                     st.error(f"حصل خطأ: {e}")
                     st.exception(e)
-
-
 
 
 
