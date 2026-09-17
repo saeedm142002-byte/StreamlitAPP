@@ -4216,6 +4216,9 @@ elif page == "التوزيع":
 
                     others = assigned[~assigned[core["sp_col"]].isin(new_sp_names)].copy()
 
+                    # المحفظة الكاملة بعد الإضافة = المحفظة الأصلية + الحسابات المسحوبة من المصدر
+                    full_portfolio = pd.concat([df_port, assigned], ignore_index=True)
+
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
                         for name in new_sp_names:
@@ -4230,6 +4233,9 @@ elif page == "التوزيع":
                         summary.to_excel(
                             writer, index=False, sheet_name="ملخص مقابل المستهدف"
                         )
+                        full_portfolio.to_excel(
+                            writer, index=False, sheet_name="المحفظة كاملة بعد الإضافة"
+                        )
 
                     if len(new_sp_names) == 1:
                         out_name = f"new_collector_{new_sp_names[0]}.xlsx"
@@ -4241,9 +4247,6 @@ elif page == "التوزيع":
                         output.getvalue(),
                         file_name=out_name,
                     )
-                except Exception as e:
-                    st.error(f"حصل خطأ: {e}")
-                    st.exception(e)
 
     # ================================================================
     # سيناريو 3: تساوي المحفظة
