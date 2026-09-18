@@ -140,6 +140,99 @@ def resolve_path_columns(path, col_map):
     return stratify_cols, balance_specs
 
 
+
+def equalize_among_new(
+    pool_df: pd.DataFrame,
+    new_sp_names: list,
+    sp_col: str,
+    id_col: str,
+    amt_col: str,
+    product_col: str | None = None,
+    classification_col: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    يوزّع pool_df بالتساوي (حسابات + عملاء) بين new_sp_names بس،
+    وده جوه كل مجموعة (تصنيف/منتج) لوحدها لو موجودين.
+    مفيش شيت مستهدفات هنا؛ العميل (id) بيتحرك ككتلة واحدة كاملة لمحصل واحد بس.
+    """
+    pool = pool_df.copy()
+
+    use_class = classification_col is not None
+    use_product = product_col is not None
+
+    group_labels = []
+    df_group_cols = []
+    if use_class:
+        group_labels.append("التصنيف")
+        df_group_cols.append(classification_col)
+    if use_product:
+        group_labels.append("نوع المنتج")
+        df_group_cols.append(product_col)
+
+    if df_group_cols:
+        grouped = pool.groupby(df_group_cols, dropna=False)
+    else:
+        grouped = [(("__ALL__",), pool)]
+
+    overall_done = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in new_sp_names}
+    assigned_rows = []
+    summary_rows = []
+
+    for gvals, sub in grouped:
+        gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+        gkey = tuple(str(x).strip() for x in gkey)
+        gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+
+        # عدّاد التساوي داخل المجموعة (التصنيف/المنتج) دي بس
+        gdone = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in new_sp_names}
+
+        units = []
+        for cid, grp in sub.groupby(id_col):
+            units.append({
+                "id": cid,
+                "count": len(grp),
+                "amount": float(grp[amt_col].sum()),
+                "rows": grp,
+            })
+        # الأكبر أولًا عشان التساوي يطلع أدق (bin-packing greedy)
+        units.sort(key=lambda u: (u["count"], u["amount"]), reverse=True)
+
+        for unit in units:
+            # يروح لأقل واحد حسابات، وبعدين أقل عملاء، وبعدين أقل مبلغ
+            best_sp = min(
+                new_sp_names,
+                key=lambda s: (gdone[s]["count"], gdone[s]["clients"], gdone[s]["amount"]),
+            )
+            part = unit["rows"].copy()
+            part[sp_col] = best_sp
+            assigned_rows.append(part)
+
+            gdone[best_sp]["count"] += unit["count"]
+            gdone[best_sp]["clients"] += 1
+            gdone[best_sp]["amount"] += unit["amount"]
+
+            overall_done[best_sp]["count"] += unit["count"]
+            overall_done[best_sp]["clients"] += 1
+            overall_done[best_sp]["amount"] += unit["amount"]
+
+        for sp in new_sp_names:
+            d = gdone[sp]
+            row = {"المحصل": sp, **gkey_dict}
+            row["عدد الحسابات"] = d["count"]
+            row["عدد العملاء"] = d["clients"]
+            row["مبلغ المديونية"] = round(d["amount"], 2)
+            summary_rows.append(row)
+
+    result = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
+    summary = pd.DataFrame(summary_rows)
+    return result, summary
+
+
+
+
+
+
+
 # ------------------------------------------------------------------
 # 2) حساب "درجة" المحصل الحالية بالنسبة لكل معيار اتزان
 # ------------------------------------------------------------------
@@ -4154,7 +4247,6 @@ elif page == "التوزيع":
             core = pick_columns(df_port, "newc")
 
             source_df = _load_excel_bytes(source_file.getvalue())
-            # نتأكد إن أعمدة المصدر موجودة
             check_keys = ["sp_col", "id_col", "acc_col", "amt_col"]
             if core["product_col"]:
                 check_keys.append("product_col")
@@ -4170,74 +4262,46 @@ elif page == "التوزيع":
             )
             new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
 
-            st.markdown("#### 3) ارفع شيت المستهدفات")
             st.caption(
-                "الأعمدة: من (المحصل المصدر في ملف الإهمال) | المحصل (الجديد اللي هياخد) | "
-                "[نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية. "
-                "أي حسابات في ملف الإهمال مالهاش سطر مطابق في المستهدفات هتفضل زي ما هي مع نفس المحصل."
+                "هيتم توزيع كل الحسابات اللي في ملف المصدر بالتساوي بين المحصلين الجداد اللي كتبتهم، "
+                "جوه كل تصنيف (ولو فيه منتج) لوحده — بحيث عدد الحسابات وعدد العملاء يبقوا متساويين قدر الإمكان بينهم."
             )
-            targets_file = st.file_uploader(
-                "شيت المستهدفات", type=["xlsx"], key="new_targets"
-            )
-            ...
-            if (
-                targets_file
-                and new_sp_names
-                and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run")
-            ):
+
+            if not new_sp_names:
+                st.info("اكتب اسم محصل جديد واحد على الأقل، اسم في كل سطر.")
+
+            if new_sp_names and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run"):
                 try:
-                    targets = load_targets(
-                        _load_excel_bytes(targets_file.getvalue()),
-                        has_product=bool(core["product_col"]),
-                        has_classification=bool(core["classification_col"]),
-                        use_source=True,   # <-- الإضافة
-                    )
-
-                    # تنبيه لو "من" فيها أسماء مش موجودة في ملف المصدر أصلاً
-                    unknown_sources = sorted(
-                        set(targets["من"]) - set(source_df[core["sp_col"]].astype(str).str.strip())
-                    )
-                    if unknown_sources:
-                        st.warning(
-                            f"تنبيه: القيم دي في عمود «من» مش موجودة في ملف المصدر: "
-                            f"{', '.join(unknown_sources)}"
-                        )
-
-                    missing_targets = [
-                        n for n in new_sp_names if n not in set(targets["المحصل"])
-                    ]
-                    if missing_targets:
-                        st.warning(
-                            f"تنبيه: المحصلين «{', '.join(missing_targets)}» مش موجودين "
-                            "في شيت المستهدفات، مش هياخدوا حسابات."
-                        )
-
                     pool = source_df.dropna(subset=[core["acc_col"]]).copy()
 
-                    with st.spinner("جاري التوزيع..."):
-                        assigned, summary, shortage = distribute_by_targets(
+                    if pool.empty:
+                        st.error("ملف المصدر فاضي")
+                        st.stop()
+
+                    with st.spinner("جاري التساوي بين المحصلين الجداد..."):
+                        assigned, summary = equalize_among_new(
                             pool_df=pool,
-                            targets=targets,
+                            new_sp_names=new_sp_names,
                             sp_col=core["sp_col"],
                             id_col=core["id_col"],
-                            acc_col=core["acc_col"],
                             amt_col=core["amt_col"],
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
-                            allow_leftover=True,
-                            use_source=True,   # <-- الإضافة
                         )
 
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
+                    st.markdown("### ملخص التوزيع (حسب التصنيف/المنتج)")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-                    if shortage:
-                        st.warning("مستهدفات متكملتش:")
-                        st.dataframe(pd.DataFrame(shortage), use_container_width=True)
+                    # إجمالي كل محصل جديد عبر كل التصنيفات
+                    totals = (
+                        summary.groupby("المحصل")[["عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]]
+                        .sum()
+                        .reset_index()
+                    )
+                    st.markdown("### الإجمالي الكلي لكل محصل جديد")
+                    st.dataframe(totals, use_container_width=True, hide_index=True)
 
-                    others = assigned[~assigned[core["sp_col"]].isin(new_sp_names)].copy()
-
-                    # المحفظة الكاملة بعد الإضافة = المحفظة الأصلية + الحسابات المسحوبة من المصدر
                     full_portfolio = pd.concat([df_port, assigned], ignore_index=True)
 
                     output = io.BytesIO()
@@ -4247,13 +4311,8 @@ elif page == "التوزيع":
                             portion.to_excel(
                                 writer, index=False, sheet_name=_safe_sheet_name(f"محفظة {name}")
                             )
-                        if not others.empty:
-                            others.to_excel(
-                                writer, index=False, sheet_name="توزيع باقي المحصلين"
-                            )
-                        summary.to_excel(
-                            writer, index=False, sheet_name="ملخص مقابل المستهدف"
-                        )
+                        summary.to_excel(writer, index=False, sheet_name="ملخص التوزيع")
+                        totals.to_excel(writer, index=False, sheet_name="إجمالي المحصلين الجداد")
                         full_portfolio.to_excel(
                             writer, index=False, sheet_name="المحفظة كاملة بعد الإضافة"
                         )
