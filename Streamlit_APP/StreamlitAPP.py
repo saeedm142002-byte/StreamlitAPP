@@ -3870,7 +3870,7 @@ elif page == "التوزيع":
                     "amount": float(grp[amt_col].sum()),
                     "rows": grp,
                 })
-            units.sort(key=lambda u: (u["count"], u["amount"]))
+            units.sort(key=lambda u: (u["count"], u["clients"] if "clients" in u else 0, u["amount"]))
 
             for unit in units:
                 # مين لسه تحت المتوسط
@@ -4047,7 +4047,7 @@ elif page == "التوزيع":
                     "amount": float(grp[amt_col].sum()),
                     "rows": grp,
                 })
-            units.sort(key=lambda u: (u["count"], u["amount"]))
+            units.sort(key=lambda u: (u["count"], u["clients"] if "clients" in u else 0, u["amount"]))
     
             for unit in units:
                 # مين لسه محتاج (تحت المتوسط)
@@ -4066,8 +4066,10 @@ elif page == "التوزيع":
                 best_sp = min(
                     still_needed,
                     key=lambda s: (
-                        gdone[s]["count"] - target["count"],
-                        gdone[s]["clients"] - target["clients"],
+                        # الأولوية الأولى: العملاء + الحسابات (وزن أعلى)
+                        (gdone[s]["clients"] - target["clients"]) * 2 + (gdone[s]["count"] - target["count"]) * 2,
+                        
+                        # الأولوية الثانية: المديونية
                         gdone[s]["amount"] - target["amount"],
                     ),
                 )
