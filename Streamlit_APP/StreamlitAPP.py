@@ -160,6 +160,8 @@ def equalize_new_with_old(
     """
     pool = pool_df.copy()
 
+    
+
     # القدام = أي محصل في المحفظة الحالية غير الجداد
     old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
     old_names = sorted(old_df[sp_col].dropna().unique())
@@ -4178,6 +4180,158 @@ elif page == "التوزيع":
         summary = pd.DataFrame(summary_rows)
         return result, summary, shortage
 
+        def equalize_new_with_old(
+        pool_df: pd.DataFrame,
+        portfolio_df: pd.DataFrame,
+        new_sp_names: list,
+        sp_col: str,
+        id_col: str,
+        amt_col: str,
+        product_col: str | None = None,
+        classification_col: str | None = None,
+        new_sp_filters: dict | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        pool = pool_df.copy()
+        new_sp_filters = new_sp_filters or {}
+
+        old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
+        old_names = sorted(old_df[sp_col].dropna().unique())
+        if not old_names:
+            raise ValueError("مفيش محصلين قدام في ملف المحفظة عشان نحسب عليهم المتوسط")
+
+        use_class = classification_col is not None
+        use_product = product_col is not None
+
+        group_labels = []
+        df_group_cols = []
+        if use_class:
+            group_labels.append("التصنيف")
+            df_group_cols.append(classification_col)
+        if use_product:
+            group_labels.append("نوع المنتج")
+            df_group_cols.append(product_col)
+
+        def is_eligible(sp: str, gkey_dict: dict) -> bool:
+            filt = new_sp_filters.get(sp, {})
+            prods = filt.get("products")
+            classes = filt.get("classifications")
+            if prods and gkey_dict.get("نوع المنتج") not in prods:
+                return False
+            if classes and gkey_dict.get("التصنيف") not in classes:
+                return False
+            return True
+
+        def old_stats_for_group(gkey) -> dict:
+            if df_group_cols:
+                mask = pd.Series(True, index=old_df.index)
+                for col, val in zip(df_group_cols, gkey):
+                    mask &= (old_df[col].astype(str).str.strip() == val)
+                sub = old_df[mask]
+            else:
+                sub = old_df
+
+            stats = {}
+            for sp in old_names:
+                s = sub[sub[sp_col] == sp]
+                stats[sp] = {
+                    "count": len(s),
+                    "clients": s[id_col].nunique(),
+                    "amount": float(s[amt_col].sum()),
+                }
+            return stats
+
+        if df_group_cols:
+            pool_grouped = pool.groupby(df_group_cols, dropna=False)
+        else:
+            pool_grouped = [(("__ALL__",), pool)]
+
+        assigned_rows = []
+        leftover_rows = []
+        summary_rows = []
+
+        for gvals, sub in pool_grouped:
+            gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+            gkey = tuple(str(x).strip() for x in gkey)
+            gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+
+            old_stats = old_stats_for_group(gkey)
+            avg_count = sum(s["count"] for s in old_stats.values()) / len(old_names)
+            avg_clients = sum(s["clients"] for s in old_stats.values()) / len(old_names)
+            avg_amount = sum(s["amount"] for s in old_stats.values()) / len(old_names)
+            target = {"count": avg_count, "clients": avg_clients, "amount": avg_amount}
+
+            eligible_sps = [sp for sp in new_sp_names if is_eligible(sp, gkey_dict)]
+            gdone = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in eligible_sps}
+
+            if not eligible_sps:
+                leftover_rows.append(sub)
+                for sp in new_sp_names:
+                    row = {"المحصل": sp, **gkey_dict}
+                    row["عدد الحسابات (بعد التوزيع)"] = 0
+                    row["عدد العملاء (بعد التوزيع)"] = 0
+                    row["مبلغ المديونية (بعد التوزيع)"] = 0.0
+                    row["متوسط القدام - حسابات"] = round(avg_count, 1)
+                    row["متوسط القدام - عملاء"] = round(avg_clients, 1)
+                    row["متوسط القدام - مديونية"] = round(avg_amount, 2)
+                    row["ملحوظة"] = "غير مؤهل لهذه الفئة"
+                    summary_rows.append(row)
+                continue
+
+            units = []
+            for cid, grp in sub.groupby(id_col):
+                units.append({
+                    "id": cid,
+                    "count": len(grp),
+                    "amount": float(grp[amt_col].sum()),
+                    "rows": grp,
+                })
+            units.sort(key=lambda u: (u["count"], u["amount"]))
+
+            for unit in units:
+                still_needed = [
+                    sp for sp in eligible_sps
+                    if gdone[sp]["count"] < target["count"]
+                    or gdone[sp]["clients"] < target["clients"]
+                ]
+
+                if not still_needed:
+                    leftover_rows.append(unit["rows"])
+                    continue
+
+                best_sp = min(
+                    still_needed,
+                    key=lambda s: (
+                        gdone[s]["count"] - target["count"],
+                        gdone[s]["clients"] - target["clients"],
+                        gdone[s]["amount"] - target["amount"],
+                    ),
+                )
+
+                part = unit["rows"].copy()
+                part[sp_col] = best_sp
+                assigned_rows.append(part)
+
+                gdone[best_sp]["count"] += unit["count"]
+                gdone[best_sp]["clients"] += 1
+                gdone[best_sp]["amount"] += unit["amount"]
+
+            for sp in new_sp_names:
+                d = gdone.get(sp, {"count": 0, "clients": 0, "amount": 0.0})
+                row = {"المحصل": sp, **gkey_dict}
+                row["عدد الحسابات (بعد التوزيع)"] = d["count"]
+                row["عدد العملاء (بعد التوزيع)"] = d["clients"]
+                row["مبلغ المديونية (بعد التوزيع)"] = round(d["amount"], 2)
+                row["متوسط القدام - حسابات"] = round(avg_count, 1)
+                row["متوسط القدام - عملاء"] = round(avg_clients, 1)
+                row["متوسط القدام - مديونية"] = round(avg_amount, 2)
+                row["ملحوظة"] = "" if sp in eligible_sps else "غير مؤهل لهذه الفئة"
+                summary_rows.append(row)
+
+        assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
+        leftover = pd.concat(leftover_rows, ignore_index=True) if leftover_rows else pool.iloc[0:0].copy()
+        summary = pd.DataFrame(summary_rows)
+        return assigned, leftover, summary
+
     # ================================================================
     # سيناريو 1: محصل/محصلين هيمشوا
     # ================================================================
@@ -4320,10 +4474,42 @@ elif page == "التوزيع":
             )
             new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
 
+            new_sp_filters = {}
+            if new_sp_names:
+                st.markdown("##### فلتر اختياري لكل محصل جديد (سيبه فاضي = ياخد من كل حاجة)")
+                available_products = (
+                    sorted(source_df[core["product_col"]].dropna().astype(str).unique())
+                    if core["product_col"] else []
+                )
+                available_classes = (
+                    sorted(source_df[core["classification_col"]].dropna().astype(str).unique())
+                    if core["classification_col"] else []
+                )
+                for name in new_sp_names:
+                    with st.expander(f"فلتر {name}"):
+                        sel_products = []
+                        sel_classes = []
+                        if available_products:
+                            sel_products = st.multiselect(
+                                f"منتجات {name} (فاضي = كل المنتجات)",
+                                available_products,
+                                key=f"filt_prod_{name}",
+                            )
+                        if available_classes:
+                            sel_classes = st.multiselect(
+                                f"تصنيفات {name} (فاضي = كل التصنيفات)",
+                                available_classes,
+                                key=f"filt_class_{name}",
+                            )
+                        new_sp_filters[name] = {
+                            "products": sel_products or None,
+                            "classifications": sel_classes or None,
+                        }
+
             st.caption(
                 "هيتم حساب متوسط مستوى المحصلين القدام (اللي في ملف المحفظة) داخل كل تصنيف/منتج، "
-                "وسحب بس الكمية دي من ملف المصدر (الإهمال) للمحصلين الجداد. "
-                "أي حسابات زيادة في الإهمال هتفضل مع نفس المحصل بتاعها زي ما هي."
+                "وسحب بس الكمية دي من ملف المصدر (الإهمال) للمحصلين الجداد المؤهلين لها. "
+                "أي حسابات زيادة أو في فئة غير مسموح بيها هتفضل مع نفس المحصل بتاعها زي ما هي."
             )
 
             if not new_sp_names:
@@ -4347,6 +4533,7 @@ elif page == "التوزيع":
                             amt_col=core["amt_col"],
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
+                            new_sp_filters=new_sp_filters,
                         )
 
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
@@ -4363,7 +4550,6 @@ elif page == "التوزيع":
                     st.markdown("### الإجمالي الكلي لكل محصل جديد")
                     st.dataframe(totals, use_container_width=True, hide_index=True)
 
-                    # المصدر بعد الأخذ منه = اللي اتحرك للجداد + اللي فضل زي ما هو
                     source_after = pd.concat([leftover, assigned], ignore_index=True)
                     full_portfolio = pd.concat([df_port, assigned], ignore_index=True)
 
@@ -4394,7 +4580,6 @@ elif page == "التوزيع":
                 except Exception as e:
                     st.error(f"حصل خطأ: {e}")
                     st.exception(e)
-
     # ================================================================
     # سيناريو 3: تساوي المحفظة
     # ================================================================
