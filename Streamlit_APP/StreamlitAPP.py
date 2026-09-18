@@ -4004,7 +4004,16 @@ elif page == "التوزيع":
             # ===== المتوسط الصح حسب مثالك =====
             # إجمالي القدام ÷ (عدد القدام + عدد الجداد المؤهلين)
             # ===== المتوسط الصح (مثال الـ100 → 50) =====
-            denom = len(old_names) + len(eligible_sps) if eligible_sps else len(old_names)
+            # ===== تحديد القدام النشطين في الفئة دي فقط =====
+            active_old = [sp for sp, s in old_stats.items() if s["count"] > 0]
+            
+            if not active_old and not eligible_sps:
+                leftover_rows.append(sub)
+                continue
+            
+            # المتوسط = إجمالي الفئة ÷ (القدام النشطين في الفئة + الجداد المؤهلين)
+            denom = len(active_old) + len(eligible_sps) if eligible_sps else max(len(active_old), 1)
+            
             total_old_count = sum(s["count"] for s in old_stats.values())
             total_old_clients = sum(s["clients"] for s in old_stats.values())
             total_old_amount = sum(s["amount"] for s in old_stats.values())
