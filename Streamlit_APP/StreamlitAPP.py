@@ -4916,8 +4916,8 @@ elif page == "التدوير":
     st.markdown("""
     <div class="rotation-header">
         <h1>🔄 التدوير</h1>
-        <p>إعادة توزيع العملاء على المحصلين بحيث لا يحتفظ أي عميل بمحصله القديم، مع الحفاظ على نفس عدد العملاء ومتبقي المديونية لكل محصل قدر الإمكان</p>
-        <span class="header-badge">توزيع آلي متوازن + تحسين محلي</span>
+        <p>إعادة توزيع العملاء على المحصلين بحيث لا يحتفظ أي عميل بمحصله القديم، مع الحفاظ على نفس عدد العملاء ومتبقي المديونية لكل محصل قدر الإمكان — اختياريًا داخل كل تصنيف (أول/ثاني) على حدة</p>
+        <span class="header-badge">توزيع آلي متوازن + تحسين محلي + تصنيف هرمي اختياري</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -4958,6 +4958,7 @@ elif page == "التدوير":
 
     # ============================================================
     # 🧠 مرحلة التحسين المحلي (Local Search) بعد التوزيع الأولي
+    # (بدون أي تغيير — نفس الدالة، وبقت بتتنفذ لكل تصنيف على حدة)
     # ============================================================
     def _sample_by_debt(items, cap):
         """
@@ -4975,26 +4976,12 @@ elif page == "التدوير":
                            max_passes=30, pool_cap=120):
         """
         تحسين محلي (Local Search) فوق نتيجة التوزيع الأولي (Greedy) لتقليل
-        الفرق الكلي بين (قديم/جديد) في عدد العملاء ومتبقي المديونية معًا:
-
-        - Move  : نقل عميل واحد (كل حساباته) لمحصل تاني لو ده بيقلل الانحراف
-                  الكلي (بيأثر على العدد والمديونية عند المحصلين المعنيين).
-        - Swap  : تبديل عميلين بين محصلين مختلفين. عدد العملاء عند الاتنين
-                  بيفضل زي ما هو، وبس بيتحسن توازن متبقي المديونية بينهم.
-
-        بتكرر الاتنين على شكل "passes" لحد ما محدش يقدر يحسن أكتر أو
-        نوصل للحد الأقصى لعدد المحاولات.
-
-        ملحوظة: current_count / current_debt ممكن تدخل الدالة ومعاها بالفعل
-        قيمة ابتدائية غير صفرية (مثلاً عدد ومديونية العملاء اللي عليهم سداد
-        واستبعدناهم من التدوير لكنهم فضلوا عند نفس المحصل) — والدالة بتحسب
-        على أساسها عادي من غير أي تغيير في منطقها.
+        الفرق الكلي بين (قديم/جديد) في عدد العملاء ومتبقي المديونية معًا.
+        نفس الدالة الأصلية بالظبط — بتشتغل جوة نطاق واحد فقط (تصنيف واحد
+        أو المحفظة كلها لو مفيش تصنيف)، وده اللي بيحقق شرط "اللي يدخل
+        لكل محصل زي اللي يخرج جوة كل تصنيف".
         """
 
-        # أولوية قصوى وحادة لتساوي عدد الحسابات بين المحصلين قبل أي حاجة تانية.
-        # وزن ضخم على فرق العدد يخلي أي تحسن في تساوي العدد (Move) يطغى
-        # دايمًا على أي تأثير سلبي على توازن المديونية. توازن المديونية بيتحسن
-        # بعد كده بس عن طريق Swap (لأن Swap مبيغيّرش عدد حسابات أي محصل أصلاً).
         COUNT_PRIORITY_WEIGHT = 1_000_000
 
         def pen(count_val, target_c, debt_val, target_d):
@@ -5017,7 +5004,6 @@ elif page == "التدوير":
             improved = False
             passes_done += 1
 
-            # ---------- 1) Move: نقل عميل واحد لمحصل أنسب ----------
             for g in groups:
                 gid = g["id"]
                 c_old = assignment[gid]
@@ -5061,7 +5047,6 @@ elif page == "التدوير":
                     groups_by_collector[best_c].append(g)
                     improved = True
 
-            # ---------- 2) Swap: تبديل عميلين بين محصلين لتوازن المديونية ----------
             for i, c1 in enumerate(collectors):
                 for c2 in collectors[i + 1:]:
                     list1 = [g for g in groups_by_collector[c1] if c2 not in g["forbidden"]]
@@ -5117,6 +5102,11 @@ elif page == "التدوير":
     **رقم الهوية** — **اسم المحصل القديم** — **متبقي المديونية** — **رقم الحساب** — **السداد**
 
     عمود **السداد** ده عمود رقمي (مبلغ السداد)، أي قيمة أكبر من صفر معناها إن على الحساب ده سداد.
+
+    ممكن كمان (اختياري) تحدد **عمود تصنيف أول** و**عمود تصنيف ثاني** من أعمدة الملف
+    (مثلاً: نوع المنتج، نوع الفرع). لو اتحددوا، التدوير هيتم **داخل كل تصنيف على حدة**
+    بحيث عدد العملاء/الحسابات ومتبقي المديونية اللي بيدخل كل محصل يفضل قريب من اللي
+    كان بيخرج منه **جوة نفس التصنيف**، مش على مستوى المحفظة كلها.
     """)
 
     # ============================================================
@@ -5156,16 +5146,53 @@ elif page == "التدوير":
     ]
 
     # ============================================================
+    # 🏷️ اختيار عمودي التصنيف (اختياري) — بعد رفع الملف عشان نعرض
+    # أسماء الأعمدة الفعلية الموجودة فيه
+    # ============================================================
+    classification_col_1 = None
+    classification_col_2 = None
+
+    if rotation_file:
+        try:
+            _preview_df = pd.read_excel(BytesIO(rotation_file.getvalue()), nrows=0)
+            _available_cols = [c for c in _preview_df.columns if c not in REQUIRED_ROTATION_COLS]
+        except Exception:
+            _available_cols = []
+
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            classification_col_1 = st.selectbox(
+                "🏷️ عمود التصنيف الأول (اختياري) — مثال: نوع المنتج",
+                ["بدون تصنيف"] + _available_cols,
+                key="rotation_class_col_1",
+            )
+            if classification_col_1 == "بدون تصنيف":
+                classification_col_1 = None
+        with col_c2:
+            _remaining_cols = [c for c in _available_cols if c != classification_col_1]
+            classification_col_2 = st.selectbox(
+                "🏷️ عمود التصنيف الثاني (اختياري) — مثال: نوع الفرع",
+                ["بدون تصنيف"] + _remaining_cols,
+                key="rotation_class_col_2",
+            )
+            if classification_col_2 == "بدون تصنيف":
+                classification_col_2 = None
+
+    # ============================================================
     # الدالة الأساسية لإعادة التوزيع - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري إعادة توزيع المحفظة على المحصلين...")
-    def rotate_portfolio(file_bytes, keep_paid_in_rotation):
+    def rotate_portfolio(file_bytes, keep_paid_in_rotation, classification_col_1, classification_col_2):
         try:
             df = pd.read_excel(BytesIO(file_bytes))
         except Exception as e:
             raise KeyError(f"STEP::قراءة ملف الإكسيل::MISSING::{e}")
 
         require_columns(df, REQUIRED_ROTATION_COLS, "التحقق من الأعمدة المطلوبة")
+
+        class_cols = [c for c in [classification_col_1, classification_col_2] if c]
+        if class_cols:
+            require_columns(df, class_cols, "التحقق من أعمدة التصنيف")
 
         df = df.copy()
         df["رقم الهوية"] = df["رقم الهوية"].astype(str).str.strip()
@@ -5182,144 +5209,201 @@ elif page == "التدوير":
         )
         df["السداد"] = pd.to_numeric(df["السداد"], errors="coerce").fillna(0.0)
 
-        collectors = sorted([c for c in df["اسم المحصل القديم"].unique().tolist() if c and c.lower() != "nan"])
-        if len(collectors) < 2:
+        for c in class_cols:
+            df[c] = df[c].astype(str).str.strip()
+            df[c] = df[c].replace({"nan": "غير محدد", "": "غير محدد", "None": "غير محدد"})
+
+        all_collectors = sorted([c for c in df["اسم المحصل القديم"].unique().tolist() if c and c.lower() != "nan"])
+        if len(all_collectors) < 2:
             raise KeyError(
                 "STEP::التحقق من عدد المحصلين::MISSING::"
                 "لازم يكون في الملف محصلين اثنين على الأقل عشان تدوير المحفظة"
             )
 
         # ------------------------------------------------------
-        # الأهداف الأصلية لكل محصل (بتحسب على كل الحسابات، سداد أو مش سداد):
-        # عدد العملاء (IDs مميزة) + إجمالي متبقي المديونية (على مستوى الحسابات)
+        # 🏷️ لو فيه تصنيف (أول و/أو تاني): كل عميل (رقم هوية) لازم ينتمي
+        # لتصنيف واحد بس عشان يفضل عند محصل جديد واحد (شرط أساسي). لو
+        # حسابات نفس العميل موزعة على أكتر من قيمة تصنيف، بناخد التصنيف
+        # اللي فيه أكبر مديونية للعميل ده، ونوحّد كل حساباته عليه، ونبلّغ
+        # عن عدد العملاء دول ومديونيتهم عشان تتراجع لو حبيت.
         # ------------------------------------------------------
-        target_count = df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
-        target_debt = df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
+        mixed_clients_count = 0
+        mixed_clients_debt = 0.0
 
-        # ------------------------------------------------------
-        # تحديد العملاء اللي عليهم سداد (لو أي حساب من حساباته عليه سداد،
-        # كل حسابات العميل تتعتبر "عليها سداد" وتفضل عند نفس المحصل)
-        # ------------------------------------------------------
+        if class_cols:
+            combo = df.groupby(["رقم الهوية"] + class_cols)["متبقي المديونية"].sum().reset_index()
+            combos_per_id = combo.groupby("رقم الهوية").size()
+            mixed_ids = set(combos_per_id[combos_per_id > 1].index.tolist())
+
+            if mixed_ids:
+                mixed_clients_count = len(mixed_ids)
+                mixed_clients_debt = float(df.loc[df["رقم الهوية"].isin(mixed_ids), "متبقي المديونية"].sum())
+
+            idx_max = combo.loc[combo.groupby("رقم الهوية")["متبقي المديونية"].idxmax()]
+            primary_class = idx_max.set_index("رقم الهوية")[class_cols].to_dict(orient="index")
+
+            for c in class_cols:
+                df[c] = df["رقم الهوية"].map(lambda i, _c=c: primary_class[i][_c])
+
+            df["__segment__"] = df[class_cols].agg(" | ".join, axis=1)
+        else:
+            df["__segment__"] = "كل المحفظة"
+
+        segments = sorted(df["__segment__"].unique().tolist())
+
         if keep_paid_in_rotation:
             paid_ids = set()
         else:
             paid_ids = set(df.loc[df["السداد"] > 0, "رقم الهوية"].unique().tolist())
 
-        # حساب عدد/مديونية العملاء المستبعدين بسبب السداد لكل محصل (للتقرير
-        # ولاستخدامها كنقطة بداية لعملية التوزيع بدل الصفر)
-        if paid_ids:
-            kept_df = df[df["رقم الهوية"].isin(paid_ids)]
-            kept_count_by_collector = (
-                kept_df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique()
-                .reindex(collectors, fill_value=0).to_dict()
-            )
-            kept_debt_by_collector = (
-                kept_df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum()
-                .reindex(collectors, fill_value=0.0).to_dict()
-            )
-        else:
-            kept_count_by_collector = {c: 0 for c in collectors}
-            kept_debt_by_collector = {c: 0.0 for c in collectors}
+        full_assignment = {}
+        no_alt_ids = set()
+        summary_rows = []
 
         # ------------------------------------------------------
-        # تجميع الصفوف حسب رقم الهوية — كل عميل ينتقل ككتلة واحدة
-        # (بنستبعد من هنا العملاء اللي عليهم سداد لو مطلوب استبعادهم)
+        # نلف على كل تصنيف (أو على المحفظة كلها كتصنيف واحد لو مفيش
+        # أعمدة تصنيف) ونشغّل نفس منطق التوزيع الأصلي (Greedy + تحسين
+        # محلي) بشكل مستقل تمامًا داخل كل تصنيف
         # ------------------------------------------------------
-        groups = []
-        for id_val, g in df.groupby("رقم الهوية", sort=False):
-            if id_val in paid_ids:
-                continue
-            groups.append({
-                "id": id_val,
-                "debt": float(g["متبقي المديونية"].sum()),
-                "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
-            })
+        for seg in segments:
+            df_seg = df[df["__segment__"] == seg]
+            seg_collectors = sorted([
+                c for c in df_seg["اسم المحصل القديم"].unique().tolist() if c and c.lower() != "nan"
+            ])
 
-        # المجموعات الأكبر (من حيث المديونية) الأول، لتوزيع أفضل
-        groups.sort(key=lambda x: x["debt"], reverse=True)
+            target_count = df_seg.groupby("اسم المحصل القديم")["رقم الهوية"].nunique().to_dict()
+            target_debt = df_seg.groupby("اسم المحصل القديم")["متبقي المديونية"].sum().to_dict()
 
-        # نبدأ العد والمديونية الحالية بقيمة العملاء المستبعدين (سداد) بدل الصفر،
-        # عشان خوارزمية التوزيع تاخد بالها إن المحصل ده أصلاً معاه عدد/مديونية
-        # محجوزة، فتوزع عليه حسابات جديدة أقل بنفس القيمة دي.
-        current_count = dict(kept_count_by_collector)
-        current_debt = dict(kept_debt_by_collector)
-        assignment = {}
-        unassignable = []
+            seg_paid_ids = paid_ids & set(df_seg["رقم الهوية"].unique().tolist())
 
-        for grp in groups:
-            candidates = [c for c in collectors if c not in grp["forbidden"]]
-            if not candidates:
-                unassignable.append(str(grp["id"]))
-                continue
+            if seg_paid_ids:
+                kept_df = df_seg[df_seg["رقم الهوية"].isin(seg_paid_ids)]
+                kept_count_by_collector = (
+                    kept_df.groupby("اسم المحصل القديم")["رقم الهوية"].nunique()
+                    .reindex(seg_collectors, fill_value=0).to_dict()
+                )
+                kept_debt_by_collector = (
+                    kept_df.groupby("اسم المحصل القديم")["متبقي المديونية"].sum()
+                    .reindex(seg_collectors, fill_value=0.0).to_dict()
+                )
+            else:
+                kept_count_by_collector = {c: 0 for c in seg_collectors}
+                kept_debt_by_collector = {c: 0.0 for c in seg_collectors}
 
-            def score(c):
-                tc = target_count.get(c, 0) or 1
-                td = target_debt.get(c, 0.0) or 1.0
-                deficit_count = (target_count.get(c, 0) - current_count[c]) / tc
-                deficit_debt = (target_debt.get(c, 0.0) - current_debt[c]) / td
-                # أولوية حادة لسد فجوة العدد أولاً؛ متبقي المديونية بيفرق بس
-                # لما يكون فيه أكتر من محصل بنفس درجة الاحتياج للعدد تقريبًا.
-                return 1_000_000 * deficit_count + deficit_debt
+            groups = []
+            for id_val, g in df_seg.groupby("رقم الهوية", sort=False):
+                if id_val in seg_paid_ids:
+                    continue
+                groups.append({
+                    "id": id_val,
+                    "debt": float(g["متبقي المديونية"].sum()),
+                    "forbidden": set(g["اسم المحصل القديم"].unique().tolist()),
+                })
+            groups.sort(key=lambda x: x["debt"], reverse=True)
 
-            best = max(candidates, key=score)
-            assignment[grp["id"]] = best
-            current_count[best] += 1
-            current_debt[best] += grp["debt"]
+            current_count = dict(kept_count_by_collector)
+            current_debt = dict(kept_debt_by_collector)
 
-        if unassignable:
-            raise KeyError(
-                "STEP::تعذر إيجاد محصل بديل لبعض العملاء (رقم الهوية)::MISSING::"
-                + "|".join(unassignable[:25])
-            )
+            if len(seg_collectors) < 2:
+                # مفيش محصل بديل جوة التصنيف ده — العملاء يفضلوا عند محصلهم القديم
+                for grp in groups:
+                    no_alt_ids.add(grp["id"])
+                    full_assignment[grp["id"]] = None
+            else:
+                unassignable_here = []
+                for grp in groups:
+                    candidates = [c for c in seg_collectors if c not in grp["forbidden"]]
+                    if not candidates:
+                        unassignable_here.append(grp["id"])
+                        continue
 
-        # ------------------------------------------------------
-        # 🔧 تحسين محلي: تقليل الفرق في العدد والمديونية أكتر من التوزيع
-        # الأولي (Greedy) عن طريق Move + Swap بين المحصلين
-        # ------------------------------------------------------
-        refine_assignment(
-            groups, assignment, current_count, current_debt,
-            target_count, target_debt, collectors
+                    def score(c, _cc=current_count, _cd=current_debt, _tc=target_count, _td=target_debt):
+                        tc = _tc.get(c, 0) or 1
+                        td = _td.get(c, 0.0) or 1.0
+                        deficit_count = (_tc.get(c, 0) - _cc[c]) / tc
+                        deficit_debt = (_td.get(c, 0.0) - _cd[c]) / td
+                        return 1_000_000 * deficit_count + deficit_debt
+
+                    best = max(candidates, key=score)
+                    full_assignment[grp["id"]] = best
+                    current_count[best] += 1
+                    current_debt[best] += grp["debt"]
+
+                for gid in unassignable_here:
+                    no_alt_ids.add(gid)
+                    full_assignment[gid] = None
+
+                active_groups = [g for g in groups if g["id"] not in unassignable_here]
+                if active_groups:
+                    refine_assignment(
+                        active_groups, full_assignment, current_count, current_debt,
+                        target_count, target_debt, seg_collectors
+                    )
+
+            for c in seg_collectors:
+                summary_rows.append({
+                    "التصنيف": seg,
+                    "المحصل": c,
+                    "عدد العملاء (قديم)": target_count.get(c, 0),
+                    "عدد العملاء المستبعدين (سداد)": kept_count_by_collector.get(c, 0),
+                    "عدد العملاء (جديد)": current_count.get(c, 0),
+                    "فرق العدد": current_count.get(c, 0) - target_count.get(c, 0),
+                    "متبقي المديونية (قديم)": target_debt.get(c, 0.0),
+                    "متبقي المديونية المستبعدة (سداد)": kept_debt_by_collector.get(c, 0.0),
+                    "متبقي المديونية (جديد)": current_debt.get(c, 0.0),
+                    "فرق المديونية": current_debt.get(c, 0.0) - target_debt.get(c, 0.0),
+                })
+
+        summary_df = pd.DataFrame(summary_rows)
+
+        overall_summary_df = summary_df.groupby("المحصل", as_index=False)[[
+            "عدد العملاء (قديم)", "عدد العملاء المستبعدين (سداد)", "عدد العملاء (جديد)",
+            "متبقي المديونية (قديم)", "متبقي المديونية المستبعدة (سداد)", "متبقي المديونية (جديد)",
+        ]].sum()
+        overall_summary_df["فرق العدد"] = (
+            overall_summary_df["عدد العملاء (جديد)"] - overall_summary_df["عدد العملاء (قديم)"]
+        )
+        overall_summary_df["فرق المديونية"] = (
+            overall_summary_df["متبقي المديونية (جديد)"] - overall_summary_df["متبقي المديونية (قديم)"]
         )
 
-        df["المحصل الجديد"] = df["رقم الهوية"].map(assignment)
-
-        # العملاء المستبعدين بسبب السداد يفضلوا عند نفس المحصل القديم
-        if paid_ids:
-            mask_kept = df["رقم الهوية"].isin(paid_ids)
-            df.loc[mask_kept, "المحصل الجديد"] = df.loc[mask_kept, "اسم المحصل القديم"]
+        df["المحصل الجديد"] = df["رقم الهوية"].map(full_assignment)
+        # العملاء المستبعدين بسبب السداد أو بسبب عدم وجود محصل بديل جوة تصنيفهم
+        # يفضلوا عند نفس المحصل القديم
+        fallback_mask = df["المحصل الجديد"].isna()
+        df.loc[fallback_mask, "المحصل الجديد"] = df.loc[fallback_mask, "اسم المحصل القديم"]
 
         df["له سداد"] = np.where(df["السداد"] > 0, "نعم", "لا")
         df["مستبعد من التدوير (سداد)"] = np.where(df["رقم الهوية"].isin(paid_ids), "نعم", "لا")
+        df["مستبعد من التدوير (لا يوجد بديل)"] = np.where(df["رقم الهوية"].isin(no_alt_ids), "نعم", "لا")
 
-        # جدول مقارنة قبل / بعد لكل محصل
-        summary_rows = []
-        for c in collectors:
-            summary_rows.append({
-                "المحصل": c,
-                "عدد العملاء (قديم)": target_count.get(c, 0),
-                "عدد العملاء المستبعدين (سداد)": kept_count_by_collector.get(c, 0),
-                "عدد العملاء (جديد)": current_count.get(c, 0),
-                "فرق العدد": current_count.get(c, 0) - target_count.get(c, 0),
-                "متبقي المديونية (قديم)": target_debt.get(c, 0.0),
-                "متبقي المديونية المستبعدة (سداد)": kept_debt_by_collector.get(c, 0.0),
-                "متبقي المديونية (جديد)": current_debt.get(c, 0.0),
-                "فرق المديونية": current_debt.get(c, 0.0) - target_debt.get(c, 0.0),
-            })
-        summary_df = pd.DataFrame(summary_rows)
+        meta = {
+            "has_classification": bool(class_cols),
+            "segments_count": len(segments),
+            "mixed_clients_count": mixed_clients_count,
+            "mixed_clients_debt": mixed_clients_debt,
+            "no_alt_count": len(no_alt_ids),
+            "no_alt_debt": float(df.loc[df["رقم الهوية"].isin(no_alt_ids), "متبقي المديونية"].sum()) if no_alt_ids else 0.0,
+        }
 
-        return df.reset_index(drop=True), summary_df
+        return df.reset_index(drop=True), summary_df, overall_summary_df, meta
 
     if rotation_file:
         try:
             file_bytes = rotation_file.getvalue()
-            result_df, summary_df = rotate_portfolio(file_bytes, keep_paid_in_rotation)
+            result_df, summary_df, overall_summary_df, meta = rotate_portfolio(
+                file_bytes, keep_paid_in_rotation, classification_col_1, classification_col_2
+            )
 
             # ------------------------------------------------------
             # تحقق نهائي (Sanity check) من الشرطين الأساسيين
-            # (بنستبعد من فحص "احتفظ بنفس المحصل" العملاء اللي استبعدناهم
-            # عمدًا بسبب السداد، لأن فضلهم عند نفس المحصل ده مطلوب أصلاً)
+            # (بنستبعد من فحص "احتفظ بنفس المحصل" العملاء المستبعدين عمدًا
+            # بسبب السداد أو بسبب عدم وجود محصل بديل جوة تصنيفهم)
             # ------------------------------------------------------
-            rotated_mask = result_df["مستبعد من التدوير (سداد)"] == "لا"
+            rotated_mask = (
+                (result_df["مستبعد من التدوير (سداد)"] == "لا")
+                & (result_df["مستبعد من التدوير (لا يوجد بديل)"] == "لا")
+            )
             same_collector_violations = int(
                 (
                     result_df.loc[rotated_mask, "المحصل الجديد"]
@@ -5331,13 +5415,13 @@ elif page == "التدوير":
             )
 
             total_clients = result_df["رقم الهوية"].nunique()
-            excluded_clients = result_df.loc[
-                result_df["مستبعد من التدوير (سداد)"] == "نعم", "رقم الهوية"
-            ].nunique()
+            excluded_mask = (
+                (result_df["مستبعد من التدوير (سداد)"] == "نعم")
+                | (result_df["مستبعد من التدوير (لا يوجد بديل)"] == "نعم")
+            )
+            excluded_clients = result_df.loc[excluded_mask, "رقم الهوية"].nunique()
             rotated_clients = total_clients - excluded_clients
-            excluded_debt = result_df.loc[
-                result_df["مستبعد من التدوير (سداد)"] == "نعم", "متبقي المديونية"
-            ].sum()
+            excluded_debt = result_df.loc[excluded_mask, "متبقي المديونية"].sum()
 
             # ==========================================
             # 🔢 بطاقات KPI — صف أول: أرقام عامة
@@ -5352,13 +5436,13 @@ elif page == "التدوير":
                 </div>
                 <div class="kpi-card info">
                     <div class="kpi-icon">🧾</div>
-                    <div class="kpi-label">عملاء مستبعدين من التدوير (عليهم سداد)</div>
+                    <div class="kpi-label">عملاء مستبعدين من التدوير</div>
                     <div class="kpi-value">{excluded_clients:,}</div>
-                    <div class="kpi-sub">فضلوا عند نفس المحصل القديم</div>
+                    <div class="kpi-sub">سداد أو عدم وجود محصل بديل — فضلوا عند نفس المحصل</div>
                 </div>
                 <div class="kpi-card info">
                     <div class="kpi-icon">💰</div>
-                    <div class="kpi-label">متبقي مديونية المستبعدين (سداد)</div>
+                    <div class="kpi-label">متبقي مديونية المستبعدين</div>
                     <div class="kpi-value">{excluded_debt:,.0f}</div>
                     <div class="kpi-sub">اتحسبت ضمن نفس المحصل القديم</div>
                 </div>
@@ -5375,7 +5459,7 @@ elif page == "التدوير":
                     <div class="kpi-icon">{'✅' if same_collector_violations == 0 else '⚠️'}</div>
                     <div class="kpi-label">صفوف اتدورت واحتفظت بنفس المحصل</div>
                     <div class="kpi-value">{same_collector_violations:,}</div>
-                    <div class="kpi-sub">لازم تكون صفر دايمًا (غير المستبعدين بالسداد)</div>
+                    <div class="kpi-sub">لازم تكون صفر دايمًا (غير المستبعدين)</div>
                 </div>
                 <div class="kpi-card {'ok' if split_id_violations == 0 else ''}">
                     <div class="kpi-icon">{'✅' if split_id_violations == 0 else '⚠️'}</div>
@@ -5388,23 +5472,37 @@ elif page == "التدوير":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
+            if meta["has_classification"]:
+                st.markdown(
+                    f'<div class="info-box">🏷️ تم تقسيم المحفظة إلى '
+                    f'<b>{meta["segments_count"]:,}</b> تصنيف، وتم تشغيل التوزيع '
+                    'والتحسين المحلي بشكل مستقل داخل كل تصنيف على حدة.</div>',
+                    unsafe_allow_html=True
+                )
+                if meta["mixed_clients_count"] > 0:
+                    st.markdown(
+                        f'<div class="info-box">ℹ️ فيه <b>{meta["mixed_clients_count"]:,}</b> عميل '
+                        f'(بمتبقي مديونية إجمالي {meta["mixed_clients_debt"]:,.0f}) عنده حسابات في '
+                        'أكتر من تصنيف مختلف — تم توحيدهم تلقائيًا على التصنيف اللي فيه أكبر '
+                        'مديونية لكل عميل، عشان كل عميل يفضل عند محصل جديد واحد بس.</div>',
+                        unsafe_allow_html=True
+                    )
+                if meta["no_alt_count"] > 0:
+                    st.markdown(
+                        f'<div class="info-box">⚠️ فيه <b>{meta["no_alt_count"]:,}</b> عميل '
+                        f'(بمتبقي مديونية {meta["no_alt_debt"]:,.0f}) فضلوا عند نفس محصلهم القديم '
+                        'لعدم وجود محصل بديل داخل تصنيفهم (تصنيف بمحصل واحد بس، أو كل المحصلين '
+                        'المتاحين ممنوعين عليهم).</div>',
+                        unsafe_allow_html=True
+                    )
+
             if same_collector_violations == 0 and split_id_violations == 0:
-                if excluded_clients > 0:
-                    st.markdown(
-                        '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
-                        'مفيش أي عميل (من غير المستبعدين بسبب السداد) احتفظ بمحصله القديم، '
-                        'ومفيش أي هوية اتوزعت على أكتر من محصل. وتم كمان تقليل عدد/مديونية '
-                        'الحسابات الجديدة لكل محصل بنفس قيمة الحسابات اللي عليها سداد واستبعدناها، '
-                        'بحيث (المستبعدين + المتدورين) تساوي إجمالي عملاء المحصل الأصليين قدر الإمكان.</div>',
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.markdown(
-                        '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
-                        'مفيش أي عميل احتفظ بمحصله القديم، ومفيش أي هوية اتوزعت على أكتر من محصل. '
-                        'وتم كمان تشغيل مرحلة تحسين محلي لتقليل الفروق في العدد والمديونية قدر الإمكان.</div>',
-                        unsafe_allow_html=True
-                    )
+                st.markdown(
+                    '<div class="success-box">✅ التوزيع الجديد يحقق الشرطين بالكامل: '
+                    'مفيش أي عميل (من غير المستبعدين) احتفظ بمحصله القديم، '
+                    'ومفيش أي هوية اتوزعت على أكتر من محصل.</div>',
+                    unsafe_allow_html=True
+                )
 
             # ==========================================
             # تحميل النتيجة
@@ -5412,11 +5510,12 @@ elif page == "التدوير":
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 result_df.to_excel(writer, index=False, sheet_name="التدوير")
-                summary_df.to_excel(writer, index=False, sheet_name="مقارنة قبل وبعد")
+                summary_df.to_excel(writer, index=False, sheet_name="مقارنة حسب التصنيف")
+                overall_summary_df.to_excel(writer, index=False, sheet_name="مقارنة إجمالية لكل محصل")
             output.seek(0)
 
             st.download_button(
-                "📥 تحميل ملف التدوير (مع جدول المقارنة)",
+                "📥 تحميل ملف التدوير (مع جداول المقارنة)",
                 data=output,
                 file_name="التدوير.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -5424,9 +5523,9 @@ elif page == "التدوير":
             )
 
             # ==========================================
-            # جدول المقارنة + البيانات
+            # جداول المقارنة + البيانات
             # ==========================================
-            st.markdown('<div class="section-title">📊 مقارنة قبل وبعد لكل محصل</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-title">📊 مقارنة قبل وبعد</div>', unsafe_allow_html=True)
 
             def style_summary(d):
                 fmt = {
@@ -5441,13 +5540,22 @@ elif page == "التدوير":
                 }
                 return d.style.format(fmt)
 
-            tab_summary, tab_data = st.tabs(["📄 جدول المقارنة", "🗂️ البيانات الكاملة بعد التدوير"])
-
-            with tab_summary:
-                st.dataframe(style_summary(summary_df), use_container_width=True, hide_index=True)
-
-            with tab_data:
-                st.dataframe(result_df, use_container_width=True, hide_index=True)
+            if meta["has_classification"]:
+                tab_seg_summary, tab_overall_summary, tab_data = st.tabs([
+                    "📄 مقارنة حسب التصنيف", "📄 مقارنة إجمالية لكل محصل", "🗂️ البيانات الكاملة بعد التدوير"
+                ])
+                with tab_seg_summary:
+                    st.dataframe(style_summary(summary_df), use_container_width=True, hide_index=True)
+                with tab_overall_summary:
+                    st.dataframe(style_summary(overall_summary_df), use_container_width=True, hide_index=True)
+                with tab_data:
+                    st.dataframe(result_df, use_container_width=True, hide_index=True)
+            else:
+                tab_summary, tab_data = st.tabs(["📄 جدول المقارنة", "🗂️ البيانات الكاملة بعد التدوير"])
+                with tab_summary:
+                    st.dataframe(style_summary(overall_summary_df), use_container_width=True, hide_index=True)
+                with tab_data:
+                    st.dataframe(result_df, use_container_width=True, hide_index=True)
 
             # ==========================================
             # الرسوم البيانية
@@ -5472,25 +5580,33 @@ elif page == "التدوير":
                 fig.update_xaxes(tickfont=dict(size=13, family="Tajawal", color=AXIS_TEXT_COLOR))
                 fig.update_yaxes(tickfont=dict(size=12, family="Tajawal", color=AXIS_TEXT_COLOR), gridcolor=GRID_COLOR)
                 fig.update_layout(
-                    height=400, xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
+                    height=420 if meta["has_classification"] and meta["segments_count"] > 1 else 400,
+                    xaxis_tickangle=angle, margin=dict(t=20, b=10, l=10, r=10),
                     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                     font=dict(family="Tajawal"),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 return fig
 
+            use_facets = meta["has_classification"] and meta["segments_count"] > 1
+
             chart_col1, chart_col2 = st.columns(2)
 
             with chart_col1:
-                st.markdown('<div class="chart-card"><div class="chart-card-title">عدد العملاء: قديم مقابل جديد لكل محصل</div>', unsafe_allow_html=True)
-                count_melt = summary_df.melt(
-                    id_vars="المحصل",
+                title1 = "عدد العملاء: قديم مقابل جديد لكل محصل" + (" (حسب كل تصنيف)" if use_facets else "")
+                st.markdown(f'<div class="chart-card"><div class="chart-card-title">{title1}</div>', unsafe_allow_html=True)
+                count_source = summary_df if use_facets else overall_summary_df
+                id_vars = ["التصنيف", "المحصل"] if use_facets else ["المحصل"]
+                count_melt = count_source.melt(
+                    id_vars=id_vars,
                     value_vars=["عدد العملاء (قديم)", "عدد العملاء (جديد)"],
                     var_name="النوع", value_name="عدد العملاء"
                 )
                 fig1 = px.bar(
                     count_melt, x="المحصل", y="عدد العملاء", color="النوع",
                     barmode="group", text="عدد العملاء",
+                    facet_col="التصنيف" if use_facets else None,
+                    facet_col_wrap=2,
                     color_discrete_map={"عدد العملاء (قديم)": GOLD, "عدد العملاء (جديد)": BLUE},
                     template="plotly_white"
                 )
@@ -5499,15 +5615,19 @@ elif page == "التدوير":
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with chart_col2:
-                st.markdown('<div class="chart-card"><div class="chart-card-title">متبقي المديونية: قديم مقابل جديد لكل محصل</div>', unsafe_allow_html=True)
-                debt_melt = summary_df.melt(
-                    id_vars="المحصل",
+                title2 = "متبقي المديونية: قديم مقابل جديد لكل محصل" + (" (حسب كل تصنيف)" if use_facets else "")
+                st.markdown(f'<div class="chart-card"><div class="chart-card-title">{title2}</div>', unsafe_allow_html=True)
+                debt_source = summary_df if use_facets else overall_summary_df
+                debt_melt = debt_source.melt(
+                    id_vars=id_vars,
                     value_vars=["متبقي المديونية (قديم)", "متبقي المديونية (جديد)"],
                     var_name="النوع", value_name="متبقي المديونية"
                 )
                 fig2 = px.bar(
                     debt_melt, x="المحصل", y="متبقي المديونية", color="النوع",
                     barmode="group", text="متبقي المديونية",
+                    facet_col="التصنيف" if use_facets else None,
+                    facet_col_wrap=2,
                     color_discrete_map={"متبقي المديونية (قديم)": GOLD, "متبقي المديونية (جديد)": BLUE},
                     template="plotly_white"
                 )
@@ -5521,5 +5641,3 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
-
-
