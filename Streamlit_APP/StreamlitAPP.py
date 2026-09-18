@@ -3874,13 +3874,15 @@ elif page == "التوزيع":
 
             for unit in units:
                 # مين لسه تحت المتوسط
+                # نفضل نوزع على الجداد لحد ما نوصل للهدف أو الإهمال يخلص
                 still_needed = [
-                    sp for sp in mover_names
-                    if done[sp]["count"] < target["count"] or done[sp]["clients"] < target["clients"]
+                    sp for sp in eligible_sps
+                    if gdone[sp]["count"] < target["count"] * 1.02   # سماح بسيط 2%
+                    or gdone[sp]["clients"] < target["clients"] * 1.02
                 ]
                 if not still_needed:
-                    # كل الحسابات لازم تتوزع حتى لو كل الـ movers وصلوا للمتوسط بالظبط
-                    still_needed = mover_names
+                    leftover_rows.append(unit["rows"])
+                    continue
 
                 best_sp = min(
                     still_needed,
@@ -3999,9 +4001,9 @@ elif page == "التوزيع":
             eligible_sps = [sp for sp in new_sp_names if is_eligible(sp, gkey_dict)]
             old_stats = old_stats_for_group(gkey)
     
-            # ===== المتوسط الجديد (بدون تخفيف) =====
-            # عايزين الجداد يوصلوا لمتوسط القدام الحالي
-            denom = len(old_names) if old_names else 1
+            # ===== المتوسط الصح حسب مثالك =====
+            # إجمالي القدام ÷ (عدد القدام + عدد الجداد المؤهلين)
+            denom = len(old_names) + len(eligible_sps) if eligible_sps else len(old_names)
             total_old_count = sum(s["count"] for s in old_stats.values())
             total_old_clients = sum(s["clients"] for s in old_stats.values())
             total_old_amount = sum(s["amount"] for s in old_stats.values())
