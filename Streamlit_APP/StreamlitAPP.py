@@ -236,29 +236,30 @@ def equalize_new_with_old(
                 "amount": float(grp[amt_col].sum()),
                 "rows": grp,
             })
-        units.sort(key=lambda u: (u["count"], u["amount"]), reverse=True)
+        units.sort(key=lambda u: (u["count"], u["amount"]))
 
         for unit in units:
-            # رشّح المحصلين الجداد اللي لسه محتاجين ووصولهم مقبول
-            candidates = []
-            for sp in new_sp_names:
-                d = gdone[sp]
-                if d["count"] >= target["count"] or d["clients"] >= target["clients"]:
-                    continue
-                if d["count"] + unit["count"] > target["count"] + tolerance:
-                    continue
-                if d["clients"] + 1 > target["clients"] + tolerance:
-                    continue
-                need = (target["count"] - d["count"]) + (target["clients"] - d["clients"])
-                candidates.append((need, sp))
+            # مين لسه تحت الهدف (عدد الحسابات أو عدد العملاء)
+            still_needed = [
+                sp for sp in new_sp_names
+                if gdone[sp]["count"] < target["count"]
+                or gdone[sp]["clients"] < target["clients"]
+            ]
 
-            if not candidates:
-                # محدش محتاج -> يفضل زي ما هو
+            if not still_needed:
+                # كل الجداد وصلوا لمستوى القدام -> الباقي يفضل زي ما هو
                 leftover_rows.append(unit["rows"])
                 continue
 
-            candidates.sort(reverse=True)
-            best_sp = candidates[0][1]
+            # ياخدها أقل واحد لسه بعيد عن الهدف (حسابات ثم عملاء ثم مبلغ)
+            best_sp = min(
+                still_needed,
+                key=lambda s: (
+                    gdone[s]["count"] - target["count"],
+                    gdone[s]["clients"] - target["clients"],
+                    gdone[s]["amount"] - target["amount"],
+                ),
+            )
 
             part = unit["rows"].copy()
             part[sp_col] = best_sp
@@ -4077,7 +4078,7 @@ elif page == "التوزيع":
                     "rows": grp,
                 })
             # الأكبر أولًا
-            units.sort(key=lambda u: (u["count"], u["amount"]), reverse=True)
+            units.sort(key=lambda u: (u["count"], u["amount"]))
 
             for unit in units:
                 best_sp = None
