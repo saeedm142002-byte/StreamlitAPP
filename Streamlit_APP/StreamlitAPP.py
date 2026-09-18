@@ -3785,35 +3785,33 @@ elif page == "التوزيع":
         targets_df: pd.DataFrame,
         has_product: bool,
         has_classification: bool,
+        use_source: bool = False,   # <-- جديد
     ) -> pd.DataFrame:
-        """
-        يتوقع أعمدة:
-        المحصل | [نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية
-        (نوع المنتج والتصنيف اختياريين)
-        """
         required = ["المحصل", "عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]
+        if use_source:
+            required.append("من")
         if has_product:
             required.append("نوع المنتج")
         if has_classification:
             required.append("التصنيف")
-
+    
         missing = [c for c in required if c not in targets_df.columns]
         if missing:
             raise ValueError(f"أعمدة ناقصة في شيت المستهدفات: {missing}")
-
+    
         t = targets_df.copy()
         t["المحصل"] = t["المحصل"].astype(str).str.strip()
+        if use_source:
+            t["من"] = t["من"].astype(str).str.strip()
         if has_product:
             t["نوع المنتج"] = t["نوع المنتج"].astype(str).str.strip()
         if has_classification:
             t["التصنيف"] = t["التصنيف"].astype(str).str.strip()
-
+    
         for col in ["عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]:
-            t[col] = (
-                t[col].astype(str).str.replace(",", "", regex=False).str.strip()
-            )
+            t[col] = t[col].astype(str).str.replace(",", "", regex=False).str.strip()
             t[col] = pd.to_numeric(t[col], errors="coerce").fillna(0)
-
+    
         t["عدد الحسابات"] = t["عدد الحسابات"].astype(int)
         t["عدد العملاء"] = t["عدد العملاء"].astype(int)
         return t
@@ -3831,6 +3829,8 @@ elif page == "التوزيع":
         product_col: str | None = None,
         classification_col: str | None = None,
         amount_tolerance: float = 50_000,
+        allow_leftover: bool = False,
+        use_source: bool = False,   # <-- جديد
     ) -> tuple[pd.DataFrame, pd.DataFrame, list]:
         """
         يوزّع حسابات pool_df على المحصلين حسب المستهدفات.
@@ -3846,22 +3846,27 @@ elif page == "التوزيع":
 
         use_class = classification_col is not None
         use_product = product_col is not None
-
-        # ترتيب ثابت للمفاتيح: التصنيف أولًا ثم المنتج
+    
         group_labels = []
+        if use_source:
+            group_labels.append("من")
         if use_class:
             group_labels.append("التصنيف")
         if use_product:
             group_labels.append("نوع المنتج")
-
+    
         df_group_cols = []
+        if use_source:
+            df_group_cols.append(sp_col)   # المحصل الحالي في الـ pool = "من"
         if use_class:
             df_group_cols.append(classification_col)
         if use_product:
             df_group_cols.append(product_col)
-
+    
         def target_key(row) -> tuple:
             parts = []
+            if use_source:
+                parts.append(str(row["من"]).strip())
             if use_class:
                 parts.append(str(row["التصنيف"]).strip())
             if use_product:
@@ -3931,7 +3936,6 @@ elif page == "التوزيع":
                 for sp in collectors:
                     t = target_map[sp].get(gkey)
                     if t is None:
-                        # المحصل ده ملهوش مستهدف للمجموعة دي → نتخطاه إلا في البواقي
                         continue
 
                     d = done[sp].setdefault(
@@ -3940,33 +3944,35 @@ elif page == "التوزيع":
 
                     need_count = t["count"] - d["count"]
                     need_clients = t["clients"] - d["clients"]
-                    need_amount = t["amount"] - d["amount"]
 
-                    score_count = need_count / max(t["count"], 1)
-                    score_clients = need_clients / max(t["clients"], 1)
-                    score_amount = need_amount / max(t["amount"], 1.0)
-
-                    score = (
-                        1_000_000 * score_count
-                        + 10_000 * score_clients
-                        + score_amount
-                    )
-
+                    if need_count <= 0 or need_clients <= 0:
+                        continue
                     if d["count"] + unit["count"] > t["count"] + 3:
-                        score -= 1_000_000_000
+                        continue
                     if d["clients"] + 1 > t["clients"] + 3:
-                        score -= 1_000_000_000
+                        continue
+
+                    need_amount = t["amount"] - d["amount"]
+                    score = (
+                        1_000_000 * (need_count / max(t["count"], 1))
+                        + 10_000 * (need_clients / max(t["clients"], 1))
+                        + (need_amount / max(t["amount"], 1.0))
+                    )
 
                     if score > best_score:
                         best_score = score
                         best_sp = sp
 
-                # لو مفيش حد مناسب → نوزّع على أي محصل موجود في المستهدفات
                 if best_sp is None:
-                    best_sp = min(
-                        collectors,
-                        key=lambda s: done[s].get(gkey, {"count": 0})["count"],
-                    )
+                    if allow_leftover:
+                        # يفضل مع "من" (المحصل الأصلي) زي ما هو
+                        assigned_rows.append(unit["rows"])
+                        continue
+                    else:
+                        best_sp = min(
+                            collectors,
+                            key=lambda s: done[s].get(gkey, {"count": 0})["count"],
+                        )
 
                 part = unit["rows"].copy()
                 part[sp_col] = best_sp
@@ -4002,6 +4008,8 @@ elif page == "التوزيع":
                     "مبلغ المديونية (فعلي)": round(d["amount"], 2),
                     "فرق المبلغ": round(d["amount"] - t["amount"], 2),
                 }
+                if use_source:
+                    row["من"] = gkey_dict.get("من", "")
                 if use_product:
                     row["نوع المنتج"] = gkey_dict.get("نوع المنتج", "")
                 if use_class:
@@ -4164,16 +4172,14 @@ elif page == "التوزيع":
 
             st.markdown("#### 3) ارفع شيت المستهدفات")
             st.caption(
-                "المستهدفات تشمل المحصلين الجداد + أي محصلين تانيين لو هيتاخد منهم. "
-                "الأعمدة: المحصل | [نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية"
+                "الأعمدة: من (المحصل المصدر في ملف الإهمال) | المحصل (الجديد اللي هياخد) | "
+                "[نوع المنتج] | [التصنيف] | عدد الحسابات | عدد العملاء | مبلغ المديونية. "
+                "أي حسابات في ملف الإهمال مالهاش سطر مطابق في المستهدفات هتفضل زي ما هي مع نفس المحصل."
             )
             targets_file = st.file_uploader(
                 "شيت المستهدفات", type=["xlsx"], key="new_targets"
             )
-
-            if not new_sp_names:
-                st.info("اكتب اسم محصل جديد واحد على الأقل، اسم في كل سطر.")
-
+            ...
             if (
                 targets_file
                 and new_sp_names
@@ -4184,7 +4190,18 @@ elif page == "التوزيع":
                         _load_excel_bytes(targets_file.getvalue()),
                         has_product=bool(core["product_col"]),
                         has_classification=bool(core["classification_col"]),
+                        use_source=True,   # <-- الإضافة
                     )
+
+                    # تنبيه لو "من" فيها أسماء مش موجودة في ملف المصدر أصلاً
+                    unknown_sources = sorted(
+                        set(targets["من"]) - set(source_df[core["sp_col"]].astype(str).str.strip())
+                    )
+                    if unknown_sources:
+                        st.warning(
+                            f"تنبيه: القيم دي في عمود «من» مش موجودة في ملف المصدر: "
+                            f"{', '.join(unknown_sources)}"
+                        )
 
                     missing_targets = [
                         n for n in new_sp_names if n not in set(targets["المحصل"])
@@ -4195,7 +4212,6 @@ elif page == "التوزيع":
                             "في شيت المستهدفات، مش هياخدوا حسابات."
                         )
 
-                    # المصدر = اللي هيتوزّع (عادةً الإهمال)
                     pool = source_df.dropna(subset=[core["acc_col"]]).copy()
 
                     with st.spinner("جاري التوزيع..."):
@@ -4208,6 +4224,8 @@ elif page == "التوزيع":
                             amt_col=core["amt_col"],
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
+                            allow_leftover=True,
+                            use_source=True,   # <-- الإضافة
                         )
 
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
