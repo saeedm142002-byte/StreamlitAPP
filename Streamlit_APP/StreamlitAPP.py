@@ -4049,35 +4049,50 @@ elif page == "التوزيع":
                 })
             units.sort(key=lambda u: (u["count"], u["clients"] if "clients" in u else 0, u["amount"]))
     
+            # ===== تجهيز الوحدات (كل عميل = كتلة واحدة) =====
+            units = []
+            for cid, grp in sub.groupby(id_col):
+                units.append({
+                    "id": cid,
+                    "count": len(grp),
+                    "clients": 1,
+                    "amount": float(grp[amt_col].sum()),
+                    "rows": grp,
+                })
+            
+            # Shuffle عشان ميكونش في تحيز من الترتيب الأصلي
+            import random
+            random.shuffle(units)
+            
+            # ===== التوزيع مع توازن أقوى =====
             for unit in units:
-                # مين لسه محتاج (تحت المتوسط)
                 still_needed = [
                     sp for sp in eligible_sps
-                    if gdone[sp]["count"] < target["count"]
-                    or gdone[sp]["clients"] < target["clients"]
+                    if (gdone[sp]["count"] < target["count"] * 1.03) or 
+                       (gdone[sp]["clients"] < target["clients"] * 1.03) or
+                       (gdone[sp]["amount"] < target["amount"] * 1.03)
                 ]
                 
                 if not still_needed:
-                    # كل الجداد وصلوا للهدف → الباقي يتساب في الإهمال
                     leftover_rows.append(unit["rows"])
                     continue
             
-                # نختار أقل واحد حالياً
-                best_sp = min(
-                    still_needed,
-                    key=lambda s: (
-                        # الأولوية الأولى: العملاء + الحسابات (وزن أعلى)
-                        (gdone[s]["clients"] - target["clients"]) * 2 + (gdone[s]["count"] - target["count"]) * 2,
-                        
-                        # الأولوية الثانية: المديونية
-                        gdone[s]["amount"] - target["amount"],
-                    ),
-                )
-                
+                # مفتاح توازن: أولوية للعملاء والحسابات + المديونية
+                def score(s):
+                    # فرق نسبي (عشان الوحدات مختلفة المقياس)
+                    dc = (gdone[s]["count"] - target["count"]) / max(target["count"], 1)
+                    dcl = (gdone[s]["clients"] - target["clients"]) / max(target["clients"], 1)
+                    da = (gdone[s]["amount"] - target["amount"]) / max(target["amount"], 1)
+                    
+                    # وزن أعلى للعملاء والحسابات، والمديونية ليها وزن كمان
+                    return (dc * 2.0 + dcl * 2.5 + da * 1.5)
+            
+                best_sp = min(still_needed, key=score)
+            
                 part = unit["rows"].copy()
                 part[sp_col] = best_sp
                 assigned_rows.append(part)
-                
+            
                 gdone[best_sp]["count"] += unit["count"]
                 gdone[best_sp]["clients"] += 1
                 gdone[best_sp]["amount"] += unit["amount"]
