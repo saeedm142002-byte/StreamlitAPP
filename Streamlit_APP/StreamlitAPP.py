@@ -3999,18 +3999,18 @@ elif page == "التوزيع":
             eligible_sps = [sp for sp in new_sp_names if is_eligible(sp, gkey_dict)]
             old_stats = old_stats_for_group(gkey)
     
-            # ===== المتوسط الصح حسب طلبك =====
-            # إجمالي حسابات القدام جوه التصنيف ÷ (عدد القدام + عدد الجداد المؤهلين)
-            denom = len(old_names) + len(eligible_sps) if eligible_sps else len(old_names)
+            # ===== المتوسط الجديد (بدون تخفيف) =====
+            # عايزين الجداد يوصلوا لمتوسط القدام الحالي
+            denom = len(old_names) if old_names else 1
             total_old_count = sum(s["count"] for s in old_stats.values())
             total_old_clients = sum(s["clients"] for s in old_stats.values())
             total_old_amount = sum(s["amount"] for s in old_stats.values())
-    
+            
             avg_count = total_old_count / denom
             avg_clients = total_old_clients / denom
             avg_amount = total_old_amount / denom
             target = {"count": avg_count, "clients": avg_clients, "amount": avg_amount}
-    
+                
             gdone = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in eligible_sps}
     
             if not eligible_sps:
@@ -4038,11 +4038,8 @@ elif page == "التوزيع":
             units.sort(key=lambda u: (u["count"], u["amount"]))
     
             for unit in units:
-                still_needed = [
-                    sp for sp in eligible_sps
-                    if gdone[sp]["count"] < target["count"]
-                    or gdone[sp]["clients"] < target["clients"]
-                ]
+                # نفضل ندي للجداد حتى لو عدّوا المتوسط شوية، المهم نقرّب من القدام
+                still_needed = eligible_sps
                 if not still_needed:
                     leftover_rows.append(unit["rows"])
                     continue
