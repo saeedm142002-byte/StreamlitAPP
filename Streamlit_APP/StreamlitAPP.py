@@ -4066,6 +4066,7 @@ elif page == "التوزيع":
             
             # ===== التوزيع مع توازن أقوى =====
             # ===== تجهيز الوحدات =====
+            # ===== تجهيز الوحدات (كل عميل = كتلة واحدة) =====
             units = []
             for cid, grp in sub.groupby(id_col):
                 units.append({
@@ -4076,51 +4077,34 @@ elif page == "التوزيع":
                     "rows": grp,
                 })
             
+            # Shuffle عشان ميكونش في تحيز من الترتيب الأصلي
             import random
-            random.shuffle(units)  # عشوائية لتقليل التحيز
+            random.shuffle(units)
             
-            def relative_devs(done, target):
-                """فرق نسبي للتلاتة معايير"""
-                dc = (done["count"] - target["count"]) / max(target["count"], 1e-6)
-                dcl = (done["clients"] - target["clients"]) / max(target["clients"], 1e-6)
-                da = (done["amount"] - target["amount"]) / max(target["amount"], 1e-6)
-                return dc, dcl, da
-            
+            # ===== التوزيع مع توازن أقوى =====
             for unit in units:
-                still_needed = eligible_sps[:]  # نحاول نوزع على الكل لحد ما نخلص الكمية المناسبة
-            
+                still_needed = [
+                    sp for sp in eligible_sps
+                    if (gdone[sp]["count"] < target["count"] * 1.03) or 
+                       (gdone[sp]["clients"] < target["clients"] * 1.03) or
+                       (gdone[sp]["amount"] < target["amount"] * 1.03)
+                ]
+                
                 if not still_needed:
                     leftover_rows.append(unit["rows"])
                     continue
             
-                def score(sp):
-                    # نحسب الحالة بعد ما ناخد الوحدة دي
-                    new_done = {
-                        "count": gdone[sp]["count"] + unit["count"],
-                        "clients": gdone[sp]["clients"] + 1,
-                        "amount": gdone[sp]["amount"] + unit["amount"],
-                    }
-                    dc, dcl, da = relative_devs(new_done, target)
-            
+                # مفتاح توازن: أولوية للعملاء والحسابات + المديونية
+                def score(s):
+                    # فرق نسبي (عشان الوحدات مختلفة المقياس)
+                    dc = (gdone[s]["count"] - target["count"]) / max(target["count"], 1)
+                    dcl = (gdone[s]["clients"] - target["clients"]) / max(target["clients"], 1)
+                    da = (gdone[s]["amount"] - target["amount"]) / max(target["amount"], 1)
+                    
                     # وزن أعلى للعملاء والحسابات، والمديونية ليها وزن كمان
-                    # + نفضل اللي لسه تحت المتوسط
-                    over_penalty = max(0, dc) + max(0, dcl) + max(0, da) * 0.8
-                    under_score = min(0, dc) * 2.2 + min(0, dcl) * 2.5 + min(0, da) * 1.3
-            
-                    return over_penalty + under_score
+                    return (dc * 2.0 + dcl * 2.5 + da * 1.5)
             
                 best_sp = min(still_needed, key=score)
-            
-                # لو كل الجداد عدّوا المتوسط بزيادة كبيرة، نوقف ونسيب الباقي
-                test_done = {
-                    "count": gdone[best_sp]["count"] + unit["count"],
-                    "clients": gdone[best_sp]["clients"] + 1,
-                    "amount": gdone[best_sp]["amount"] + unit["amount"],
-                }
-                dc, dcl, da = relative_devs(test_done, target)
-                if dc > 0.08 and dcl > 0.08 and da > 0.08:  # عدّى أكتر من 8% في التلاتة
-                    leftover_rows.append(unit["rows"])
-                    continue
             
                 part = unit["rows"].copy()
                 part[sp_col] = best_sp
