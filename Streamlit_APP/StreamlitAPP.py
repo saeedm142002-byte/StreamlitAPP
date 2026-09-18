@@ -4003,6 +4003,7 @@ elif page == "التوزيع":
     
             # ===== المتوسط الصح حسب مثالك =====
             # إجمالي القدام ÷ (عدد القدام + عدد الجداد المؤهلين)
+            # ===== المتوسط الصح (مثال الـ100 → 50) =====
             denom = len(old_names) + len(eligible_sps) if eligible_sps else len(old_names)
             total_old_count = sum(s["count"] for s in old_stats.values())
             total_old_clients = sum(s["clients"] for s in old_stats.values())
@@ -4040,12 +4041,19 @@ elif page == "التوزيع":
             units.sort(key=lambda u: (u["count"], u["amount"]))
     
             for unit in units:
-                # نفضل ندي للجداد حتى لو عدّوا المتوسط شوية، المهم نقرّب من القدام
-                still_needed = eligible_sps
+                # مين لسه محتاج (تحت المتوسط)
+                still_needed = [
+                    sp for sp in eligible_sps
+                    if gdone[sp]["count"] < target["count"]
+                    or gdone[sp]["clients"] < target["clients"]
+                ]
+                
                 if not still_needed:
+                    # كل الجداد وصلوا للهدف → الباقي يتساب في الإهمال
                     leftover_rows.append(unit["rows"])
                     continue
-    
+            
+                # نختار أقل واحد حالياً
                 best_sp = min(
                     still_needed,
                     key=lambda s: (
@@ -4054,9 +4062,11 @@ elif page == "التوزيع":
                         gdone[s]["amount"] - target["amount"],
                     ),
                 )
+                
                 part = unit["rows"].copy()
                 part[sp_col] = best_sp
                 assigned_rows.append(part)
+                
                 gdone[best_sp]["count"] += unit["count"]
                 gdone[best_sp]["clients"] += 1
                 gdone[best_sp]["amount"] += unit["amount"]
