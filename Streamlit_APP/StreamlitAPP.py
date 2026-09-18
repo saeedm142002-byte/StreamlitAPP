@@ -141,21 +141,30 @@ def resolve_path_columns(path, col_map):
 
 
 
-def equalize_among_new(
-    pool_df: pd.DataFrame,
+def equalize_new_with_old(
+    pool_df: pd.DataFrame,          # ملف الإهمال (المصدر)
+    portfolio_df: pd.DataFrame,     # ملف المحفظة الحالي (فيه القدام)
     new_sp_names: list,
     sp_col: str,
     id_col: str,
     amt_col: str,
     product_col: str | None = None,
     classification_col: str | None = None,
+    tolerance: int = 3,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    يوزّع pool_df بالتساوي (حسابات + عملاء) بين new_sp_names بس،
-    وده جوه كل مجموعة (تصنيف/منتج) لوحدها لو موجودين.
-    مفيش شيت مستهدفات هنا؛ العميل (id) بيتحرك ككتلة واحدة كاملة لمحصل واحد بس.
+    بيجيب من pool_df بس الكمية اللي المحصلين الجداد محتاجينها عشان
+    يوصلوا لمتوسط مستوى المحصلين القدام (من portfolio_df)، جوه كل
+    تصنيف/منتج لوحده. الباقي من pool_df بيفضل زي ما هو (نفس المحصل).
+    العميل بيتحرك ككتلة واحدة كاملة، مش بيتقسم.
     """
     pool = pool_df.copy()
+
+    # القدام = أي محصل في المحفظة الحالية غير الجداد
+    old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
+    old_names = sorted(old_df[sp_col].dropna().unique())
+    if not old_names:
+        raise ValueError("مفيش محصلين قدام في ملف المحفظة عشان نحسب عليهم المتوسط")
 
     use_class = classification_col is not None
     use_product = product_col is not None
@@ -169,21 +178,54 @@ def equalize_among_new(
         group_labels.append("نوع المنتج")
         df_group_cols.append(product_col)
 
+    # ---- حساب مستوى كل محصل قديم داخل كل مجموعة (تصنيف/منتج) ----
     if df_group_cols:
-        grouped = pool.groupby(df_group_cols, dropna=False)
+        all_groups = old_df.groupby(df_group_cols, dropna=False).groups.keys()
+        all_groups = {tuple(str(x).strip() for x in (g if isinstance(g, tuple) else (g,))) for g in all_groups}
     else:
-        grouped = [(("__ALL__",), pool)]
+        all_groups = {("__ALL__",)}
 
-    overall_done = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in new_sp_names}
-    assigned_rows = []
+    def old_stats_for_group(gkey) -> dict:
+        """count/clients/amount لكل محصل قديم داخل المجموعة دي (0 لو مش موجود)."""
+        if df_group_cols:
+            mask = pd.Series(True, index=old_df.index)
+            for col, val in zip(df_group_cols, gkey):
+                mask &= (old_df[col].astype(str).str.strip() == val)
+            sub = old_df[mask]
+        else:
+            sub = old_df
+
+        stats = {}
+        for sp in old_names:
+            s = sub[sub[sp_col] == sp]
+            stats[sp] = {
+                "count": len(s),
+                "clients": s[id_col].nunique(),
+                "amount": float(s[amt_col].sum()),
+            }
+        return stats
+
+    # ---- تجهيز الـ pool مجمّع بنفس المفتاح ----
+    if df_group_cols:
+        pool_grouped = pool.groupby(df_group_cols, dropna=False)
+    else:
+        pool_grouped = [(("__ALL__",), pool)]
+
+    assigned_rows = []   # اللي هيتحرك للجداد
+    leftover_rows = []   # اللي هيفضل زي ما هو
     summary_rows = []
 
-    for gvals, sub in grouped:
+    for gvals, sub in pool_grouped:
         gkey = gvals if isinstance(gvals, tuple) else (gvals,)
         gkey = tuple(str(x).strip() for x in gkey)
         gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
 
-        # عدّاد التساوي داخل المجموعة (التصنيف/المنتج) دي بس
+        old_stats = old_stats_for_group(gkey)
+        avg_count = sum(s["count"] for s in old_stats.values()) / len(old_names)
+        avg_clients = sum(s["clients"] for s in old_stats.values()) / len(old_names)
+        avg_amount = sum(s["amount"] for s in old_stats.values()) / len(old_names)
+
+        target = {"count": avg_count, "clients": avg_clients, "amount": avg_amount}
         gdone = {sp: {"count": 0, "clients": 0, "amount": 0.0} for sp in new_sp_names}
 
         units = []
@@ -194,15 +236,30 @@ def equalize_among_new(
                 "amount": float(grp[amt_col].sum()),
                 "rows": grp,
             })
-        # الأكبر أولًا عشان التساوي يطلع أدق (bin-packing greedy)
         units.sort(key=lambda u: (u["count"], u["amount"]), reverse=True)
 
         for unit in units:
-            # يروح لأقل واحد حسابات، وبعدين أقل عملاء، وبعدين أقل مبلغ
-            best_sp = min(
-                new_sp_names,
-                key=lambda s: (gdone[s]["count"], gdone[s]["clients"], gdone[s]["amount"]),
-            )
+            # رشّح المحصلين الجداد اللي لسه محتاجين ووصولهم مقبول
+            candidates = []
+            for sp in new_sp_names:
+                d = gdone[sp]
+                if d["count"] >= target["count"] or d["clients"] >= target["clients"]:
+                    continue
+                if d["count"] + unit["count"] > target["count"] + tolerance:
+                    continue
+                if d["clients"] + 1 > target["clients"] + tolerance:
+                    continue
+                need = (target["count"] - d["count"]) + (target["clients"] - d["clients"])
+                candidates.append((need, sp))
+
+            if not candidates:
+                # محدش محتاج -> يفضل زي ما هو
+                leftover_rows.append(unit["rows"])
+                continue
+
+            candidates.sort(reverse=True)
+            best_sp = candidates[0][1]
+
             part = unit["rows"].copy()
             part[sp_col] = best_sp
             assigned_rows.append(part)
@@ -211,21 +268,21 @@ def equalize_among_new(
             gdone[best_sp]["clients"] += 1
             gdone[best_sp]["amount"] += unit["amount"]
 
-            overall_done[best_sp]["count"] += unit["count"]
-            overall_done[best_sp]["clients"] += 1
-            overall_done[best_sp]["amount"] += unit["amount"]
-
         for sp in new_sp_names:
             d = gdone[sp]
             row = {"المحصل": sp, **gkey_dict}
-            row["عدد الحسابات"] = d["count"]
-            row["عدد العملاء"] = d["clients"]
-            row["مبلغ المديونية"] = round(d["amount"], 2)
+            row["عدد الحسابات (بعد التوزيع)"] = d["count"]
+            row["عدد العملاء (بعد التوزيع)"] = d["clients"]
+            row["مبلغ المديونية (بعد التوزيع)"] = round(d["amount"], 2)
+            row["متوسط القدام - حسابات"] = round(avg_count, 1)
+            row["متوسط القدام - عملاء"] = round(avg_clients, 1)
+            row["متوسط القدام - مديونية"] = round(avg_amount, 2)
             summary_rows.append(row)
 
-    result = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
+    assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
+    leftover = pd.concat(leftover_rows, ignore_index=True) if leftover_rows else pool.iloc[0:0].copy()
     summary = pd.DataFrame(summary_rows)
-    return result, summary
+    return assigned, leftover, summary
 
 
 
@@ -4263,8 +4320,9 @@ elif page == "التوزيع":
             new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
 
             st.caption(
-                "هيتم توزيع كل الحسابات اللي في ملف المصدر بالتساوي بين المحصلين الجداد اللي كتبتهم، "
-                "جوه كل تصنيف (ولو فيه منتج) لوحده — بحيث عدد الحسابات وعدد العملاء يبقوا متساويين قدر الإمكان بينهم."
+                "هيتم حساب متوسط مستوى المحصلين القدام (اللي في ملف المحفظة) داخل كل تصنيف/منتج، "
+                "وسحب بس الكمية دي من ملف المصدر (الإهمال) للمحصلين الجداد. "
+                "أي حسابات زيادة في الإهمال هتفضل مع نفس المحصل بتاعها زي ما هي."
             )
 
             if not new_sp_names:
@@ -4278,9 +4336,10 @@ elif page == "التوزيع":
                         st.error("ملف المصدر فاضي")
                         st.stop()
 
-                    with st.spinner("جاري التساوي بين المحصلين الجداد..."):
-                        assigned, summary = equalize_among_new(
+                    with st.spinner("جاري حساب مستوى القدام والتوزيع..."):
+                        assigned, leftover, summary = equalize_new_with_old(
                             pool_df=pool,
+                            portfolio_df=df_port,
                             new_sp_names=new_sp_names,
                             sp_col=core["sp_col"],
                             id_col=core["id_col"],
@@ -4290,18 +4349,21 @@ elif page == "التوزيع":
                         )
 
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
-                    st.markdown("### ملخص التوزيع (حسب التصنيف/المنتج)")
+                    st.markdown("### الجداد مقابل متوسط القدام (حسب التصنيف/المنتج)")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-                    # إجمالي كل محصل جديد عبر كل التصنيفات
                     totals = (
-                        summary.groupby("المحصل")[["عدد الحسابات", "عدد العملاء", "مبلغ المديونية"]]
-                        .sum()
-                        .reset_index()
+                        assigned.groupby(core["sp_col"]).agg(
+                            عدد_الحسابات=(core["acc_col"], "count"),
+                            عدد_العملاء=(core["id_col"], "nunique"),
+                            إجمالي_المبلغ=(core["amt_col"], "sum"),
+                        ).reset_index()
                     )
                     st.markdown("### الإجمالي الكلي لكل محصل جديد")
                     st.dataframe(totals, use_container_width=True, hide_index=True)
 
+                    # المصدر بعد الأخذ منه = اللي اتحرك للجداد + اللي فضل زي ما هو
+                    source_after = pd.concat([leftover, assigned], ignore_index=True)
                     full_portfolio = pd.concat([df_port, assigned], ignore_index=True)
 
                     output = io.BytesIO()
@@ -4311,7 +4373,8 @@ elif page == "التوزيع":
                             portion.to_excel(
                                 writer, index=False, sheet_name=_safe_sheet_name(f"محفظة {name}")
                             )
-                        summary.to_excel(writer, index=False, sheet_name="ملخص التوزيع")
+                        leftover.to_excel(writer, index=False, sheet_name="باقي الإهمال بدون تغيير")
+                        summary.to_excel(writer, index=False, sheet_name="مقارنة بالقدام")
                         totals.to_excel(writer, index=False, sheet_name="إجمالي المحصلين الجداد")
                         full_portfolio.to_excel(
                             writer, index=False, sheet_name="المحفظة كاملة بعد الإضافة"
