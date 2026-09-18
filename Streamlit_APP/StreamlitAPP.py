@@ -4172,120 +4172,139 @@ elif page == "التوزيع":
     # ================================================================
     # سيناريو 2: محصل/محصلين جداد جايين
     # ================================================================
-# ================================================================
-# سيناريو 2: محصل/محصلين جداد جايين
-# ================================================================
-elif distribution_type == "محصل جديد جاي":
-    st.markdown("#### 1) ارفع ملف المحفظة الحالية")
-    portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="new_port")
-    st.markdown("#### 2) ارفع ملف المصدر (إهمال / الحالات اللي هتتنقل للجداد)")
-    source_file = st.file_uploader("ملف المصدر", type=["xlsx"], key="new_source")
-
-    if portfolio_file and source_file:
-        df_port = _load_excel_bytes(portfolio_file.getvalue())
-        core = pick_columns(df_port, "newc")
-        source_df = _load_excel_bytes(source_file.getvalue())
-
-        # التأكد من وجود الأعمدة الأساسية في ملف المصدر
-        check_keys = ["sp_col", "id_col", "acc_col", "amt_col"]
-        if core["product_col"]:
-            check_keys.append("product_col")
-        if core["classification_col"]:
-            check_keys.append("classification_col")
-        for col_key in check_keys:
-            col_name = core[col_key]
-            if col_name not in source_df.columns:
-                st.error(f"عمود «{col_name}» مش موجود في ملف المصدر")
-                st.stop()
-
-        new_names_raw = st.text_area(
-            "أسماء المحصلين الجداد (اكتب اسم في كل سطر)",
-            key="new_sp_names_area",
-        )
-        new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
-
-        # فلتر اختياري لكل محصل جديد
-        new_sp_filters = {}
-        if new_sp_names:
-            st.markdown("##### فلتر اختياري لكل محصل جديد (سيبه فاضي = ياخد من كل حاجة)")
-            available_products = (
-                sorted(source_df[core["product_col"]].dropna().astype(str).unique())
-                if core["product_col"] else []
-            )
-            available_classes = (
-                sorted(source_df[core["classification_col"]].dropna().astype(str).unique())
-                if core["classification_col"] else []
-            )
-            for name in new_sp_names:
-                with st.expander(f"فلتر {name}"):
-                    sel_products = []
-                    sel_classes = []
-                    if available_products:
-                        sel_products = st.multiselect(
-                            f"منتجات {name} (فاضي = كل المنتجات)",
-                            available_products,
-                            key=f"filt_prod_{name}",
-                        )
-                    if available_classes:
-                        sel_classes = st.multiselect(
-                            f"تصنيفات {name} (فاضي = كل التصنيفات)",
-                            available_classes,
-                            key=f"filt_class_{name}",
-                        )
-                    new_sp_filters[name] = {
-                        "products": sel_products or None,
-                        "classifications": sel_classes or None,
-                    }
-
-        st.caption(
-            "المتوسط = إجمالي حسابات القدام ÷ (عدد القدام + عدد الجداد المؤهلين)، "
-            "وبعدين بيتسحب **من الإهمال فقط** ويُعطى **للجداد فقط** لحد ما يوصلوا للمتوسط. "
-            "القدام مبيتاخدوش حاجة من الإهمال، بس الحسابات اللي اتاخدت بتتشال من محافظهم."
-        )
-
-        if not new_sp_names:
-            st.info("اكتب اسم محصل جديد واحد على الأقل.")
-
-        if new_sp_names and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run"):
-            try:
-                df_port = df_port.dropna(subset=[core["acc_col"]]).copy()
-                pool = source_df.dropna(subset=[core["acc_col"]]).copy()
-
-                if pool.empty:
-                    st.error("ملف المصدر (الإهمال) فاضي")
+    # ================================================================
+    # سيناريو 2: محصل/محصلين جداد جايين
+    # ================================================================
+    elif distribution_type == "محصل جديد جاي":
+        st.markdown("#### 1) ارفع ملف المحفظة الحالية")
+        portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="new_port")
+        st.markdown("#### 2) ارفع ملف المصدر (إهمال / الحالات اللي هتتنقل للجداد)")
+        source_file = st.file_uploader("ملف المصدر", type=["xlsx"], key="new_source")
+    
+        if portfolio_file and source_file:
+            df_port = _load_excel_bytes(portfolio_file.getvalue())
+            core = pick_columns(df_port, "newc")
+            source_df = _load_excel_bytes(source_file.getvalue())
+    
+            # التأكد من وجود الأعمدة الأساسية في ملف المصدر
+            check_keys = ["sp_col", "id_col", "acc_col", "amt_col"]
+            if core["product_col"]:
+                check_keys.append("product_col")
+            if core["classification_col"]:
+                check_keys.append("classification_col")
+            for col_key in check_keys:
+                col_name = core[col_key]
+                if col_name not in source_df.columns:
+                    st.error(f"عمود «{col_name}» مش موجود في ملف المصدر")
                     st.stop()
-
-                with st.spinner("جاري حساب المتوسط وتوزيع الإهمال على الجداد فقط..."):
-                    assigned, leftover, summary = equalize_new_with_old(
-                        pool_df=pool,
-                        portfolio_df=df_port,
-                        new_sp_names=new_sp_names,
-                        sp_col=core["sp_col"],
-                        id_col=core["id_col"],
-                        amt_col=core["amt_col"],
-                        product_col=core["product_col"],
-                        classification_col=core["classification_col"],
-                        new_sp_filters=new_sp_filters,
-                    )
-
-                # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
-                if not assigned.empty and core["acc_col"] in assigned.columns:
-                    assigned_accounts = set(assigned[core["acc_col"]].astype(str))
-                    df_port_clean = df_port[~df_port[core["acc_col"]].astype(str).isin(assigned_accounts)].copy()
-                else:
-                    df_port_clean = df_port.copy()
-
-                full_portfolio = pd.concat([df_port_clean, assigned], ignore_index=True)
-
-                st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
-
-                st.markdown("### الجداد مقابل المتوسط (حسب التصنيف/المنتج)")
-                st.dataframe(summary, use_container_width=True, hide_index=True)
-
-                # إجمالي كل محصل جديد
-                if not assigned.empty:
-                    totals = (
-                        assigned.groupby(core["sp_col"])
+    
+            new_names_raw = st.text_area(
+                "أسماء المحصلين الجداد (اكتب اسم في كل سطر)",
+                key="new_sp_names_area",
+            )
+            new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
+    
+            # فلتر اختياري لكل محصل جديد
+            new_sp_filters = {}
+            if new_sp_names:
+                st.markdown("##### فلتر اختياري لكل محصل جديد (سيبه فاضي = ياخد من كل حاجة)")
+                available_products = (
+                    sorted(source_df[core["product_col"]].dropna().astype(str).unique())
+                    if core["product_col"] else []
+                )
+                available_classes = (
+                    sorted(source_df[core["classification_col"]].dropna().astype(str).unique())
+                    if core["classification_col"] else []
+                )
+                for name in new_sp_names:
+                    with st.expander(f"فلتر {name}"):
+                        sel_products = []
+                        sel_classes = []
+                        if available_products:
+                            sel_products = st.multiselect(
+                                f"منتجات {name} (فاضي = كل المنتجات)",
+                                available_products,
+                                key=f"filt_prod_{name}",
+                            )
+                        if available_classes:
+                            sel_classes = st.multiselect(
+                                f"تصنيفات {name} (فاضي = كل التصنيفات)",
+                                available_classes,
+                                key=f"filt_class_{name}",
+                            )
+                        new_sp_filters[name] = {
+                            "products": sel_products or None,
+                            "classifications": sel_classes or None,
+                        }
+    
+            st.caption(
+                "المتوسط = إجمالي حسابات القدام ÷ (عدد القدام + عدد الجداد المؤهلين)، "
+                "وبعدين بيتسحب **من الإهمال فقط** ويُعطى **للجداد فقط** لحد ما يوصلوا للمتوسط. "
+                "القدام مبيتاخدوش حاجة من الإهمال، بس الحسابات اللي اتاخدت بتتشال من محافظهم."
+            )
+    
+            if not new_sp_names:
+                st.info("اكتب اسم محصل جديد واحد على الأقل.")
+    
+            if new_sp_names and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run"):
+                try:
+                    df_port = df_port.dropna(subset=[core["acc_col"]]).copy()
+                    pool = source_df.dropna(subset=[core["acc_col"]]).copy()
+    
+                    if pool.empty:
+                        st.error("ملف المصدر (الإهمال) فاضي")
+                        st.stop()
+    
+                    with st.spinner("جاري حساب المتوسط وتوزيع الإهمال على الجداد فقط..."):
+                        assigned, leftover, summary = equalize_new_with_old(
+                            pool_df=pool,
+                            portfolio_df=df_port,
+                            new_sp_names=new_sp_names,
+                            sp_col=core["sp_col"],
+                            id_col=core["id_col"],
+                            amt_col=core["amt_col"],
+                            product_col=core["product_col"],
+                            classification_col=core["classification_col"],
+                            new_sp_filters=new_sp_filters,
+                        )
+    
+                    # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
+                    if not assigned.empty and core["acc_col"] in assigned.columns:
+                        assigned_accounts = set(assigned[core["acc_col"]].astype(str))
+                        df_port_clean = df_port[~df_port[core["acc_col"]].astype(str).isin(assigned_accounts)].copy()
+                    else:
+                        df_port_clean = df_port.copy()
+    
+                    full_portfolio = pd.concat([df_port_clean, assigned], ignore_index=True)
+    
+                    st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
+    
+                    st.markdown("### الجداد مقابل المتوسط (حسب التصنيف/المنتج)")
+                    st.dataframe(summary, use_container_width=True, hide_index=True)
+    
+                    # إجمالي كل محصل جديد
+                    if not assigned.empty:
+                        totals = (
+                            assigned.groupby(core["sp_col"])
+                            .agg(
+                                عدد_الحسابات=(core["acc_col"], "count"),
+                                عدد_العملاء=(core["id_col"], "nunique"),
+                                إجمالي_المبلغ=(core["amt_col"], "sum"),
+                            )
+                            .reset_index()
+                        )
+                        st.markdown("### الإجمالي الكلي لكل محصل جديد")
+                        st.dataframe(totals, use_container_width=True, hide_index=True)
+    
+                    # ملخص نهائي
+                    final_cols = [core["sp_col"]]
+                    if core["product_col"]:
+                        final_cols.append(core["product_col"])
+                    if core["classification_col"]:
+                        final_cols.append(core["classification_col"])
+    
+                    final_summary = (
+                        full_portfolio.groupby(final_cols)
                         .agg(
                             عدد_الحسابات=(core["acc_col"], "count"),
                             عدد_العملاء=(core["id_col"], "nunique"),
@@ -4293,51 +4312,32 @@ elif distribution_type == "محصل جديد جاي":
                         )
                         .reset_index()
                     )
-                    st.markdown("### الإجمالي الكلي لكل محصل جديد")
-                    st.dataframe(totals, use_container_width=True, hide_index=True)
-
-                # ملخص نهائي
-                final_cols = [core["sp_col"]]
-                if core["product_col"]:
-                    final_cols.append(core["product_col"])
-                if core["classification_col"]:
-                    final_cols.append(core["classification_col"])
-
-                final_summary = (
-                    full_portfolio.groupby(final_cols)
-                    .agg(
-                        عدد_الحسابات=(core["acc_col"], "count"),
-                        عدد_العملاء=(core["id_col"], "nunique"),
-                        إجمالي_المبلغ=(core["amt_col"], "sum"),
-                    )
-                    .reset_index()
-                )
-                st.markdown("### المحفظة بعد التوزيع (ملخص)")
-                st.dataframe(final_summary, use_container_width=True)
-
-                # تصدير
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    for name in new_sp_names:
-                        portion = assigned[assigned[core["sp_col"]] == name].copy()
-                        portion.to_excel(
-                            writer, index=False, sheet_name=_safe_sheet_name(f"محفظة {name}")
+                    st.markdown("### المحفظة بعد التوزيع (ملخص)")
+                    st.dataframe(final_summary, use_container_width=True)
+    
+                    # تصدير
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        for name in new_sp_names:
+                            portion = assigned[assigned[core["sp_col"]] == name].copy()
+                            portion.to_excel(
+                                writer, index=False, sheet_name=_safe_sheet_name(f"محفظة {name}")
+                            )
+                        leftover.to_excel(writer, index=False, sheet_name="باقي الإهمال بدون تغيير")
+                        summary.to_excel(writer, index=False, sheet_name="مقارنة بالمتوسط")
+                        if not assigned.empty:
+                            totals.to_excel(writer, index=False, sheet_name="إجمالي المحصلين الجداد")
+                        final_summary.to_excel(writer, index=False, sheet_name="ملخص نهائي")
+                        full_portfolio.to_excel(
+                            writer, index=False, sheet_name="المحفظة كاملة بعد الإضافة"
                         )
-                    leftover.to_excel(writer, index=False, sheet_name="باقي الإهمال بدون تغيير")
-                    summary.to_excel(writer, index=False, sheet_name="مقارنة بالمتوسط")
-                    if not assigned.empty:
-                        totals.to_excel(writer, index=False, sheet_name="إجمالي المحصلين الجداد")
-                    final_summary.to_excel(writer, index=False, sheet_name="ملخص نهائي")
-                    full_portfolio.to_excel(
-                        writer, index=False, sheet_name="المحفظة كاملة بعد الإضافة"
-                    )
-
-                out_name = f"new_collector_{new_sp_names[0]}.xlsx" if len(new_sp_names) == 1 else "new_collectors.xlsx"
-                st.download_button("تحميل النتيجة", output.getvalue(), file_name=out_name)
-
-            except Exception as e:
-                st.error(f"حصل خطأ: {e}")
-                st.exception(e)
+    
+                    out_name = f"new_collector_{new_sp_names[0]}.xlsx" if len(new_sp_names) == 1 else "new_collectors.xlsx"
+                    st.download_button("تحميل النتيجة", output.getvalue(), file_name=out_name)
+    
+                except Exception as e:
+                    st.error(f"حصل خطأ: {e}")
+                    st.exception(e)
     # ================================================================
     # سيناريو 3: تساوي المحفظة
     # ================================================================
