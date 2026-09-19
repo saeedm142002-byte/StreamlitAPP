@@ -29,7 +29,7 @@ from design_system import (
     GREEN, GOLD, RED, BLUE, VIOLET, TEAL,
 )
 
-inject_design_system(PAGE_THEMES.get(st.session_state.page, "promises"))
+
 
 
 import io
@@ -1774,6 +1774,8 @@ if "page" not in st.session_state:
 
 if "sub_page" not in st.session_state:
     st.session_state.sub_page = "اهمال"
+
+inject_design_system(PAGE_THEMES.get(st.session_state.page, "promises"))
 
 
 # ======================
