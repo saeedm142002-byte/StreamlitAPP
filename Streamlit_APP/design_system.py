@@ -63,10 +63,12 @@ PAGE_THEMES = {
 }
 
 # ألوان الرسومات - لوحة احترافية هادية مبنية على هوية إجادة
-NAVY_C, GOLD_C, GREEN_C, RED_C, VIOLET_C, TEAL_C, BLUE_C, SLATE_C = (
-    "#1E3A63", "#C9971F", "#0E9F6E", "#D5484F", "#6C5DD3", "#1596B7", "#3B6EA5", "#7C8CA6"
+# (نفس الأسماء القديمة GREEN/GOLD/RED/BLUE/VIOLET/TEAL محتفظ بيها عشان أي
+#  استيراد مباشر ليها في app.py يفضل شغال من غير أي تعديل هناك)
+GREEN, RED, VIOLET, TEAL, BLUE, SLATE = (
+    "#0E9F6E", "#D5484F", "#6C5DD3", "#1596B7", "#2F5FA8", "#7C8CA6"
 )
-PALETTE = [NAVY_C, GOLD_C, TEAL_C, VIOLET_C, GREEN_C, RED_C, BLUE_C, SLATE_C]
+PALETTE = [NAVY, GOLD, RED, GREEN, VIOLET, TEAL, BLUE, SLATE]
 
 _TONES = {"ok": "#0E9F6E", "bad": "#D5484F", "warn": "#C9971F", "info": None}
 
