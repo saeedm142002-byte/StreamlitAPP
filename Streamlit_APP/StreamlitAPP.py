@@ -4278,7 +4278,7 @@ elif page == "التوزيع":
                             amount_weight=amount_weight,
                             excluded_sps=excluded_sps,
                             time_limit=time_limit,
-                            balance_old=balance_old,
+                            
                         )
     
                     # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
