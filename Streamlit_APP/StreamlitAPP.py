@@ -4011,14 +4011,27 @@ elif page == "التوزيع":
                 continue
     
             # ===== المتوسط =====
-            denom = len(active_old) + len(eligible_sps)
-            avg_count = sum(s["count"] for s in old_stats.values()) / denom
-            avg_clients = sum(s["clients"] for s in old_stats.values()) / denom
-            avg_amount = sum(s["amount"] for s in old_stats.values()) / denom
+            # ===== المستوى العادل (L) =====
+            def _level(values, k):
+                values = [v for v in values if v > 0]
+                if not values:
+                    return 0.0
+                lo, hi = 0.0, max(values)
+                for _ in range(60):
+                    mid = (lo + hi) / 2
+                    if sum(max(0.0, v - mid) for v in values) > k * mid:
+                        lo = mid
+                    else:
+                        hi = mid
+                return (lo + hi) / 2
     
-            # ===== المطلوب سحبه من كل قديم = الحالي - المتوسط =====
-            taken_units = []
-            taken_index = []
+            k = len(eligible_sps)
+            avg_count = _level([s["count"] for s in old_stats.values()], k)
+            avg_clients = _level([s["clients"] for s in old_stats.values()], k)
+            avg_amount = _level([s["amount"] for s in old_stats.values()], k)
+    
+            # ===== المطلوب سحبه من كل قديم = الحالي - L =====
+            taken_units, taken_index = [], []
             for sp in old_names:
                 s = old_stats[sp]
                 need_count = max(0.0, s["count"] - avg_count)
@@ -4031,17 +4044,20 @@ elif page == "التوزيع":
                 ]
                 random.shuffle(units)
     
+                def _err(c, a):
+                    return (abs(c - need_count) / max(avg_count, 1)
+                            + abs(a - need_amount) / max(avg_amount, 1))
+    
                 t_count = t_clients = 0
                 t_amount = 0.0
                 for u in units:
-                    # نقف أول ما الحسابات أو المديونية توصل للمطلوب
-                    if t_count >= need_count or t_amount >= need_amount:
-                        break
-                    taken_units.append(u)
-                    taken_index.extend(u["rows"].index.tolist())
-                    t_count += u["count"]
-                    t_clients += 1
-                    t_amount += u["amount"]
+                    # ناخد العميل بس لو قرّبنا من المطلوب (مش لو عدّيناه)
+                    if _err(t_count + u["count"], t_amount + u["amount"]) < _err(t_count, t_amount):
+                        taken_units.append(u)
+                        taken_index.extend(u["rows"].index.tolist())
+                        t_count += u["count"]
+                        t_clients += 1
+                        t_amount += u["amount"]
     
                 take_rows.append({
                     "المحصل القديم": sp, **gkey_dict,
