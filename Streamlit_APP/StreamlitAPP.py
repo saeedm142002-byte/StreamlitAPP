@@ -3917,152 +3917,152 @@ elif page == "التوزيع":
         return assigned, summary
 
 
-    def _optimize_assignment(units, base, targets, scale, eligible,
-                         time_limit=8.0, weights=(1.0, 1.0, 1.0)):
-    """
-    units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
-    base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
-    targets: هدف كل محصل [حسابات, عملاء, مبلغ]
-    بيرجع: (holder لكل وحدة، أقل تكلفة)
-    """
-    import random, time, math
-
-    n = len(units)
-    elig = set(eligible)
-    homes = [u["home"] for u in units]
-    vecs = [u["v"] for u in units]
-    dests = [[h] + list(eligible) for h in homes]
-
-    def hc(h, v):
-        t = targets[h]
-        return (weights[0] * ((v[0] - t[0]) / scale[0]) ** 2
-                + weights[1] * ((v[1] - t[1]) / scale[1]) ** 2
-                + weights[2] * ((v[2] - t[2]) / scale[2]) ** 2)
-
-    if n == 0 or not eligible:
-        return homes[:], sum(hc(h, base[h]) for h in base)
-
-    def run(seed, budget):
-        rnd = random.Random(seed)
-        holder = homes[:]
-        st = {h: list(v) for h, v in base.items()}
-        cost = {h: hc(h, st[h]) for h in st}
-
-        def move_delta(i, dst):
-            src, v = holder[i], vecs[i]
-            ns = [st[src][m] - v[m] for m in range(3)]
-            nd = [st[dst][m] + v[m] for m in range(3)]
-            cs, cd = hc(src, ns), hc(dst, nd)
-            return cs + cd - cost[src] - cost[dst], ns, nd, cs, cd
-
-        def do_move(i, dst, ns, nd, cs, cd):
-            src = holder[i]
-            st[src], st[dst] = ns, nd
-            cost[src], cost[dst] = cs, cd
-            holder[i] = dst
-
-        def swap_ok(i, j):
-            p, q = holder[i], holder[j]
-            if p == q:
-                return False
-            return (q == homes[i] or q in elig) and (p == homes[j] or p in elig)
-
-        def swap_delta(i, j):
-            p, q = holder[i], holder[j]
-            vi, vj = vecs[i], vecs[j]
-            np_ = [st[p][m] - vi[m] + vj[m] for m in range(3)]
-            nq = [st[q][m] - vj[m] + vi[m] for m in range(3)]
-            cp, cq = hc(p, np_), hc(q, nq)
-            return cp + cq - cost[p] - cost[q], np_, nq, cp, cq
-
-        def do_swap(i, j, np_, nq, cp, cq):
-            p, q = holder[i], holder[j]
-            st[p], st[q] = np_, nq
-            cost[p], cost[q] = cp, cq
-            holder[i], holder[j] = q, p
-
-        def descent(max_passes=30):
-            for _ in range(max_passes):
-                improved = False
-                order = list(range(n))
-                rnd.shuffle(order)
-                for i in order:
-                    best = None
-                    for dst in dests[i]:
-                        if dst == holder[i]:
-                            continue
-                        r = move_delta(i, dst)
-                        if r[0] < -1e-12 and (best is None or r[0] < best[1][0]):
-                            best = (dst, r)
-                    if best:
-                        do_move(i, best[0], *best[1][1:])
-                        improved = True
-                for _ in range(n * 5):
-                    i, j = rnd.randrange(n), rnd.randrange(n)
-                    if i != j and swap_ok(i, j):
-                        r = swap_delta(i, j)
-                        if r[0] < -1e-12:
-                            do_swap(i, j, *r[1:])
+        def _optimize_assignment(units, base, targets, scale, eligible,
+                             time_limit=8.0, weights=(1.0, 1.0, 1.0)):
+        """
+        units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
+        base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
+        targets: هدف كل محصل [حسابات, عملاء, مبلغ]
+        بيرجع: (holder لكل وحدة، أقل تكلفة)
+        """
+        import random, time, math
+    
+        n = len(units)
+        elig = set(eligible)
+        homes = [u["home"] for u in units]
+        vecs = [u["v"] for u in units]
+        dests = [[h] + list(eligible) for h in homes]
+    
+        def hc(h, v):
+            t = targets[h]
+            return (weights[0] * ((v[0] - t[0]) / scale[0]) ** 2
+                    + weights[1] * ((v[1] - t[1]) / scale[1]) ** 2
+                    + weights[2] * ((v[2] - t[2]) / scale[2]) ** 2)
+    
+        if n == 0 or not eligible:
+            return homes[:], sum(hc(h, base[h]) for h in base)
+    
+        def run(seed, budget):
+            rnd = random.Random(seed)
+            holder = homes[:]
+            st = {h: list(v) for h, v in base.items()}
+            cost = {h: hc(h, st[h]) for h in st}
+    
+            def move_delta(i, dst):
+                src, v = holder[i], vecs[i]
+                ns = [st[src][m] - v[m] for m in range(3)]
+                nd = [st[dst][m] + v[m] for m in range(3)]
+                cs, cd = hc(src, ns), hc(dst, nd)
+                return cs + cd - cost[src] - cost[dst], ns, nd, cs, cd
+    
+            def do_move(i, dst, ns, nd, cs, cd):
+                src = holder[i]
+                st[src], st[dst] = ns, nd
+                cost[src], cost[dst] = cs, cd
+                holder[i] = dst
+    
+            def swap_ok(i, j):
+                p, q = holder[i], holder[j]
+                if p == q:
+                    return False
+                return (q == homes[i] or q in elig) and (p == homes[j] or p in elig)
+    
+            def swap_delta(i, j):
+                p, q = holder[i], holder[j]
+                vi, vj = vecs[i], vecs[j]
+                np_ = [st[p][m] - vi[m] + vj[m] for m in range(3)]
+                nq = [st[q][m] - vj[m] + vi[m] for m in range(3)]
+                cp, cq = hc(p, np_), hc(q, nq)
+                return cp + cq - cost[p] - cost[q], np_, nq, cp, cq
+    
+            def do_swap(i, j, np_, nq, cp, cq):
+                p, q = holder[i], holder[j]
+                st[p], st[q] = np_, nq
+                cost[p], cost[q] = cp, cq
+                holder[i], holder[j] = q, p
+    
+            def descent(max_passes=30):
+                for _ in range(max_passes):
+                    improved = False
+                    order = list(range(n))
+                    rnd.shuffle(order)
+                    for i in order:
+                        best = None
+                        for dst in dests[i]:
+                            if dst == holder[i]:
+                                continue
+                            r = move_delta(i, dst)
+                            if r[0] < -1e-12 and (best is None or r[0] < best[1][0]):
+                                best = (dst, r)
+                        if best:
+                            do_move(i, best[0], *best[1][1:])
                             improved = True
-                if not improved:
-                    break
-
-        # 1) نزول أولي
-        descent()
-        best_h, best_c = holder[:], sum(cost.values())
-
-        # 2) Simulated Annealing
-        deltas = []
-        for _ in range(min(300, n * 3)):
-            i = rnd.randrange(n)
-            dst = rnd.choice(dests[i])
-            if dst != holder[i]:
-                deltas.append(abs(move_delta(i, dst)[0]))
-        T0 = max((sum(deltas) / len(deltas)) * 0.5 if deltas else 1e-3, 1e-9)
-        Tend = T0 * 1e-4
-        t_start, it, T = time.time(), 0, T0
-        while True:
-            if it % 500 == 0:
-                frac = (time.time() - t_start) / budget
-                if frac >= 1:
-                    break
-                T = T0 * (Tend / T0) ** frac
-            it += 1
-            if rnd.random() < 0.5:
+                    for _ in range(n * 5):
+                        i, j = rnd.randrange(n), rnd.randrange(n)
+                        if i != j and swap_ok(i, j):
+                            r = swap_delta(i, j)
+                            if r[0] < -1e-12:
+                                do_swap(i, j, *r[1:])
+                                improved = True
+                    if not improved:
+                        break
+    
+            # 1) نزول أولي
+            descent()
+            best_h, best_c = holder[:], sum(cost.values())
+    
+            # 2) Simulated Annealing
+            deltas = []
+            for _ in range(min(300, n * 3)):
                 i = rnd.randrange(n)
                 dst = rnd.choice(dests[i])
-                if dst == holder[i]:
-                    continue
-                r = move_delta(i, dst)
-                if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
-                    do_move(i, dst, *r[1:])
+                if dst != holder[i]:
+                    deltas.append(abs(move_delta(i, dst)[0]))
+            T0 = max((sum(deltas) / len(deltas)) * 0.5 if deltas else 1e-3, 1e-9)
+            Tend = T0 * 1e-4
+            t_start, it, T = time.time(), 0, T0
+            while True:
+                if it % 500 == 0:
+                    frac = (time.time() - t_start) / budget
+                    if frac >= 1:
+                        break
+                    T = T0 * (Tend / T0) ** frac
+                it += 1
+                if rnd.random() < 0.5:
+                    i = rnd.randrange(n)
+                    dst = rnd.choice(dests[i])
+                    if dst == holder[i]:
+                        continue
+                    r = move_delta(i, dst)
+                    if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
+                        do_move(i, dst, *r[1:])
+                else:
+                    i, j = rnd.randrange(n), rnd.randrange(n)
+                    if i == j or not swap_ok(i, j):
+                        continue
+                    r = swap_delta(i, j)
+                    if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
+                        do_swap(i, j, *r[1:])
+    
+            # 3) نزول نهائي
+            descent()
+            c = sum(cost.values())
+            return (holder[:], c) if c < best_c else (best_h, best_c)
+    
+        # إعادة تشغيل لحد ما مفيش تحسن
+        best_h, best_c, stale, seed = None, float("inf"), 0, 0
+        t_end = time.time() + time_limit
+        while True:
+            budget = max(0.3, min(time_limit / 3, t_end - time.time()))
+            h, c = run(seed, budget)
+            seed += 1
+            if c < best_c * (1 - 1e-4):
+                best_h, best_c, stale = h, c, 0
             else:
-                i, j = rnd.randrange(n), rnd.randrange(n)
-                if i == j or not swap_ok(i, j):
-                    continue
-                r = swap_delta(i, j)
-                if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
-                    do_swap(i, j, *r[1:])
-
-        # 3) نزول نهائي
-        descent()
-        c = sum(cost.values())
-        return (holder[:], c) if c < best_c else (best_h, best_c)
-
-    # إعادة تشغيل لحد ما مفيش تحسن
-    best_h, best_c, stale, seed = None, float("inf"), 0, 0
-    t_end = time.time() + time_limit
-    while True:
-        budget = max(0.3, min(time_limit / 3, t_end - time.time()))
-        h, c = run(seed, budget)
-        seed += 1
-        if c < best_c * (1 - 1e-4):
-            best_h, best_c, stale = h, c, 0
-        else:
-            stale += 1
-        if best_c < 1e-12 or stale >= 3 or time.time() >= t_end:
-            break
-        return best_h, best_c
+                stale += 1
+            if best_c < 1e-12 or stale >= 3 or time.time() >= t_end:
+                break
+            return best_h, best_c
 
 
     
