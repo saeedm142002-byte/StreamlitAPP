@@ -190,14 +190,20 @@ def equalize_new_with_old(
     new_sp_filters: dict | None = None,
     time_limit: float = 8.0,
     amount_weight: float = 3.0,
+    excluded_sps: list | None = None,
+    
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pool = pool_df.copy()
     new_sp_filters = new_sp_filters or {}
 
+    excluded_sps = set(excluded_sps or [])
     old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
-    old_names = sorted(old_df[sp_col].dropna().unique())
+    old_names = sorted(
+        sp for sp in old_df[sp_col].dropna().unique() if sp not in excluded_sps
+    )
     if not old_names:
-        raise ValueError("مفيش محصلين قدام في ملف المحفظة عشان نحسب عليهم المتوسط")
+        raise ValueError("مفيش محصلين قدام متاحين بعد الاستبعاد عشان نحسب عليهم المتوسط")
+    
 
     group_labels, df_group_cols = [], []
     if classification_col:
@@ -4390,6 +4396,14 @@ elif page == "التوزيع":
                 key="new_sp_names_area",
             )
             new_sp_names = [n.strip() for n in new_names_raw.splitlines() if n.strip()]
+            old_candidates = sorted(
+            x for x in df_port[core["sp_col"]].dropna().unique() if x not in new_sp_names
+            )
+            excluded_sps = st.multiselect(
+                "استبعاد محصلين من حساب المتوسط (مش هيتحسبوا ومش هيتسحب منهم)",
+                old_candidates,
+                key="new_excluded_sps",
+            )
     
             # فلتر اختياري لكل محصل جديد
             new_sp_filters = {}
@@ -4464,6 +4478,7 @@ elif page == "التوزيع":
                             classification_col=core["classification_col"],
                             new_sp_filters=new_sp_filters,
                             amount_weight=amount_weight,
+                            excluded_sps=excluded_sps,
                         )
     
                     # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
