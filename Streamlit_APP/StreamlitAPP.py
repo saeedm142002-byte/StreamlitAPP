@@ -27,337 +27,339 @@ import io
 import pandas as pd
 import streamlit as st
 
-def equalize_new_with_old(
-        pool_df: pd.DataFrame,
-        portfolio_df: pd.DataFrame,
-        new_sp_names: list,
-        sp_col: str,
-        id_col: str,
-        amt_col: str,
-        product_col: str | None = None,
-        classification_col: str | None = None,
-        new_sp_filters: dict | None = None,
-        time_limit: float = 8.0,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        pool = pool_df.copy()
-        new_sp_filters = new_sp_filters or {}
-    
-        old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
-        old_names = sorted(old_df[sp_col].dropna().unique())
-        if not old_names:
-            raise ValueError("مفيش محصلين قدام في ملف المحفظة عشان نحسب عليهم المتوسط")
-    
-        group_labels, df_group_cols = [], []
-        if classification_col:
-            group_labels.append("التصنيف")
-            df_group_cols.append(classification_col)
-        if product_col:
-            group_labels.append("نوع المنتج")
-            df_group_cols.append(product_col)
-    
-        def is_eligible(sp, gkey_dict):
-            filt = new_sp_filters.get(sp, {})
-            prods, classes = filt.get("products"), filt.get("classifications")
-            if prods and gkey_dict.get("نوع المنتج") not in prods:
-                return False
-            if classes and gkey_dict.get("التصنيف") not in classes:
-                return False
-            return True
-    
-        def filter_group(df, gkey):
-            if not df_group_cols:
-                return df
-            mask = pd.Series(True, index=df.index)
-            for col, val in zip(df_group_cols, gkey):
-                mask &= (df[col].astype(str).str.strip() == val)
-            return df[mask]
-    
-        def _level(values, k):
-            values = [v for v in values if v > 0]
-            if not values:
-                return 0.0
-            lo, hi = 0.0, max(values)
-            for _ in range(60):
-                mid = (lo + hi) / 2
-                if sum(max(0.0, v - mid) for v in values) > k * mid:
-                    lo = mid
-                else:
-                    hi = mid
-            return (lo + hi) / 2
-    
-        pool_grouped = (
-            pool.groupby(df_group_cols, dropna=False) if df_group_cols
-            else [(("__ALL__",), pool)]
-        )
-    
-        assigned_rows, leftover_rows, summary_rows, take_rows = [], [], [], []
-    
-        for gvals, sub in pool_grouped:
-            gkey = gvals if isinstance(gvals, tuple) else (gvals,)
-            gkey = tuple(str(x).strip() for x in gkey)
-            gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
-    
-            eligible_sps = [sp for sp in new_sp_names if is_eligible(sp, gkey_dict)]
-    
-            old_g = filter_group(old_df, gkey)
-            old_stats = {}
-            for sp in old_names:
-                s = old_g[old_g[sp_col] == sp]
-                old_stats[sp] = {
-                    "count": len(s),
-                    "clients": s[id_col].nunique(),
-                    "amount": float(s[amt_col].sum()),
-                }
-    
-            if not eligible_sps:
-                leftover_rows.append(sub)
-                for sp in new_sp_names:
-                    summary_rows.append({
-                        "المحصل": sp, **gkey_dict,
-                        "عدد الحسابات (بعد التوزيع)": 0,
-                        "عدد العملاء (بعد التوزيع)": 0,
-                        "مبلغ المديونية (بعد التوزيع)": 0.0,
-                        "ملحوظة": "غير مؤهل لهذه الفئة",
-                    })
-                continue
-    
-            # ===== المستوى العادل L =====
-            k = len(eligible_sps)
-            L = [_level([old_stats[sp][m] for sp in old_names], k)
-                 for m in ("count", "clients", "amount")]
-            scale = [max(x, 1.0) for x in L]
-    
-            base, targets = {}, {}
-            for sp in old_names:
-                cur = [old_stats[sp]["count"], old_stats[sp]["clients"], old_stats[sp]["amount"]]
-                base[sp] = cur
-                targets[sp] = [min(cur[m], L[m]) for m in range(3)]
-            for sp in eligible_sps:
-                base[sp] = [0, 0, 0.0]
-                targets[sp] = list(L)
-    
-            # ===== الوحدات: كل عميل عند قديم = وحدة =====
-            units = []
-            for sp in old_names:
-                for cid, grp in sub[sub[sp_col] == sp].groupby(id_col):
-                    units.append({
-                        "home": sp,
-                        "v": [len(grp), 1, float(grp[amt_col].sum())],
-                        "rows": grp,
-                    })
-    
-            # ===== التحسين العنيف =====
-            holder, _ = _optimize_assignment(
-                units, base, targets, scale, eligible_sps, time_limit=time_limit
-            )
-    
-            taken = {sp: [0, 0, 0.0] for sp in old_names}
-            gdone = {sp: [0, 0, 0.0] for sp in eligible_sps}
-            new_owner = {}
-            for u, h in zip(units, holder):
-                if h == u["home"]:
-                    continue
-                for m in range(3):
-                    taken[u["home"]][m] += u["v"][m]
-                    gdone[h][m] += u["v"][m]
-                for ix in u["rows"].index:
-                    new_owner[ix] = h
-    
-            if new_owner:
-                part = sub.loc[list(new_owner)].copy()
-                part["المحصل القديم"] = part[sp_col]
-                part[sp_col] = pd.Series(new_owner)
-                assigned_rows.append(part)
-            leftover_rows.append(sub.loc[~sub.index.isin(list(new_owner))])
-    
-            for sp in old_names:
-                s, t = old_stats[sp], taken[sp]
-                take_rows.append({
-                    "المحصل القديم": sp, **gkey_dict,
-                    "حسابات حالية": s["count"],
-                    "عملاء حاليين": s["clients"],
-                    "مديونية حالية": round(s["amount"], 2),
-                    "المتوسط - حسابات": round(L[0], 1),
-                    "المتوسط - عملاء": round(L[1], 1),
-                    "المتوسط - مديونية": round(L[2], 2),
-                    "المطلوب سحبه - حسابات": round(max(0, s["count"] - L[0]), 1),
-                    "المطلوب سحبه - عملاء": round(max(0, s["clients"] - L[1]), 1),
-                    "المطلوب سحبه - مديونية": round(max(0, s["amount"] - L[2]), 2),
-                    "اتسحب فعليًا - حسابات": t[0],
-                    "اتسحب فعليًا - عملاء": t[1],
-                    "اتسحب فعليًا - مديونية": round(t[2], 2),
-                    "بعد السحب - حسابات": s["count"] - t[0],
-                    "بعد السحب - عملاء": s["clients"] - t[1],
-                    "بعد السحب - مديونية": round(s["amount"] - t[2], 2),
-                })
-    
-            for sp in new_sp_names:
-                d = gdone.get(sp, [0, 0, 0.0])
-                summary_rows.append({
-                    "المحصل": sp, **gkey_dict,
-                    "عدد الحسابات (بعد التوزيع)": d[0],
-                    "عدد العملاء (بعد التوزيع)": d[1],
-                    "مبلغ المديونية (بعد التوزيع)": round(d[2], 2),
-                    "المتوسط المستهدف - حسابات": round(L[0], 1),
-                    "المتوسط المستهدف - عملاء": round(L[1], 1),
-                    "المتوسط المستهدف - مديونية": round(L[2], 2),
-                    "انحراف الحسابات %": round((d[0] - L[0]) / max(L[0], 1) * 100, 1),
-                    "انحراف المديونية %": round((d[2] - L[2]) / max(L[2], 1) * 100, 1),
-                    "ملحوظة": "" if sp in eligible_sps else "غير مؤهل لهذه الفئة",
-                })
-    
-        assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
-        leftover = pd.concat(leftover_rows, ignore_index=True) if leftover_rows else pool.iloc[0:0].copy()
-        return assigned, leftover, pd.DataFrame(summary_rows), pd.DataFrame(take_rows)
-
-
 def _optimize_assignment(units, base, targets, scale, eligible,
-                             time_limit=8.0, weights=(1.0, 1.0, 1.0)):
-        """
-        units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
-        base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
-        targets: هدف كل محصل [حسابات, عملاء, مبلغ]
-        بيرجع: (holder لكل وحدة، أقل تكلفة)
-        """
-        import random, time, math
-    
-        n = len(units)
-        elig = set(eligible)
-        homes = [u["home"] for u in units]
-        vecs = [u["v"] for u in units]
-        dests = [[h] + list(eligible) for h in homes]
-    
-        def hc(h, v):
-            t = targets[h]
-            return (weights[0] * ((v[0] - t[0]) / scale[0]) ** 2
-                    + weights[1] * ((v[1] - t[1]) / scale[1]) ** 2
-                    + weights[2] * ((v[2] - t[2]) / scale[2]) ** 2)
-    
-        if n == 0 or not eligible:
-            return homes[:], sum(hc(h, base[h]) for h in base)
-    
-        def run(seed, budget):
-            rnd = random.Random(seed)
-            holder = homes[:]
-            st = {h: list(v) for h, v in base.items()}
-            cost = {h: hc(h, st[h]) for h in st}
-    
-            def move_delta(i, dst):
-                src, v = holder[i], vecs[i]
-                ns = [st[src][m] - v[m] for m in range(3)]
-                nd = [st[dst][m] + v[m] for m in range(3)]
-                cs, cd = hc(src, ns), hc(dst, nd)
-                return cs + cd - cost[src] - cost[dst], ns, nd, cs, cd
-    
-            def do_move(i, dst, ns, nd, cs, cd):
-                src = holder[i]
-                st[src], st[dst] = ns, nd
-                cost[src], cost[dst] = cs, cd
-                holder[i] = dst
-    
-            def swap_ok(i, j):
-                p, q = holder[i], holder[j]
-                if p == q:
-                    return False
-                return (q == homes[i] or q in elig) and (p == homes[j] or p in elig)
-    
-            def swap_delta(i, j):
-                p, q = holder[i], holder[j]
-                vi, vj = vecs[i], vecs[j]
-                np_ = [st[p][m] - vi[m] + vj[m] for m in range(3)]
-                nq = [st[q][m] - vj[m] + vi[m] for m in range(3)]
-                cp, cq = hc(p, np_), hc(q, nq)
-                return cp + cq - cost[p] - cost[q], np_, nq, cp, cq
-    
-            def do_swap(i, j, np_, nq, cp, cq):
-                p, q = holder[i], holder[j]
-                st[p], st[q] = np_, nq
-                cost[p], cost[q] = cp, cq
-                holder[i], holder[j] = q, p
-    
-            def descent(max_passes=30):
-                for _ in range(max_passes):
-                    improved = False
-                    order = list(range(n))
-                    rnd.shuffle(order)
-                    for i in order:
-                        best = None
-                        for dst in dests[i]:
-                            if dst == holder[i]:
-                                continue
-                            r = move_delta(i, dst)
-                            if r[0] < -1e-12 and (best is None or r[0] < best[1][0]):
-                                best = (dst, r)
-                        if best:
-                            do_move(i, best[0], *best[1][1:])
+                         time_limit=8.0, weights=(1.0, 1.0, 1.0)):
+    """
+    units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
+    base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
+    targets: هدف كل محصل [حسابات, عملاء, مبلغ]
+    بيرجع: (holder لكل وحدة، أقل تكلفة)
+    """
+    import random, time, math
+
+    n = len(units)
+    elig = set(eligible)
+    homes = [u["home"] for u in units]
+    vecs = [u["v"] for u in units]
+    dests = [[h] + list(eligible) for h in homes]
+
+    def hc(h, v):
+        t = targets[h]
+        return (weights[0] * ((v[0] - t[0]) / scale[0]) ** 2
+                + weights[1] * ((v[1] - t[1]) / scale[1]) ** 2
+                + weights[2] * ((v[2] - t[2]) / scale[2]) ** 2)
+
+    if n == 0 or not eligible:
+        return homes[:], sum(hc(h, base[h]) for h in base)
+
+    def run(seed, budget):
+        rnd = random.Random(seed)
+        holder = homes[:]
+        st = {h: list(v) for h, v in base.items()}
+        cost = {h: hc(h, st[h]) for h in st}
+
+        def move_delta(i, dst):
+            src, v = holder[i], vecs[i]
+            ns = [st[src][m] - v[m] for m in range(3)]
+            nd = [st[dst][m] + v[m] for m in range(3)]
+            cs, cd = hc(src, ns), hc(dst, nd)
+            return cs + cd - cost[src] - cost[dst], ns, nd, cs, cd
+
+        def do_move(i, dst, ns, nd, cs, cd):
+            src = holder[i]
+            st[src], st[dst] = ns, nd
+            cost[src], cost[dst] = cs, cd
+            holder[i] = dst
+
+        def swap_ok(i, j):
+            p, q = holder[i], holder[j]
+            if p == q:
+                return False
+            return (q == homes[i] or q in elig) and (p == homes[j] or p in elig)
+
+        def swap_delta(i, j):
+            p, q = holder[i], holder[j]
+            vi, vj = vecs[i], vecs[j]
+            np_ = [st[p][m] - vi[m] + vj[m] for m in range(3)]
+            nq = [st[q][m] - vj[m] + vi[m] for m in range(3)]
+            cp, cq = hc(p, np_), hc(q, nq)
+            return cp + cq - cost[p] - cost[q], np_, nq, cp, cq
+
+        def do_swap(i, j, np_, nq, cp, cq):
+            p, q = holder[i], holder[j]
+            st[p], st[q] = np_, nq
+            cost[p], cost[q] = cp, cq
+            holder[i], holder[j] = q, p
+
+        def descent(max_passes=30):
+            for _ in range(max_passes):
+                improved = False
+                order = list(range(n))
+                rnd.shuffle(order)
+                for i in order:
+                    best = None
+                    for dst in dests[i]:
+                        if dst == holder[i]:
+                            continue
+                        r = move_delta(i, dst)
+                        if r[0] < -1e-12 and (best is None or r[0] < best[1][0]):
+                            best = (dst, r)
+                    if best:
+                        do_move(i, best[0], *best[1][1:])
+                        improved = True
+                for _ in range(n * 5):
+                    i, j = rnd.randrange(n), rnd.randrange(n)
+                    if i != j and swap_ok(i, j):
+                        r = swap_delta(i, j)
+                        if r[0] < -1e-12:
+                            do_swap(i, j, *r[1:])
                             improved = True
-                    for _ in range(n * 5):
-                        i, j = rnd.randrange(n), rnd.randrange(n)
-                        if i != j and swap_ok(i, j):
-                            r = swap_delta(i, j)
-                            if r[0] < -1e-12:
-                                do_swap(i, j, *r[1:])
-                                improved = True
-                    if not improved:
-                        break
-    
-            # 1) نزول أولي
-            descent()
-            best_h, best_c = holder[:], sum(cost.values())
-    
-            # 2) Simulated Annealing
-            deltas = []
-            for _ in range(min(300, n * 3)):
+                if not improved:
+                    break
+
+        # 1) نزول أولي
+        descent()
+        best_h, best_c = holder[:], sum(cost.values())
+
+        # 2) Simulated Annealing
+        deltas = []
+        for _ in range(min(300, n * 3)):
+            i = rnd.randrange(n)
+            dst = rnd.choice(dests[i])
+            if dst != holder[i]:
+                deltas.append(abs(move_delta(i, dst)[0]))
+        T0 = max((sum(deltas) / len(deltas)) * 0.5 if deltas else 1e-3, 1e-9)
+        Tend = T0 * 1e-4
+        t_start, it, T = time.time(), 0, T0
+        while True:
+            if it % 500 == 0:
+                frac = (time.time() - t_start) / budget
+                if frac >= 1:
+                    break
+                T = T0 * (Tend / T0) ** frac
+            it += 1
+            if rnd.random() < 0.5:
                 i = rnd.randrange(n)
                 dst = rnd.choice(dests[i])
-                if dst != holder[i]:
-                    deltas.append(abs(move_delta(i, dst)[0]))
-            T0 = max((sum(deltas) / len(deltas)) * 0.5 if deltas else 1e-3, 1e-9)
-            Tend = T0 * 1e-4
-            t_start, it, T = time.time(), 0, T0
-            while True:
-                if it % 500 == 0:
-                    frac = (time.time() - t_start) / budget
-                    if frac >= 1:
-                        break
-                    T = T0 * (Tend / T0) ** frac
-                it += 1
-                if rnd.random() < 0.5:
-                    i = rnd.randrange(n)
-                    dst = rnd.choice(dests[i])
-                    if dst == holder[i]:
-                        continue
-                    r = move_delta(i, dst)
-                    if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
-                        do_move(i, dst, *r[1:])
-                else:
-                    i, j = rnd.randrange(n), rnd.randrange(n)
-                    if i == j or not swap_ok(i, j):
-                        continue
-                    r = swap_delta(i, j)
-                    if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
-                        do_swap(i, j, *r[1:])
-    
-            # 3) نزول نهائي
-            descent()
-            c = sum(cost.values())
-            return (holder[:], c) if c < best_c else (best_h, best_c)
-    
-        # إعادة تشغيل لحد ما مفيش تحسن
-        best_h, best_c, stale, seed = None, float("inf"), 0, 0
-        t_end = time.time() + time_limit
-        while True:
-            budget = max(0.3, min(time_limit / 3, t_end - time.time()))
-            h, c = run(seed, budget)
-            seed += 1
-            if c < best_c * (1 - 1e-4):
-                best_h, best_c, stale = h, c, 0
+                if dst == holder[i]:
+                    continue
+                r = move_delta(i, dst)
+                if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
+                    do_move(i, dst, *r[1:])
             else:
-                stale += 1
-            if best_c < 1e-12 or stale >= 3 or time.time() >= t_end:
-                break
-            return best_h, best_c
+                i, j = rnd.randrange(n), rnd.randrange(n)
+                if i == j or not swap_ok(i, j):
+                    continue
+                r = swap_delta(i, j)
+                if r[0] <= 0 or rnd.random() < math.exp(-r[0] / T):
+                    do_swap(i, j, *r[1:])
 
+        # 3) نزول نهائي
+        descent()
+        c = sum(cost.values())
+        return (holder[:], c) if c < best_c else (best_h, best_c)
+
+    # إعادة تشغيل لحد ما مفيش تحسن
+    best_h, best_c, stale, seed = None, float("inf"), 0, 0
+    t_end = time.time() + time_limit
+    while True:
+        budget = max(0.3, min(time_limit / 3, t_end - time.time()))
+        h, c = run(seed, budget)
+        seed += 1
+        if c < best_c * (1 - 1e-4):
+            best_h, best_c, stale = h, c, 0
+        else:
+            stale += 1
+        if best_c < 1e-12 or stale >= 3 or time.time() >= t_end:
+            break
+
+    if best_h is None:
+        best_h, best_c = homes[:], sum(hc(h, base[h]) for h in base)
+    return best_h, best_c
+
+
+def equalize_new_with_old(
+    pool_df: pd.DataFrame,
+    portfolio_df: pd.DataFrame,
+    new_sp_names: list,
+    sp_col: str,
+    id_col: str,
+    amt_col: str,
+    product_col: str | None = None,
+    classification_col: str | None = None,
+    new_sp_filters: dict | None = None,
+    time_limit: float = 8.0,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    pool = pool_df.copy()
+    new_sp_filters = new_sp_filters or {}
+
+    old_df = portfolio_df[~portfolio_df[sp_col].isin(new_sp_names)].copy()
+    old_names = sorted(old_df[sp_col].dropna().unique())
+    if not old_names:
+        raise ValueError("مفيش محصلين قدام في ملف المحفظة عشان نحسب عليهم المتوسط")
+
+    group_labels, df_group_cols = [], []
+    if classification_col:
+        group_labels.append("التصنيف")
+        df_group_cols.append(classification_col)
+    if product_col:
+        group_labels.append("نوع المنتج")
+        df_group_cols.append(product_col)
+
+    def is_eligible(sp, gkey_dict):
+        filt = new_sp_filters.get(sp, {})
+        prods, classes = filt.get("products"), filt.get("classifications")
+        if prods and gkey_dict.get("نوع المنتج") not in prods:
+            return False
+        if classes and gkey_dict.get("التصنيف") not in classes:
+            return False
+        return True
+
+    def filter_group(df, gkey):
+        if not df_group_cols:
+            return df
+        mask = pd.Series(True, index=df.index)
+        for col, val in zip(df_group_cols, gkey):
+            mask &= (df[col].astype(str).str.strip() == val)
+        return df[mask]
+
+    def _level(values, k):
+        values = [v for v in values if v > 0]
+        if not values:
+            return 0.0
+        lo, hi = 0.0, max(values)
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if sum(max(0.0, v - mid) for v in values) > k * mid:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+
+    pool_grouped = (
+        pool.groupby(df_group_cols, dropna=False) if df_group_cols
+        else [(("__ALL__",), pool)]
+    )
+
+    assigned_rows, leftover_rows, summary_rows, take_rows = [], [], [], []
+
+    for gvals, sub in pool_grouped:
+        gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+        gkey = tuple(str(x).strip() for x in gkey)
+        gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+
+        eligible_sps = [sp for sp in new_sp_names if is_eligible(sp, gkey_dict)]
+
+        old_g = filter_group(old_df, gkey)
+        old_stats = {}
+        for sp in old_names:
+            s = old_g[old_g[sp_col] == sp]
+            old_stats[sp] = {
+                "count": len(s),
+                "clients": s[id_col].nunique(),
+                "amount": float(s[amt_col].sum()),
+            }
+
+        if not eligible_sps:
+            leftover_rows.append(sub)
+            for sp in new_sp_names:
+                summary_rows.append({
+                    "المحصل": sp, **gkey_dict,
+                    "عدد الحسابات (بعد التوزيع)": 0,
+                    "عدد العملاء (بعد التوزيع)": 0,
+                    "مبلغ المديونية (بعد التوزيع)": 0.0,
+                    "ملحوظة": "غير مؤهل لهذه الفئة",
+                })
+            continue
+
+        # ===== المستوى العادل L =====
+        k = len(eligible_sps)
+        L = [_level([old_stats[sp][m] for sp in old_names], k)
+             for m in ("count", "clients", "amount")]
+        scale = [max(x, 1.0) for x in L]
+
+        base, targets = {}, {}
+        for sp in old_names:
+            cur = [old_stats[sp]["count"], old_stats[sp]["clients"], old_stats[sp]["amount"]]
+            base[sp] = cur
+            targets[sp] = [min(cur[m], L[m]) for m in range(3)]
+        for sp in eligible_sps:
+            base[sp] = [0, 0, 0.0]
+            targets[sp] = list(L)
+
+        # ===== الوحدات: كل عميل عند قديم = وحدة =====
+        units = []
+        for sp in old_names:
+            for cid, grp in sub[sub[sp_col] == sp].groupby(id_col):
+                units.append({
+                    "home": sp,
+                    "v": [len(grp), 1, float(grp[amt_col].sum())],
+                    "rows": grp,
+                })
+
+        # ===== التحسين العنيف =====
+        holder, _ = _optimize_assignment(
+            units, base, targets, scale, eligible_sps, time_limit=time_limit
+        )
+
+        taken = {sp: [0, 0, 0.0] for sp in old_names}
+        gdone = {sp: [0, 0, 0.0] for sp in eligible_sps}
+        new_owner = {}
+        for u, h in zip(units, holder):
+            if h == u["home"]:
+                continue
+            for m in range(3):
+                taken[u["home"]][m] += u["v"][m]
+                gdone[h][m] += u["v"][m]
+            for ix in u["rows"].index:
+                new_owner[ix] = h
+
+        if new_owner:
+            part = sub.loc[list(new_owner)].copy()
+            part["المحصل القديم"] = part[sp_col]
+            part[sp_col] = pd.Series(new_owner)
+            assigned_rows.append(part)
+        leftover_rows.append(sub.loc[~sub.index.isin(list(new_owner))])
+
+        for sp in old_names:
+            s, t = old_stats[sp], taken[sp]
+            take_rows.append({
+                "المحصل القديم": sp, **gkey_dict,
+                "حسابات حالية": s["count"],
+                "عملاء حاليين": s["clients"],
+                "مديونية حالية": round(s["amount"], 2),
+                "المتوسط - حسابات": round(L[0], 1),
+                "المتوسط - عملاء": round(L[1], 1),
+                "المتوسط - مديونية": round(L[2], 2),
+                "المطلوب سحبه - حسابات": round(max(0, s["count"] - L[0]), 1),
+                "المطلوب سحبه - عملاء": round(max(0, s["clients"] - L[1]), 1),
+                "المطلوب سحبه - مديونية": round(max(0, s["amount"] - L[2]), 2),
+                "اتسحب فعليًا - حسابات": t[0],
+                "اتسحب فعليًا - عملاء": t[1],
+                "اتسحب فعليًا - مديونية": round(t[2], 2),
+                "بعد السحب - حسابات": s["count"] - t[0],
+                "بعد السحب - عملاء": s["clients"] - t[1],
+                "بعد السحب - مديونية": round(s["amount"] - t[2], 2),
+            })
+
+        for sp in new_sp_names:
+            d = gdone.get(sp, [0, 0, 0.0])
+            summary_rows.append({
+                "المحصل": sp, **gkey_dict,
+                "عدد الحسابات (بعد التوزيع)": d[0],
+                "عدد العملاء (بعد التوزيع)": d[1],
+                "مبلغ المديونية (بعد التوزيع)": round(d[2], 2),
+                "المتوسط المستهدف - حسابات": round(L[0], 1),
+                "المتوسط المستهدف - عملاء": round(L[1], 1),
+                "المتوسط المستهدف - مديونية": round(L[2], 2),
+                "انحراف الحسابات %": round((d[0] - L[0]) / max(L[0], 1) * 100, 1),
+                "انحراف المديونية %": round((d[2] - L[2]) / max(L[2], 1) * 100, 1),
+                "ملحوظة": "" if sp in eligible_sps else "غير مؤهل لهذه الفئة",
+            })
+
+    assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool.iloc[0:0].copy()
+    leftover = pd.concat(leftover_rows, ignore_index=True) if leftover_rows else pool.iloc[0:0].copy()
+    return assigned, leftover, pd.DataFrame(summary_rows), pd.DataFrame(take_rows)
 
 NONE_OPT = "— بدون —"
 
