@@ -1840,6 +1840,8 @@ if page == "الوعود القائمة و المكسورة":
     from io import BytesIO
     import traceback
 
+    page_header("🟢", "الوعود القائمة / الوعود المكسورة", "تتبع الوعود بالسداد ...", chips=['حدد الفلترة ثم اضغط "عمل الوعود"'])
+
   
 
     # ============================================================
@@ -2388,6 +2390,9 @@ elif page == "الاهمال":
         import re
         import traceback
         from io import BytesIO
+
+        page_header("⚠️", "الاهمال", "رصد الحسابات المهملة ...", chips=['حدد الفلترة ثم اضغط "عمل الاهمال"'])
+
 
 
 
@@ -3833,6 +3838,9 @@ elif page == "النشاط":
 elif page == "التوزيع":
     st.subheader("👥 توزيع المحافظ (حسب المستهدفات)")
 
+    page_header("👥", "توزيع المحافظ", "نقل الحسابات بين المحصلين بحيث الكل يقرب من المتوسط في الحسابات والعملاء والمديونية",
+            chips=["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"])
+
     distribution_type = st.radio(
         "نوع التوزيع",
         ["محصل هيمشي", "محصل جديد جاي", "تساوي المحفظة"],
@@ -4499,6 +4507,9 @@ elif page == "التوزيع":
 elif page == "التقرير اليومي للسدادات":
     st.subheader("📞 التقرير اليومي للسدادات")
 
+    page_header("💳", "التقرير اليومي للسدادات", "تجميع السدادات حسب المشرف والمحصل والمنتج، وتحديث ملف تقرير الأداء",
+            chips=["كاش", "ناجز", "جدولة"])
+
     st.markdown("### 1) رفع الملفات")
     col1, col2, col3 = st.columns(3)
 
@@ -4843,235 +4854,9 @@ elif page == "التدوير":
     import traceback
     from io import BytesIO
 
-    # ============================================================
-    # 🎨 نظام تصميم مودرن شامل (نفس عائلة التصميم، بلمسة لون خاصة بالتدوير)
-    # ============================================================
-    st.markdown("""
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+    page_header("🔄", "التدوير", "إعادة توزيع العملاء على المحصلين ...", chips=["توزيع آلي متوازن", "تحسين محلي"])
 
-        html, body, [class*="css"] {
-            font-family: 'Tajawal', sans-serif;
-        }
 
-        .main .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 3rem;
-        }
-
-        /* ===== الهيدر الرئيسي ===== */
-        .rotation-header {
-            position: relative;
-            overflow: hidden;
-            background: linear-gradient(120deg, #0d2d4a 0%, #155a8a 50%, #1c76b3 100%);
-            padding: 32px 34px;
-            border-radius: 20px;
-            margin-bottom: 26px;
-            box-shadow: 0 10px 30px rgba(21,90,138,0.28);
-        }
-        .rotation-header::after {
-            content: "";
-            position: absolute;
-            top: -60px; left: -40px;
-            width: 220px; height: 220px;
-            background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%);
-            border-radius: 50%;
-        }
-        .rotation-header h1 {
-            color: #fff;
-            margin: 0;
-            font-size: 27px;
-            font-weight: 800;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .rotation-header p {
-            color: #d3e9f7;
-            margin: 8px 0 0 0;
-            font-size: 14.5px;
-            font-weight: 500;
-        }
-        .header-badge {
-            display: inline-block;
-            background: rgba(255,255,255,0.14);
-            color: #fff;
-            font-size: 12px;
-            font-weight: 700;
-            padding: 4px 12px;
-            border-radius: 999px;
-            margin-top: 12px;
-            border: 1px solid rgba(255,255,255,0.25);
-        }
-
-        /* ===== بطاقات KPI ===== */
-        .kpi-grid-3 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 6px;
-        }
-        .kpi-card {
-            position: relative;
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 20px 22px;
-            box-shadow: 0 6px 20px rgba(17,24,39,0.07);
-            border: 1px solid #eef1ef;
-            border-left: 6px solid #155a8a;
-            overflow: hidden;
-        }
-        .kpi-card.ok { border-left-color: #00693E; }
-        .kpi-card.info { border-left-color: #C9A227; }
-        .kpi-card::before {
-            content: "";
-            position: absolute;
-            top: 0; right: 0;
-            width: 90px; height: 90px;
-            background: radial-gradient(circle, rgba(21,90,138,0.10) 0%, rgba(21,90,138,0) 70%);
-        }
-        .kpi-icon {
-            width: 40px; height: 40px;
-            border-radius: 12px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 19px;
-            background: #e5f0f8;
-        }
-        .kpi-card.ok .kpi-icon { background: #e7f4ec; }
-        .kpi-card.info .kpi-icon { background: #fbf1d9; }
-        .kpi-label {
-            font-size: 13px;
-            color: #6b7280;
-            font-weight: 700;
-            margin-top: 12px;
-        }
-        .kpi-value {
-            font-size: 30px;
-            font-weight: 800;
-            color: #0f172a;
-            margin-top: 2px;
-        }
-        .kpi-sub {
-            font-size: 12px;
-            color: #9aa4b2;
-            font-weight: 600;
-            margin-top: 4px;
-        }
-
-        /* ===== عناوين الأقسام ===== */
-        .section-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: linear-gradient(90deg, #f1f7fb 0%, #ffffff 100%);
-            border-radius: 12px;
-            padding: 12px 18px;
-            margin: 26px 0 14px 0;
-            border-right: 5px solid #155a8a;
-            font-weight: 800;
-            font-size: 16.5px;
-            color: #0d2d4a;
-        }
-
-        /* ===== بطاقة تحيط بالشارت ===== */
-        .chart-card {
-            background: #ffffff;
-            border-radius: 18px;
-            padding: 14px 16px 4px 16px;
-            border: 1px solid #eef1ef;
-            box-shadow: 0 4px 14px rgba(17,24,39,0.05);
-            margin-bottom: 18px;
-        }
-        .chart-card-title {
-            font-weight: 800;
-            font-size: 14.5px;
-            color: #0f172a;
-            margin-bottom: 4px;
-        }
-
-        /* ===== رفع الملف ===== */
-        div[data-testid="stFileUploader"] {
-            border: 2px dashed #155a8a44;
-            border-radius: 16px;
-            padding: 8px;
-            background: #f8fbfd;
-        }
-
-        /* ===== أزرار التحميل ===== */
-        div[data-testid="stDownloadButton"] button {
-            border-radius: 12px !important;
-            font-weight: 700 !important;
-            border: 1px solid #d8e6f0 !important;
-            transition: all 0.15s ease-in-out;
-        }
-        div[data-testid="stDownloadButton"] button:hover {
-            border-color: #155a8a !important;
-            color: #155a8a !important;
-            transform: translateY(-1px);
-        }
-
-        /* ===== حالة فارغة ===== */
-        .empty-state {
-            text-align: center;
-            padding: 26px 10px;
-            color: #9aa4b2;
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        /* ===== صندوق الأخطاء ===== */
-        .error-box {
-            background: #fdecea;
-            border: 1px solid #f5c2c0;
-            border-radius: 14px;
-            padding: 18px 20px;
-            color: #7a1f1a;
-            font-weight: 600;
-            line-height: 2;
-        }
-        .error-box code {
-            background: #fbe0de;
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-weight: 700;
-        }
-        .error-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin-bottom: 6px;
-        }
-
-        /* ===== صندوق تأكيد النجاح ===== */
-        .success-box {
-            background: #eaf6ef;
-            border: 1px solid #c9e9d5;
-            border-radius: 14px;
-            padding: 14px 18px;
-            color: #0f3d2e;
-            font-weight: 700;
-            margin-bottom: 14px;
-        }
-
-        /* ===== صندوق معلومات ===== */
-        .info-box {
-            background: #fbf6e9;
-            border: 1px solid #efe0ad;
-            border-radius: 14px;
-            padding: 14px 18px;
-            color: #6b5410;
-            font-weight: 700;
-            margin-bottom: 14px;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="rotation-header">
-        <h1>🔄 التدوير</h1>
-        <p>إعادة توزيع العملاء على المحصلين بحيث لا يحتفظ أي عميل بمحصله القديم، مع الحفاظ على نفس عدد العملاء ومتبقي المديونية لكل محصل قدر الإمكان — اختياريًا داخل كل تصنيف (أول/ثاني) على حدة</p>
-        <span class="header-badge">توزيع آلي متوازن + تحسين محلي + تصنيف هرمي اختياري</span>
-    </div>
-    """, unsafe_allow_html=True)
 
     # ============================================================
     # 🛠️ أدوات مساعدة للتحقق من الأعمدة وعرض الأخطاء بدقة
