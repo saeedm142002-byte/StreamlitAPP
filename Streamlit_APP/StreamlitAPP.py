@@ -4087,7 +4087,7 @@ elif page == "النشاط":
             avg_wasted = filtered["وقت مهدر"].mean()
             avg_wasted = 0 if pd.isna(avg_wasted) else avg_wasted
             
-            
+            """
             kpi_row([
                 dict(icon="📞", label="عدد المكالمات المغطاة", value=f"{total_covered:,}"),
                 dict(icon="✅", label="عدد المكالمات الناجحة", value=f"{total_successful:,}", tone="ok",
@@ -4096,6 +4096,8 @@ elif page == "النشاط":
                 dict(icon="🏆", label="أكتر محصل فاعلية", value=str(top_performer["Collector"]), tone="warn",
                      sub=f"سكور {top_performer['سكور الفاعلية']:.0f}/100"),
             ])
+
+            """
                         
                         st.caption(
                             "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
