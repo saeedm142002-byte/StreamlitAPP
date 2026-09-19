@@ -4239,6 +4239,12 @@ elif page == "التوزيع":
             if not new_sp_names:
                 st.info("اكتب اسم محصل جديد واحد على الأقل.")
 
+            balance_old = st.checkbox(
+                "اسمح بالتبديل بين القدام لتقريب المبالغ من المتوسط",
+                value=True,
+                key="new_bal",
+            )
+
             time_limit = st.slider(
                 "مدة التحسين لكل فئة (ثواني) — كل ما زادت كل ما التوزيع أدق",
                 2, 60, 8, key="opt_time",
