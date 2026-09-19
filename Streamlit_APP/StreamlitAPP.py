@@ -4099,29 +4099,31 @@ elif page == "النشاط":
 
             """
                         
-                        st.caption(
-                            "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
-                            "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
-                            "مقارنة بباقي المحصلين في نفس الفلتر الحالي."
-                        )
+            st.caption(
+            "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
+            "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
+            "مقارنة بباقي المحصلين في نفس الفلتر الحالي."
+             )
             
-                        st.markdown("")
-            
-                        with st.expander("📋 آخر نشاط لكل محصل"):
-                            last_per_collector = (
+            st.markdown("")
+
+
+            with st.expander("📋 آخر نشاط لكل محصل"):
+                last_per_collector = (
                                 filtered.dropna(subset=["Created on"])
                                 .sort_values(["Collector", "Created on"])
                                 .groupby("Collector", as_index=False)
                                 .last()
                             )
-                            show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
-                            st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)
+                show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
+                st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)            
             
-                        with st.expander("🏆 ترتيب المحصلين حسب سكور الفاعلية"):
-                            st.dataframe(
-                                collector_agg[["Collector", "المكالمات_المغطاة", "المكالمات_الناجحة", "الوقت_المهدر", "سكور الفاعلية"]],
-                                use_container_width=True, hide_index=True
+            with st.expander("🏆 ترتيب المحصلين حسب سكور الفاعلية"):
+                st.dataframe(
+                    collector_agg[["Collector", "المكالمات_المغطاة", "المكالمات_الناجحة", "الوقت_المهدر", "سكور الفاعلية"]],
+                    use_container_width=True, hide_index=True
                             )
+                        
 
             st.markdown("")
 
