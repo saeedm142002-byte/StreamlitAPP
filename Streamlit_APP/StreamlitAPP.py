@@ -190,8 +190,8 @@ def equalize_new_with_old(
     new_sp_filters: dict | None = None,
     time_limit: float = 8.0,
     amount_weight: float = 3.0,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pool = pool_df.copy()
     new_sp_filters = new_sp_filters or {}
 
