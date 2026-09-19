@@ -29,12 +29,18 @@ INK = "#1B1B2F"
 
 # accent = لون الصفحة | soft = نسخة فاتحة | on = لون الكتابة فوق الـ accent | pop = ظل النص
 THEMES = {
-    "promises":     dict(accent="#2DC26B", soft="#D5F7E2", on="#FFFFFF", pop=INK),
-    "neglect":      dict(accent="#FF5A5F", soft="#FFE0E1", on="#FFFFFF", pop=INK),
-    "distribution": dict(accent="#8B5CF6", soft="#EADFFF", on="#FFFFFF", pop=INK),
-    "activity":     dict(accent="#14B8D4", soft="#D2F5FB", on="#FFFFFF", pop=INK),
-    "payments":     dict(accent="#FFC93C", soft="#FFF1C4", on=INK,       pop="#FFFFFF"),
-    "rotation":     dict(accent="#3B82F6", soft="#DCE9FF", on="#FFFFFF", pop=INK),
+    "promises":     dict(accent="#2DC26B", soft="#D5F7E2", on="#FFFFFF", pop=INK,
+                         sky1="#A8E9D0", sky2="#D3F5E6", sky3="#FFF4DA", city="#1F6B5A", sun="#FFF3B0"),
+    "neglect":      dict(accent="#FF5A5F", soft="#FFE0E1", on="#FFFFFF", pop=INK,
+                         sky1="#FFB7B0", sky2="#FFD9CC", sky3="#FFF0DE", city="#8E3B4F", sun="#FFF0B8"),
+    "distribution": dict(accent="#8B5CF6", soft="#EADFFF", on="#FFFFFF", pop=INK,
+                         sky1="#BFA9FF", sky2="#E6C6F7", sky3="#FFE4EE", city="#4B3A8F", sun="#FFE9F3"),
+    "activity":     dict(accent="#14B8D4", soft="#D2F5FB", on="#FFFFFF", pop=INK,
+                         sky1="#94DFF0", sky2="#C4F0F3", sky3="#FFF6E2", city="#1E6F8C", sun="#FFF6C4"),
+    "payments":     dict(accent="#FFC93C", soft="#FFF1C4", on=INK,       pop="#FFFFFF",
+                         sky1="#FFD976", sky2="#FFCFA6", sky3="#FFF0E0", city="#9A6A2A", sun="#FFFBE0"),
+    "rotation":     dict(accent="#3B82F6", soft="#DCE9FF", on="#FFFFFF", pop=INK,
+                         sky1="#9EC5FF", sky2="#CDE0FF", sky3="#F2F8FF", city="#2F4E9A", sun="#FFFBE6"),
 }
 
 PAGE_THEMES = {
@@ -64,6 +70,7 @@ _CSS = """
   --ds-soft:__SOFT__;
   --ds-on:__ON__;
   --ds-pop:__POP__;
+  --sky1:__SKY1__; --sky2:__SKY2__; --sky3:__SKY3__;
   --ds-muted:#5b5b7a;
   --bw:3px;
   --sh:5px 5px 0 var(--ink);
@@ -74,7 +81,7 @@ _CSS = """
 .stApp{
   color-scheme:light; color:var(--ink); background:transparent !important;
 }
-html, body{ background:#FFF6DC !important; }
+html, body{ background:var(--sky3) !important; }
 [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottom"]{ background:transparent !important; }
 header[data-testid="stHeader"]{ background:transparent; }
 .main .block-container{ padding-top:1.4rem; padding-bottom:4rem; max-width:1280px; }
@@ -103,6 +110,10 @@ html, body, .stApp, .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2,
     radial-gradient(circle at 6% 88%, rgba(255,255,255,.30) 0 34px, transparent 35px),
     radial-gradient(rgba(27,27,47,.10) 2px, transparent 2px);
   background-size:auto,auto,auto,20px 20px;
+}
+.ds-header::after{
+  content:"✦ ✧"; position:absolute; right:24px; top:8px; font-size:26px; letter-spacing:8px; color:#fff;
+  text-shadow:2px 2px 0 var(--ink); transform:rotate(-6deg);
 }
 .ds-header-logo{
   position:absolute; z-index:1; left:26px; top:50%; margin-top:-46px; width:92px; height:92px; border-radius:50%;
@@ -185,9 +196,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.ds-card-title){
   text-align:center; padding:34px 16px; margin:10px 0; border:4px dashed var(--ink); border-radius:28px;
   background:var(--ds-soft); color:var(--ink); font-weight:800; font-size:16px;
 }
-.ds-empty .ds-empty-icon{ display:block; font-size:46px; margin-bottom:6px; animation:ds-bob 2.2s ease-in-out infinite; }
-@keyframes ds-bob{ 0%,100%{ transform:translateY(0) rotate(-4deg);} 50%{ transform:translateY(-8px) rotate(4deg);} }
-@media (prefers-reduced-motion:reduce){ .ds-empty .ds-empty-icon{ animation:none; } .ds-kpi,.ds-kpi:hover{ transition:none; } }
+.ds-empty .ds-empty-icon{ display:block; font-size:46px; margin-bottom:6px; }
+@media (prefers-reduced-motion:reduce){ .ds-kpi,.ds-kpi:hover{ transition:none; } }
 
 /* ===== التابات (أزرار حبوب) ===== */
 div[data-baseweb="tab-list"]{ gap:10px; border:0 !important; padding:6px 2px 10px 2px; flex-wrap:wrap; }
@@ -278,8 +288,10 @@ div[data-testid="stSpinner"] *{ color:var(--ink); font-weight:700; }
 
 /* ===== السايد بار (أصفر) ===== */
 section[data-testid="stSidebar"]{
-  background-color:#FFD23F; border-left:4px solid var(--ink);
-  background-image:radial-gradient(rgba(27,27,47,.16) 1.6px, transparent 1.6px); background-size:20px 20px;
+  border-left:4px solid var(--ink);
+  background-color:var(--sky2);
+  background-image:radial-gradient(rgba(255,255,255,.9) 1.6px, transparent 2.2px), linear-gradient(180deg, var(--sky1) 0%, var(--sky2) 60%, var(--sky3) 100%);
+  background-size:44px 44px, auto;
 }
 section[data-testid="stSidebar"] *{ color:var(--ink); }
 section[data-testid="stSidebar"] hr{ border-top:3px dashed var(--ink); opacity:.35; }
@@ -308,45 +320,22 @@ section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primar
   .ds-header{ flex-direction:column; align-items:flex-start; padding:22px; }
   .ds-header h1{ font-size:26px; }
 }
-/* ===== الخلفية المتحركة ===== */
+/* ===== الخلفية (ثابتة — مشهد أنمي) ===== */
 div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
-.ds-bg{ position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
-.ds-dots{
-  position:absolute; inset:-30px;
-  background-image:radial-gradient(rgba(27,27,47,.14) 1.7px, transparent 1.7px); background-size:26px 26px;
-  animation:ds-dots 5s linear infinite;
+.ds-bg{
+  position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
+  background:linear-gradient(180deg, var(--sky1) 0%, var(--sky2) 58%, var(--sky3) 100%);
 }
-@keyframes ds-dots{ to{ transform:translate(26px,26px); } }
-.ds-blob{ position:absolute; border-radius:50%; background:var(--ds-soft); opacity:.75; animation:ds-drift 24s ease-in-out infinite alternate; }
-.ds-blob.b1{ width:520px; height:520px; left:-160px; top:-120px; }
-.ds-blob.b2{ width:420px; height:420px; right:-120px; top:32%; background:color-mix(in srgb, var(--ds-accent) 22%, #FFF6DC); animation-duration:30s; }
-.ds-blob.b3{ width:360px; height:360px; left:34%; bottom:-190px; animation-duration:36s; animation-direction:alternate-reverse; }
-@keyframes ds-drift{ 0%{ transform:translate(0,0) scale(1); } 100%{ transform:translate(70px,50px) scale(1.12); } }
-
-.ds-fall{ position:absolute; top:-70px; left:var(--x); animation:ds-fall var(--d) linear var(--dl) infinite; }
-.ds-coin{
-  width:var(--s); height:var(--s); border-radius:50%; display:flex; align-items:center; justify-content:center;
-  background:#FFC93C; border:3px solid var(--ink); box-shadow:2px 2px 0 var(--ink); color:var(--ink);
-  font-weight:800; font-size:calc(var(--s) * .52); animation:ds-spin 1.5s ease-in-out infinite alternate; opacity:.85;
-}
-@keyframes ds-fall{
-  0%{ transform:translate(0,0) rotate(0); }
-  50%{ transform:translate(34px,55vh) rotate(20deg); }
-  100%{ transform:translate(-14px,118vh) rotate(-10deg); }
-}
-@keyframes ds-spin{ from{ transform:scaleX(1); } to{ transform:scaleX(.18); } }
-
-.ds-rise{ position:absolute; bottom:-80px; left:var(--x); font-size:var(--s); opacity:.5; animation:ds-rise var(--d) ease-in-out var(--dl) infinite; filter:drop-shadow(3px 3px 0 rgba(27,27,47,.35)); }
-@keyframes ds-rise{
-  0%{ transform:translate(0,0) rotate(-10deg); }
-  50%{ transform:translate(-40px,-60vh) rotate(12deg); }
-  100%{ transform:translate(20px,-125vh) rotate(-8deg); }
+.ds-sky{ position:absolute; inset:0; width:100%; height:100%; }
+.ds-city{ position:absolute; left:0; right:0; bottom:0; width:100%; height:34vh; min-height:200px; }
+.ds-tone{ /* شبكة نقط مانجا بتتلاشى من الركن */
+  position:absolute; inset:0; opacity:.55;
+  background-image:radial-gradient(rgba(27,27,47,.28) 1.7px, transparent 2.2px); background-size:16px 16px;
+  -webkit-mask-image:radial-gradient(circle at 100% 0, #000 0, transparent 40%);
+          mask-image:radial-gradient(circle at 100% 0, #000 0, transparent 40%);
 }
 .ds-bg.custom{ background-size:cover; background-position:center; }
 .ds-bg.custom > *{ display:none; }
-@media (prefers-reduced-motion:reduce){
-  .ds-dots,.ds-blob,.ds-fall,.ds-coin,.ds-rise{ animation:none !important; }
-}
 </style>
 
 """
@@ -392,29 +381,102 @@ def logo_html(logo=None) -> str:
     return _BUILTIN_LOGO
 
 
-def _background_html(bg_gif=None) -> str:
+def _sparkle(x, y, r, fill="#fff", op=0.95, rot=0):
+    return (f'<path d="M0 -1Q0 0 1 0Q0 0 0 1Q0 0 -1 0Q0 0 0 -1Z" fill="{fill}" opacity="{op}" '
+            f'transform="translate({x} {y}) rotate({rot}) scale({r})"/>')
+
+
+def _cloud(x, y, k, op=0.92):
+    return (f'<g transform="translate({x} {y}) scale({k})" opacity="{op}">'
+            '<rect x="0" y="44" width="230" height="52" rx="26" fill="#fff"/>'
+            '<circle cx="62" cy="44" r="40" fill="#fff"/><circle cx="118" cy="30" r="50" fill="#fff"/>'
+            '<circle cx="176" cy="48" r="34" fill="#fff"/>'
+            '<rect x="14" y="76" width="202" height="20" rx="10" fill="#B9C7F0" opacity=".28"/></g>')
+
+
+def _coin(x, y, r, rot):
+    return (f'<g transform="translate({x} {y}) rotate({rot})">'
+            f'<circle r="{r}" fill="#FFC93C" stroke="{INK}" stroke-width="3.5"/>'
+            f'<circle r="{r*0.68:.1f}" fill="none" stroke="#E0A400" stroke-width="2.5"/>'
+            f'<text y="{r*0.36:.1f}" text-anchor="middle" font-size="{r*1.05:.1f}" font-weight="800" fill="{INK}">$</text></g>')
+
+
+def _city_svg(color: str) -> str:
+    import random
+    rnd = random.Random(11)
+    layers = [  # (opacity, min_h, max_h, min_w, max_w, windows)
+        (0.28, 110, 220, 40, 90, False),
+        (0.48, 70, 170, 46, 100, False),
+        (0.82, 34, 120, 52, 118, True),
+    ]
+    out = []
+    for op, h0, h1, w0, w1, wins in layers:
+        g = [f'<g fill="{color}" opacity="{op}">']
+        x = -30
+        while x < 1640:
+            w, h = rnd.randint(w0, w1), rnd.randint(h0, h1)
+            y = 300 - h
+            g.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h+4}" rx="4"/>')
+            kind = rnd.randint(0, 3)
+            if kind == 1:
+                g.append(f'<rect x="{x + w//2 - 2}" y="{y-26}" width="4" height="27"/>')
+            elif kind == 2:
+                g.append(f'<rect x="{x + w//4}" y="{y-14}" width="{w//2}" height="15" rx="3"/>')
+            elif kind == 3:
+                g.append(f'<path d="M{x} {y} Q{x + w/2} {y-30} {x + w} {y}Z"/>')
+            g.append("</g>" if False else "")
+            if wins:
+                g.append("</g>")
+                g.append('<g fill="#FFE9A0" opacity="0.9">')
+                for cx in range(x + 9, x + w - 10, 15):
+                    for cy in range(y + 12, 292, 20):
+                        if rnd.random() < 0.26:
+                            g.append(f'<rect x="{cx}" y="{cy}" width="7" height="10" rx="1.5"/>')
+                g.append("</g>")
+                g.append(f'<g fill="{color}" opacity="{op}">')
+            x += w + rnd.randint(-8, 10)
+        g.append("</g>")
+        out.append("".join(g))
+    out.append(f'<rect x="0" y="288" width="1600" height="14" fill="{color}"/>')
+    return ('<svg class="ds-city" viewBox="0 0 1600 300" preserveAspectRatio="xMidYMax slice" '
+            'xmlns="http://www.w3.org/2000/svg">' + "".join(out) + "</svg>")
+
+
+@lru_cache(maxsize=8)
+def _scene_html(theme: str) -> str:
+    t = THEMES.get(theme, THEMES["promises"])
+    sky = [
+        f'<circle cx="1240" cy="210" r="200" fill="{t["sun"]}" opacity=".20"/>',
+        f'<circle cx="1240" cy="210" r="140" fill="{t["sun"]}" opacity=".38"/>',
+        f'<circle cx="1240" cy="210" r="88" fill="{t["sun"]}"/>',
+        _cloud(90, 110, 1.0), _cloud(520, 50, 0.7, .85), _cloud(880, 230, 0.9), _cloud(1330, 70, 1.1),
+        _cloud(260, 360, 0.65, .8), _cloud(1120, 430, 0.6, .75),
+    ]
+    for x, y, r, rot in [(150, 250, 20, 0), (470, 190, 12, 15), (700, 90, 26, 0), (980, 330, 14, 0),
+                          (1450, 250, 22, 0), (1540, 520, 12, 20), (60, 500, 16, 0), (820, 470, 10, 0),
+                          (380, 470, 9, 0), (1010, 120, 9, 0), (1300, 470, 13, 0), (600, 300, 8, 0)]:
+        sky.append(_sparkle(x, y, r, rot=rot))
+    for x, y, r, rot in [(245, 300, 27, -14), (770, 150, 21, 10), (1450, 380, 30, 16), (70, 610, 24, -8)]:
+        sky.append(_coin(x, y, r, rot))
+    return (
+        '<div class="ds-bg"><div class="ds-tone"></div>'
+        '<svg class="ds-sky" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" '
+        'xmlns="http://www.w3.org/2000/svg">' + "".join(sky) + "</svg>"
+        + _city_svg(t["city"]) + "</div>"
+    )
+
+
+def _background_html(theme="promises", bg_gif=None) -> str:
     if bg_gif and Path(bg_gif).exists():
         return f'<div class="ds-bg custom" style="background-image:url({_data_uri(str(Path(bg_gif)))})"></div>'
-    # (left%, مدة, تأخير سالب عشان يبدأ متوزع، حجم)
-    coins = [(6, 15, -2, 38), (17, 19, -9, 30), (29, 13, -5, 44), (41, 21, -13, 32), (53, 16, -7, 40),
-             (64, 18, -1, 34), (76, 14, -11, 42), (88, 20, -6, 30), (95, 17, -14, 36)]
-    icons = [(9, "💰", 26, 3, 44), (22, "📈", 30, -8, 40), (35, "⭐", 24, -15, 34), (48, "✅", 28, -4, 38),
-             (60, "💳", 32, -12, 42), (72, "📞", 27, -19, 36), (84, "🏦", 34, -9, 46), (92, "🧾", 29, -22, 34)]
-    parts = ['<div class="ds-bg"><div class="ds-dots"></div>'
-             '<div class="ds-blob b1"></div><div class="ds-blob b2"></div><div class="ds-blob b3"></div>']
-    for x, d, dl, sz in coins:
-        parts.append(f'<div class="ds-fall" style="--x:{x}%;--d:{d}s;--dl:{dl}s"><div class="ds-coin" style="--s:{sz}px">﷼</div></div>')
-    for x, ic, d, dl, sz in icons:
-        parts.append(f'<div class="ds-rise" style="--x:{x}%;--d:{d}s;--dl:{dl}s;--s:{sz}px">{ic}</div>')
-    parts.append("</div>")
-    return "".join(parts)
+    return _scene_html(theme)
 
 
-def inject_design_system(theme: str = "promises", background: str = "anim", bg_gif=None) -> None:
+def inject_design_system(theme: str = "promises", background: str = "scene", bg_gif=None) -> None:
     """
     يتنادى مرة واحدة في كل rerun، بعد set_page_config.
-    background: "anim" (عملات وأيقونات متحركة، الافتراضي) | "plain" (من غير حركة)
-    bg_gif: مسار GIF/صورة اختيارية تستخدمها كخلفية بدل الأنيميشن.
+    background: "scene" (مشهد أنمي ثابت، الافتراضي) | "plain" (سماء متدرجة بس)
+    bg_gif: مسار صورة اختيارية تستخدمها كخلفية بدل المشهد.
     """
     t = THEMES.get(theme, THEMES["promises"])
     css = (
@@ -423,10 +485,15 @@ def inject_design_system(theme: str = "promises", background: str = "anim", bg_g
         .replace("__SOFT__", t["soft"])
         .replace("__ON__", t["on"])
         .replace("__POP__", t["pop"])
+        .replace("__SKY1__", t["sky1"])
+        .replace("__SKY2__", t["sky2"])
+        .replace("__SKY3__", t["sky3"])
     )
     st.markdown(css, unsafe_allow_html=True)
-    if background != "plain" or bg_gif:
-        st.markdown(_background_html(bg_gif), unsafe_allow_html=True)
+    if background == "plain" and not bg_gif:
+        st.markdown('<div class="ds-bg"></div>', unsafe_allow_html=True)
+    else:
+        st.markdown(_background_html(theme, bg_gif), unsafe_allow_html=True)
 
 
 def _e(x) -> str:
