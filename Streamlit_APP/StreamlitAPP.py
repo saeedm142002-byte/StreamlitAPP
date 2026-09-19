@@ -28,6 +28,146 @@ import pandas as pd
 import streamlit as st
 
 
+def _norm_acc(s):
+    """توحيد أرقام الحسابات للمقارنة (نص من غير مسافات ولا .0)."""
+    return s.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+
+
+def _is_payer(s):
+    """الحساب سداد = فيه قيمة أكبر من صفر (أو نص غير فاضي لو العمود نصي)."""
+    num = pd.to_numeric(s, errors="coerce")
+    if num.notna().any():
+        return num.fillna(0) > 0
+    return s.notna() & (s.astype(str).str.strip() != "")
+
+
+def distribute_equalize(
+    df: pd.DataFrame,
+    sp_col: str,
+    id_col: str,
+    amt_col: str,
+    product_col: str | None = None,
+    classification_col: str | None = None,
+    movable_mask: pd.Series | None = None,
+    time_limit: float = 8.0,
+    amount_weight: float = 3.0,
+    excluded_sps: list | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    بيساوي المحفظة بين المحصلين جوه كل تصنيف/منتج.
+    movable_mask: الحسابات المسموح تتنقل بس (الباقي ثابت وبيتحسب في المتوسط).
+    بيرجع: (المحفظة كاملة بعد التساوي، ملخص مقابل المتوسط)
+    """
+    excluded_sps = set(excluded_sps or [])
+    names = sorted(sp for sp in df[sp_col].dropna().unique() if sp not in excluded_sps)
+    if not names:
+        raise ValueError("مفيش محصلين متاحين بعد الاستبعاد")
+
+    if movable_mask is None:
+        movable_mask = pd.Series(True, index=df.index)
+    movable_mask = movable_mask.reindex(df.index).fillna(False).astype(bool)
+
+    group_labels, df_group_cols = [], []
+    if classification_col:
+        group_labels.append("التصنيف")
+        df_group_cols.append(classification_col)
+    if product_col:
+        group_labels.append("نوع المنتج")
+        df_group_cols.append(product_col)
+
+    def _stats(sub):
+        return [len(sub), sub[id_col].nunique(), float(sub[amt_col].sum())]
+
+    new_df = df.copy()
+    new_df["المحصل السابق"] = None
+    summary_rows = []
+
+    grouped = (
+        df.groupby(df_group_cols, dropna=False) if df_group_cols
+        else [(("__ALL__",), df)]
+    )
+
+    for gvals, g in grouped:
+        gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+        gkey = tuple(str(x).strip() for x in gkey)
+        gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+
+        mv = g[movable_mask.loc[g.index]]
+        if mv.empty:
+            continue
+
+        stats = {sp: _stats(g[g[sp_col] == sp]) for sp in names}
+        # المشاركين في الفئة دي = اللي عندهم حسابات فيها
+        active = [sp for sp in names if stats[sp][0] > 0]
+        if len(active) < 2:
+            continue
+
+        # ===== الوحدات: كل عميل (من الحسابات القابلة للنقل) = وحدة =====
+        units = []
+        for sp in active:
+            for cid, grp in mv[mv[sp_col] == sp].groupby(id_col, dropna=False):
+                units.append({
+                    "home": sp,
+                    "v": [len(grp), 1, float(grp[amt_col].sum())],
+                    "rows": grp,
+                })
+        if not units:
+            continue
+
+        # ===== المتوسط = (إجمالي الثابت + القابل للنقل) ÷ عدد المشاركين =====
+        avg = [sum(stats[sp][m] for sp in active) / len(active) for m in range(3)]
+        base = {sp: list(stats[sp]) for sp in active}
+        targets = {sp: list(avg) for sp in active}
+        scale = [max(x, 1.0) for x in avg]
+
+        holder, _ = _optimize_assignment(
+            units, base, targets, scale, active,
+            time_limit=time_limit,
+            weights=(1.0, 1.0, amount_weight),
+        )
+
+        inn = {sp: [0, 0, 0.0] for sp in active}
+        out = {sp: [0, 0, 0.0] for sp in active}
+        new_owner, prev_owner = {}, {}
+        for u, h in zip(units, holder):
+            if h == u["home"]:
+                continue
+            for m in range(3):
+                out[u["home"]][m] += u["v"][m]
+                inn[h][m] += u["v"][m]
+            for ix in u["rows"].index:
+                new_owner[ix] = h
+                prev_owner[ix] = u["home"]
+
+        if new_owner:
+            idx = list(new_owner)
+            new_df.loc[idx, sp_col] = pd.Series(new_owner)
+            new_df.loc[idx, "المحصل السابق"] = pd.Series(prev_owner)
+
+        for sp in active:
+            a = [base[sp][m] - out[sp][m] + inn[sp][m] for m in range(3)]
+            summary_rows.append({
+                "المحصل": sp, **gkey_dict,
+                "حسابات قبل": base[sp][0],
+                "عملاء قبل": base[sp][1],
+                "مديونية قبل": round(base[sp][2], 2),
+                "اتسحب - حسابات": out[sp][0],
+                "اتسحب - مديونية": round(out[sp][2], 2),
+                "استلم - حسابات": inn[sp][0],
+                "استلم - مديونية": round(inn[sp][2], 2),
+                "بعد - حسابات": a[0],
+                "بعد - عملاء": a[1],
+                "بعد - مديونية": round(a[2], 2),
+                "المتوسط - حسابات": round(avg[0], 1),
+                "المتوسط - عملاء": round(avg[1], 1),
+                "المتوسط - مديونية": round(avg[2], 2),
+                "انحراف الحسابات %": round((a[0] - avg[0]) / max(avg[0], 1) * 100, 1),
+                "انحراف المديونية %": round((a[2] - avg[2]) / max(avg[2], 1) * 100, 1),
+            })
+
+    return new_df, pd.DataFrame(summary_rows)
+
+
 def distribute_leaving(
     df: pd.DataFrame,
     leaving_sps: list,
@@ -4755,6 +4895,9 @@ elif page == "التوزيع":
     # ================================================================
     # سيناريو 3: تساوي المحفظة
     # ================================================================
+    # ================================================================
+    # سيناريو 3: تساوي المحفظة
+    # ================================================================
     else:
         st.markdown("#### ارفع ملف المحفظة")
         portfolio_file = st.file_uploader("ملف المحفظة", type=["xlsx"], key="eq_port")
@@ -4764,7 +4907,7 @@ elif page == "التوزيع":
             core = pick_columns(df_raw, "eq")
             df = df_raw.dropna(subset=[core["acc_col"]]).copy()
 
-            # اختياري: الحالات القابلة للنقل
+            # ----- الحالات القابلة للنقل -----
             status_col = st.selectbox(
                 "عمود حالة الحساب (اختياري — لتحديد إيه اللي يتحرك)",
                 ["— بدون —"] + list(df.columns),
@@ -4774,59 +4917,120 @@ elif page == "التوزيع":
             if status_col != "— بدون —":
                 statuses = sorted(df[status_col].dropna().astype(str).unique())
                 included_statuses = st.multiselect(
-                    "الحالات اللي يُسمح بنقلها فقط",
+                    "الحالات اللي يُسمح بنقلها فقط (فاضي = كل الحالات)",
                     statuses,
                     key="eq_statuses",
                 )
 
+            # ----- السدادات -----
+            pay_col = st.selectbox(
+                "عمود السداد (اختياري — الحسابات اللي فيها قيمة أكبر من صفر = سداد)",
+                ["— بدون —"] + list(df.columns),
+                key="eq_pay_col",
+            )
+            keep_payers = False
+            if pay_col != "— بدون —":
+                keep_payers = st.checkbox(
+                    "اسيب السدادات مكانها (متتنقلش)", value=True, key="eq_keep_payers"
+                )
+
+            # ----- حسابات مستبعدة من شيت -----
+            excl_file = st.file_uploader(
+                "شيت حسابات مستبعدة من التساوي (اختياري — حتى لو حالتها تسمح)",
+                type=["xlsx"],
+                key="eq_excl",
+            )
+            excluded_accounts = set()
+            if excl_file:
+                ex_df = _load_excel_bytes(excl_file.getvalue())
+                excl_col = st.selectbox(
+                    "عمود رقم الحساب في الشيت", list(ex_df.columns), key="eq_excl_col"
+                )
+                excluded_accounts = set(_norm_acc(ex_df[excl_col].dropna()))
+                in_port = int(_norm_acc(df[core["acc_col"]]).isin(excluded_accounts).sum())
+                st.caption(
+                    f"الشيت فيه {len(excluded_accounts)} حساب، الموجود منهم في المحفظة: {in_port}"
+                )
+
+            # ----- استبعاد محصلين -----
+            excluded_sps = st.multiselect(
+                "استبعاد محصلين من التساوي (مش هيدخلوا في المتوسط ومحفظتهم ثابتة)",
+                sorted(df[core["sp_col"]].dropna().unique()),
+                key="eq_excluded_sps",
+            )
+
+            time_limit = st.slider(
+                "مدة التحسين لكل فئة (ثواني)", 2, 60, 8, key="eq_time"
+            )
+            amount_weight = st.slider(
+                "أهمية تقريب المديونية من المتوسط",
+                1.0, 10.0, 3.0, 0.5, key="eq_amt_w",
+            )
+
             st.caption(
-                "المتوسط بيتحسب تلقائيًا داخل كل تصنيف/منتج = (إجمالي كل المحصلين "
-                "الثابت + إجمالي الحالات القابلة للنقل) ÷ عدد كل المحصلين، وبعدين "
-                "بيتوزع بس الحالات اللي انت مسموح بنقلها لحد ما الكل يوصل للمتوسط. "
-                "مفيش شيت مستهدفات مطلوب."
+                "المتوسط جوه كل تصنيف/منتج = (إجمالي كل المحصلين المشاركين، الثابت + القابل للنقل) "
+                "÷ عددهم. المحسّن بيبدّل العملاء القابلين للنقل بين المحصلين لحد ما الكل يقرب من "
+                "المتوسط في الحسابات والعملاء والمديونية."
             )
 
             if st.button("نفذ التساوي", type="primary", key="eq_run"):
                 try:
+                    movable = pd.Series(True, index=df.index)
                     if status_col != "— بدون —" and included_statuses:
-                        movable = df[df[status_col].astype(str).isin(included_statuses)].copy()
-                        fixed = df[~df[status_col].astype(str).isin(included_statuses)].copy()
-                    else:
-                        movable = df.copy()
-                        fixed = df.iloc[0:0].copy()
+                        movable &= df[status_col].astype(str).isin(included_statuses)
+                    if excluded_accounts:
+                        movable &= ~_norm_acc(df[core["acc_col"]]).isin(excluded_accounts)
+                    if keep_payers and pay_col != "— بدون —":
+                        movable &= ~_is_payer(df[pay_col])
 
-                    if movable.empty:
+                    if not movable.any():
                         st.error("مفيش حسابات قابلة للنقل بالشروط دي")
                         st.stop()
 
-                    mover_names = sorted(df[core["sp_col"]].dropna().unique())
+                    st.info(f"قابل للنقل: {int(movable.sum())} حساب | ثابت: {int((~movable).sum())} حساب")
 
                     with st.spinner("جاري حساب المتوسط والتساوي..."):
-                        assigned, summary = distribute_pool_by_average(
-                            fixed_df=fixed,
-                            pool_df=movable,
-                            mover_names=mover_names,
+                        result_df, summary = distribute_equalize(
+                            df=df,
                             sp_col=core["sp_col"],
                             id_col=core["id_col"],
                             amt_col=core["amt_col"],
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
+                            movable_mask=movable,
+                            time_limit=time_limit,
+                            amount_weight=amount_weight,
+                            excluded_sps=excluded_sps,
                         )
-
-                    result_df = pd.concat([fixed, assigned], ignore_index=True)
 
                     st.success("تم التساوي")
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
+                    final_cols = [core["sp_col"]]
+                    if core["product_col"]:
+                        final_cols.append(core["product_col"])
+                    if core["classification_col"]:
+                        final_cols.append(core["classification_col"])
+                    final_summary = (
+                        result_df.groupby(final_cols)
+                        .agg(
+                            عدد_الحسابات=(core["acc_col"], "count"),
+                            عدد_العملاء=(core["id_col"], "nunique"),
+                            إجمالي_المبلغ=(core["amt_col"], "sum"),
+                        )
+                        .reset_index()
+                    )
+                    st.markdown("### المحفظة بعد التساوي")
+                    st.dataframe(final_summary, use_container_width=True)
+
+                    moved = result_df[result_df["المحصل السابق"].notna()]
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                        result_df.to_excel(
-                            writer, index=False, sheet_name="بعد التساوي"
-                        )
-                        summary.to_excel(
-                            writer, index=False, sheet_name="ملخص مقابل المتوسط"
-                        )
+                        result_df.to_excel(writer, index=False, sheet_name="بعد التساوي")
+                        moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
+                        summary.to_excel(writer, index=False, sheet_name="ملخص مقابل المتوسط")
+                        final_summary.to_excel(writer, index=False, sheet_name="ملخص نهائي")
                     st.download_button(
                         "تحميل الملف بعد التساوي",
                         output.getvalue(),
