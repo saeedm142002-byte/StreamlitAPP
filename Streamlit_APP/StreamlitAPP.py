@@ -195,21 +195,23 @@ def distribute_leaving(
 
 
 
-def _optimize_assignment(units, base, targets, scale, eligible,
-                                                 time_limit=8.0, weights=(1.0, 1.0, 1.0), leavers=None):
+def _optimize_assignment(units, base, targets, scale, receivers,
+                         time_limit=8.0, weights=(1.0, 1.0, 1.0), leavers=None):
     """
-    units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
-    base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
-    targets: هدف كل محصل [حسابات, عملاء, مبلغ]
+    units:     [{"home": المحصل الأصلي, "v": [حسابات, 1, مبلغ]}]
+    base:      الحالة الحالية لكل محصل
+    targets:   هدف كل محصل [حسابات, عملاء, مبلغ]
+    receivers: المحصلين المسموح يستقبلوا وحدات
+    leavers:   المحصلين اللي لازم كل وحداتهم تخرج من عندهم
     بيرجع: (holder لكل وحدة، أقل تكلفة)
     """
     import random, time, math
 
     n = len(units)
-    elig = set(eligible)
+    recv = set(receivers)
+    leav = set(leavers or [])
     homes = [u["home"] for u in units]
     vecs = [u["v"] for u in units]
-    leav = set(leavers or [])
     dests = [([] if h in leav else [h]) + [r for r in receivers if r != h] for h in homes]
 
     def hc(h, v):
@@ -218,7 +220,7 @@ def _optimize_assignment(units, base, targets, scale, eligible,
                 + weights[1] * ((v[1] - t[1]) / scale[1]) ** 2
                 + weights[2] * ((v[2] - t[2]) / scale[2]) ** 2)
 
-    if n == 0 or not eligible:
+    if n == 0 or not receivers:
         return homes[:], sum(hc(h, base[h]) for h in base)
 
     def run(seed, budget):
@@ -244,7 +246,7 @@ def _optimize_assignment(units, base, targets, scale, eligible,
             p, q = holder[i], holder[j]
             if p == q:
                 return False
-            return (q == homes[i] or q in elig) and (p == homes[j] or p in elig)
+            return (q == homes[i] or q in recv) and (p == homes[j] or p in recv)
 
         def swap_delta(i, j):
             p, q = holder[i], holder[j]
@@ -285,12 +287,14 @@ def _optimize_assignment(units, base, targets, scale, eligible,
                             improved = True
                 if not improved:
                     break
-                # وحدات المستقيلين لازم تخرج: نحطها في أول توزيع عشوائي
-                for i in range(n):
-                    if homes[i] in leav:
-                        dst = rnd.choice(dests[i])
-                        r = move_delta(i, dst)
-                        do_move(i, dst, *r[1:])            
+
+        # وحدات المستقيلين لازم تخرج: نحطها في أول توزيع عشوائي
+        for i in range(n):
+            if homes[i] in leav:
+                dst = rnd.choice(dests[i])
+                r = move_delta(i, dst)
+                do_move(i, dst, *r[1:])
+
         # 1) نزول أولي
         descent()
         best_h, best_c = holder[:], sum(cost.values())
@@ -4668,6 +4672,8 @@ elif page == "التوزيع":
                             new_sp_filters=new_sp_filters,
                             amount_weight=amount_weight,
                             excluded_sps=excluded_sps,
+                            time_limit=time_limit,
+                            balance_old=balance_old,
                         )
     
                     # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
