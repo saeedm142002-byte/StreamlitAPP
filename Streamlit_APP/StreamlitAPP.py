@@ -27,8 +27,176 @@ import io
 import pandas as pd
 import streamlit as st
 
+
+def distribute_leaving(
+    df: pd.DataFrame,
+    leaving_sps: list,
+    sp_col: str,
+    id_col: str,
+    amt_col: str,
+    product_col: str | None = None,
+    classification_col: str | None = None,
+    time_limit: float = 8.0,
+    amount_weight: float = 3.0,
+    excluded_sps: list | None = None,
+    balance_old: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    بيوزع كل حسابات المستقيلين على الباقيين (جوه كل تصنيف/منتج) بحيث الكل يقرب من المتوسط.
+    balance_old=True: مسموح كمان بتبديل عملاء بين الباقيين لتقريب المبالغ.
+    بيرجع: (المحفظة كاملة بعد التوزيع، ملخص مقابل المتوسط)
+    """
+    leaving_sps = list(leaving_sps)
+    excluded_sps = set(excluded_sps or [])
+    remaining_names = sorted(
+        sp for sp in df[sp_col].dropna().unique()
+        if sp not in leaving_sps and sp not in excluded_sps
+    )
+    if not remaining_names:
+        raise ValueError("مفيش محصلين باقيين متاحين بعد الاستبعاد")
+
+    group_labels, df_group_cols = [], []
+    if classification_col:
+        group_labels.append("التصنيف")
+        df_group_cols.append(classification_col)
+    if product_col:
+        group_labels.append("نوع المنتج")
+        df_group_cols.append(product_col)
+
+    def _stats(sub):
+        return [len(sub), sub[id_col].nunique(), float(sub[amt_col].sum())]
+
+    def _fill_level(vals, total):
+        # مستوى L بحيث مجموع (L - القيمة) للي تحته = إجمالي اللي هيتوزع
+        lo, hi = 0.0, max(vals) + total
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if sum(max(0.0, mid - v) for v in vals) < total:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+
+    new_df = df.copy()
+    new_df["المحصل السابق"] = None
+    summary_rows = []
+
+    grouped = (
+        df.groupby(df_group_cols, dropna=False) if df_group_cols
+        else [(("__ALL__",), df)]
+    )
+
+    for gvals, g in grouped:
+        gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+        gkey = tuple(str(x).strip() for x in gkey)
+        gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+
+        pool_g = g[g[sp_col].isin(leaving_sps)]
+        if pool_g.empty:
+            continue
+
+        rem_stats = {sp: _stats(g[g[sp_col] == sp]) for sp in remaining_names}
+        # اللي بيستلم في الفئة دي = الباقيين اللي عندهم حسابات فيها (لو ملقيناش، الكل)
+        active = [sp for sp in remaining_names if rem_stats[sp][0] > 0] or remaining_names
+        n = len(active)
+
+        # ===== الوحدات: كل عميل = وحدة =====
+        units = []
+        for sp in leaving_sps:
+            for cid, grp in pool_g[pool_g[sp_col] == sp].groupby(id_col, dropna=False):
+                units.append({
+                    "home": sp,
+                    "v": [len(grp), 1, float(grp[amt_col].sum())],
+                    "rows": grp,
+                })
+        pool_tot = [sum(u["v"][m] for u in units) for m in range(3)]
+
+        if balance_old:
+            for sp in active:
+                for cid, grp in g[g[sp_col] == sp].groupby(id_col, dropna=False):
+                    units.append({
+                        "home": sp,
+                        "v": [len(grp), 1, float(grp[amt_col].sum())],
+                        "rows": grp,
+                    })
+
+        # ===== المتوسط والأهداف =====
+        avg = [
+            (sum(rem_stats[sp][m] for sp in active) + pool_tot[m]) / n
+            for m in range(3)
+        ]
+        base, targets = {}, {}
+        if balance_old:
+            for sp in active:
+                targets[sp] = list(avg)
+        else:
+            lv = [_fill_level([rem_stats[sp][m] for sp in active], pool_tot[m])
+                  for m in range(3)]
+            for sp in active:
+                targets[sp] = [max(rem_stats[sp][m], lv[m]) for m in range(3)]
+        for sp in active:
+            base[sp] = list(rem_stats[sp])
+        for sp in leaving_sps:
+            base[sp] = _stats(pool_g[pool_g[sp_col] == sp])
+            targets[sp] = [0, 0, 0.0]
+        scale = [max(x, 1.0) for x in avg]
+
+        # ===== التحسين =====
+        holder, _ = _optimize_assignment(
+            units, base, targets, scale, active,
+            time_limit=time_limit,
+            weights=(1.0, 1.0, amount_weight),
+            leavers=leaving_sps,
+        )
+
+        inn = {sp: [0, 0, 0.0] for sp in active}
+        out = {sp: [0, 0, 0.0] for sp in active}
+        new_owner, prev_owner = {}, {}
+        for u, h in zip(units, holder):
+            if h == u["home"]:
+                continue
+            for m in range(3):
+                inn[h][m] += u["v"][m]
+                if u["home"] in out:
+                    out[u["home"]][m] += u["v"][m]
+            for ix in u["rows"].index:
+                new_owner[ix] = h
+                prev_owner[ix] = u["home"]
+
+        if new_owner:
+            idx = list(new_owner)
+            new_df.loc[idx, sp_col] = pd.Series(new_owner)
+            new_df.loc[idx, "المحصل السابق"] = pd.Series(prev_owner)
+
+        for sp in active:
+            a = [base[sp][m] - out[sp][m] + inn[sp][m] for m in range(3)]
+            summary_rows.append({
+                "المحصل": sp, **gkey_dict,
+                "حسابات قبل": base[sp][0],
+                "عملاء قبل": base[sp][1],
+                "مديونية قبل": round(base[sp][2], 2),
+                "استلم - حسابات": inn[sp][0],
+                "استلم - مديونية": round(inn[sp][2], 2),
+                "اتسحب (تبديل) - حسابات": out[sp][0],
+                "اتسحب (تبديل) - مديونية": round(out[sp][2], 2),
+                "بعد - حسابات": a[0],
+                "بعد - عملاء": a[1],
+                "بعد - مديونية": round(a[2], 2),
+                "المتوسط - حسابات": round(avg[0], 1),
+                "المتوسط - عملاء": round(avg[1], 1),
+                "المتوسط - مديونية": round(avg[2], 2),
+                "انحراف الحسابات %": round((a[0] - avg[0]) / max(avg[0], 1) * 100, 1),
+                "انحراف المديونية %": round((a[2] - avg[2]) / max(avg[2], 1) * 100, 1),
+            })
+
+    return new_df, pd.DataFrame(summary_rows)
+
+
+
+
+
 def _optimize_assignment(units, base, targets, scale, eligible,
-                         time_limit=8.0, weights=(1.0, 1.0, 1.0)):
+                                                 time_limit=8.0, weights=(1.0, 1.0, 1.0), leavers=None):
     """
     units:   [{"home": قديم, "v": [حسابات, 1, مبلغ]}]
     base:    الحالة الحالية لكل محصل (كل الوحدات في مكانها الأصلي)
@@ -41,7 +209,8 @@ def _optimize_assignment(units, base, targets, scale, eligible,
     elig = set(eligible)
     homes = [u["home"] for u in units]
     vecs = [u["v"] for u in units]
-    dests = [[h] + list(eligible) for h in homes]
+    leav = set(leavers or [])
+    dests = [([] if h in leav else [h]) + [r for r in receivers if r != h] for h in homes]
 
     def hc(h, v):
         t = targets[h]
@@ -116,7 +285,12 @@ def _optimize_assignment(units, base, targets, scale, eligible,
                             improved = True
                 if not improved:
                     break
-
+                # وحدات المستقيلين لازم تخرج: نحطها في أول توزيع عشوائي
+                for i in range(n):
+                    if homes[i] in leav:
+                        dst = rnd.choice(dests[i])
+                        r = move_delta(i, dst)
+                        do_move(i, dst, *r[1:])            
         # 1) نزول أولي
         descent()
         best_h, best_c = holder[:], sum(cost.values())
@@ -4289,6 +4463,27 @@ elif page == "التوزيع":
                 key="leaving_sp_select",
             )
 
+            remaining_candidates = sorted(
+            x for x in df[core["sp_col"]].dropna().unique() if x not in leaving_sps
+            )
+            excluded_sps = st.multiselect(
+                "استبعاد محصلين من التوزيع (مش هيستلموا حسابات ومش هيدخلوا في المتوسط)",
+                remaining_candidates,
+                key="leave_excluded",
+            )
+            balance_old = st.checkbox(
+                "اسمح بالتبديل بين الباقيين لتقريب المبالغ من المتوسط",
+                value=True,
+                key="leave_bal",
+            )
+            time_limit = st.slider(
+                "مدة التحسين لكل فئة (ثواني)", 2, 60, 8, key="leave_time"
+            )
+            amount_weight = st.slider(
+                "أهمية تقريب المديونية من المتوسط",
+                1.0, 10.0, 3.0, 0.5, key="leave_amt_w",
+            )
+
             st.caption(
                 "المتوسط بيتحسب تلقائيًا = (إجمالي حسابات الباقيين + إجمالي حسابات "
                 "المستقيلين) ÷ عدد الباقيين، جوه كل تصنيف/منتج لوحده. مفيش شيت مستهدفات مطلوب."
@@ -4299,35 +4494,27 @@ elif page == "التوزيع":
 
             if leaving_sps and st.button("نفذ التوزيع", type="primary", key="leave_run"):
                 try:
-                    remaining_names = sorted(
-                        df[~df[core["sp_col"]].isin(leaving_sps)][core["sp_col"]].dropna().unique()
-                    )
-                    if not remaining_names:
-                        st.error("مفيش محصلين باقيين بعد الاستقالة")
-                        st.stop()
-
-                    pool = df[df[core["sp_col"]].isin(leaving_sps)].copy()
-                    remaining = df[~df[core["sp_col"]].isin(leaving_sps)].copy()
-
-                    if pool.empty:
-                        st.error("مفيش حسابات للمحصلين المستقيلين")
-                        st.stop()
-
-                    with st.spinner("جاري حساب المتوسط والتوزيع..."):
-                        assigned, summary = distribute_pool_by_average(
-                            fixed_df=remaining,
-                            pool_df=pool,
-                            mover_names=remaining_names,
+                    with st.spinner("جاري التوزيع والتحسين..."):
+                        new_df, summary = distribute_leaving(
+                            df=df,
+                            leaving_sps=leaving_sps,
                             sp_col=core["sp_col"],
                             id_col=core["id_col"],
                             amt_col=core["amt_col"],
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
+                            time_limit=time_limit,
+                            amount_weight=amount_weight,
+                            excluded_sps=excluded_sps,
+                            balance_old=balance_old,
                         )
 
-                    new_df = pd.concat([remaining, assigned], ignore_index=True)
+                    left = int(new_df[core["sp_col"]].isin(leaving_sps).sum())
+                    if left:
+                        st.warning(f"لسه فيه {left} حساب عند المستقيلين (مفيش محصل مؤهل يستلمهم)")
+                    else:
+                        st.success("تم التوزيع")
 
-                    st.success("تم التوزيع")
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
@@ -4348,9 +4535,11 @@ elif page == "التوزيع":
                     st.markdown("### المحفظة بعد التوزيع")
                     st.dataframe(final_summary, use_container_width=True)
 
+                    moved = new_df[new_df["المحصل السابق"].notna()]
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
                         new_df.to_excel(writer, index=False, sheet_name="بعد التوزيع")
+                        moved.to_excel(writer, index=False, sheet_name="الحسابات المنقولة")
                         summary.to_excel(writer, index=False, sheet_name="ملخص مقابل المتوسط")
                         final_summary.to_excel(writer, index=False, sheet_name="ملخص نهائي")
                     st.download_button(
