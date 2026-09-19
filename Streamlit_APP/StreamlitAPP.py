@@ -3787,134 +3787,134 @@ elif page == "التوزيع":
             "classification_col": classification_col,
         }
 
-    # ================================================================
-    # المحرك المشترك: توزيع "بركة" حسابات على مجموعة محصلين لحد متوسط محسوب
-    # ================================================================
-    def distribute_pool_by_average(
-        fixed_df: pd.DataFrame,
-        pool_df: pd.DataFrame,
-        mover_names: list,
-        sp_col: str,
-        id_col: str,
-        amt_col: str,
-        product_col: str | None = None,
-        classification_col: str | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        يوزّع pool_df (العميل = كتلة واحدة) على mover_names، بحيث كل واحد
-        فيهم يوصل لمتوسط:
-            (إجمالي fixed_df لكل الـ movers + إجمالي pool_df) ÷ عددهم
-        محسوب جوه كل تصنيف/منتج لوحده (لو الأعمدة دي موجودة).
-        fixed_df: الحسابات الثابتة اللي مش هتتحرك (وبتُحسب منها رصيد كل محصل حاليًا).
-        pool_df: الحسابات القابلة للحركة واللي هيتم توزيعها على mover_names.
-        بيرجع: (الحسابات اللي اتحركت وبقت لمحصل جديد، ملخص مقابل المتوسط)
-        """
-        use_class = classification_col is not None
-        use_product = product_col is not None
-
-        group_labels, df_group_cols = [], []
-        if use_class:
-            group_labels.append("التصنيف")
-            df_group_cols.append(classification_col)
-        if use_product:
-            group_labels.append("نوع المنتج")
-            df_group_cols.append(product_col)
-
-        if df_group_cols:
-            pool_grouped = pool_df.groupby(df_group_cols, dropna=False)
-        else:
-            pool_grouped = [(("__ALL__",), pool_df)]
-
-        assigned_rows, summary_rows = [], []
-
-        for gvals, sub in pool_grouped:
-            gkey = gvals if isinstance(gvals, tuple) else (gvals,)
-            gkey = tuple(str(x).strip() for x in gkey)
-            gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
-
+        # ================================================================
+        # المحرك المشترك: توزيع "بركة" حسابات على مجموعة محصلين لحد متوسط محسوب
+        # ================================================================
+        def distribute_pool_by_average(
+            fixed_df: pd.DataFrame,
+            pool_df: pd.DataFrame,
+            mover_names: list,
+            sp_col: str,
+            id_col: str,
+            amt_col: str,
+            product_col: str | None = None,
+            classification_col: str | None = None,
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+            """
+            يوزّع pool_df (العميل = كتلة واحدة) على mover_names، بحيث كل واحد
+            فيهم يوصل لمتوسط:
+                (إجمالي fixed_df لكل الـ movers + إجمالي pool_df) ÷ عددهم
+            محسوب جوه كل تصنيف/منتج لوحده (لو الأعمدة دي موجودة).
+            fixed_df: الحسابات الثابتة اللي مش هتتحرك (وبتُحسب منها رصيد كل محصل حاليًا).
+            pool_df: الحسابات القابلة للحركة واللي هيتم توزيعها على mover_names.
+            بيرجع: (الحسابات اللي اتحركت وبقت لمحصل جديد، ملخص مقابل المتوسط)
+            """
+            use_class = classification_col is not None
+            use_product = product_col is not None
+    
+            group_labels, df_group_cols = [], []
+            if use_class:
+                group_labels.append("التصنيف")
+                df_group_cols.append(classification_col)
+            if use_product:
+                group_labels.append("نوع المنتج")
+                df_group_cols.append(product_col)
+    
             if df_group_cols:
-                mask = pd.Series(True, index=fixed_df.index)
-                for col, val in zip(df_group_cols, gkey):
-                    mask &= (fixed_df[col].astype(str).str.strip() == val)
-                fixed_sub = fixed_df[mask]
+                pool_grouped = pool_df.groupby(df_group_cols, dropna=False)
             else:
-                fixed_sub = fixed_df
-
-            # رصيد كل محصل حاليًا (من الثابت بس) داخل الفئة دي
-            done = {}
-            for sp in mover_names:
-                s = fixed_sub[fixed_sub[sp_col] == sp]
-                done[sp] = {
-                    "count": len(s),
-                    "clients": s[id_col].nunique(),
-                    "amount": float(s[amt_col].sum()),
+                pool_grouped = [(("__ALL__",), pool_df)]
+    
+            assigned_rows, summary_rows = [], []
+    
+            for gvals, sub in pool_grouped:
+                gkey = gvals if isinstance(gvals, tuple) else (gvals,)
+                gkey = tuple(str(x).strip() for x in gkey)
+                gkey_dict = dict(zip(group_labels, gkey)) if group_labels else {}
+    
+                if df_group_cols:
+                    mask = pd.Series(True, index=fixed_df.index)
+                    for col, val in zip(df_group_cols, gkey):
+                        mask &= (fixed_df[col].astype(str).str.strip() == val)
+                    fixed_sub = fixed_df[mask]
+                else:
+                    fixed_sub = fixed_df
+    
+                # رصيد كل محصل حاليًا (من الثابت بس) داخل الفئة دي
+                done = {}
+                for sp in mover_names:
+                    s = fixed_sub[fixed_sub[sp_col] == sp]
+                    done[sp] = {
+                        "count": len(s),
+                        "clients": s[id_col].nunique(),
+                        "amount": float(s[amt_col].sum()),
+                    }
+    
+                # المتوسط = (إجمالي الثابت لكل الـ movers + إجمالي البركة) ÷ عددهم
+                total_count = sum(d["count"] for d in done.values()) + len(sub)
+                total_clients = sum(d["clients"] for d in done.values()) + sub[id_col].nunique()
+                total_amount = sum(d["amount"] for d in done.values()) + float(sub[amt_col].sum())
+    
+                n = len(mover_names)
+                target = {
+                    "count": total_count / n,
+                    "clients": total_clients / n,
+                    "amount": total_amount / n,
                 }
-
-            # المتوسط = (إجمالي الثابت لكل الـ movers + إجمالي البركة) ÷ عددهم
-            total_count = sum(d["count"] for d in done.values()) + len(sub)
-            total_clients = sum(d["clients"] for d in done.values()) + sub[id_col].nunique()
-            total_amount = sum(d["amount"] for d in done.values()) + float(sub[amt_col].sum())
-
-            n = len(mover_names)
-            target = {
-                "count": total_count / n,
-                "clients": total_clients / n,
-                "amount": total_amount / n,
-            }
-
-            units = []
-            for cid, grp in sub.groupby(id_col):
-                units.append({
-                    "id": cid,
-                    "count": len(grp),
-                    "amount": float(grp[amt_col].sum()),
-                    "rows": grp,
-                })
-            units.sort(key=lambda u: (u["count"], u["clients"] if "clients" in u else 0, u["amount"]))
-
-            for unit in units:
-                # مين لسه تحت المتوسط
-                # نفضل نوزع على الجداد لحد ما نوصل للهدف أو الإهمال يخلص
-                still_needed = [
-                    sp for sp in eligible_sps
-                    if gdone[sp]["count"] < target["count"] * 1.02   # سماح بسيط 2%
-                    or gdone[sp]["clients"] < target["clients"] * 1.02
-                ]
-                if not still_needed:
-                    leftover_rows.append(unit["rows"])
-                    continue
-
-                best_sp = min(
-                    still_needed,
-                    key=lambda s: (
-                        done[s]["count"] - target["count"],
-                        done[s]["clients"] - target["clients"],
-                        done[s]["amount"] - target["amount"],
-                    ),
-                )
-
-                part = unit["rows"].copy()
-                part[sp_col] = best_sp
-                assigned_rows.append(part)
-
-                done[best_sp]["count"] += unit["count"]
-                done[best_sp]["clients"] += 1
-                done[best_sp]["amount"] += unit["amount"]
-
-            for sp in mover_names:
-                d = done[sp]
-                row = {"المحصل": sp, **gkey_dict}
-                row["عدد الحسابات (بعد التوزيع)"] = d["count"]
-                row["عدد العملاء (بعد التوزيع)"] = d["clients"]
-                row["مبلغ المديونية (بعد التوزيع)"] = round(d["amount"], 2)
-                row["المتوسط المستهدف - حسابات"] = round(target["count"], 1)
-                row["المتوسط المستهدف - عملاء"] = round(target["clients"], 1)
-                row["المتوسط المستهدف - مديونية"] = round(target["amount"], 2)
-                summary_rows.append(row)
-
-        assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool_df.iloc[0:0].copy()
-        summary = pd.DataFrame(summary_rows)
-        return assigned, summary
+    
+                units = []
+                for cid, grp in sub.groupby(id_col):
+                    units.append({
+                        "id": cid,
+                        "count": len(grp),
+                        "amount": float(grp[amt_col].sum()),
+                        "rows": grp,
+                    })
+                units.sort(key=lambda u: (u["count"], u["clients"] if "clients" in u else 0, u["amount"]))
+    
+                for unit in units:
+                    # مين لسه تحت المتوسط
+                    # نفضل نوزع على الجداد لحد ما نوصل للهدف أو الإهمال يخلص
+                    still_needed = [
+                        sp for sp in eligible_sps
+                        if gdone[sp]["count"] < target["count"] * 1.02   # سماح بسيط 2%
+                        or gdone[sp]["clients"] < target["clients"] * 1.02
+                    ]
+                    if not still_needed:
+                        leftover_rows.append(unit["rows"])
+                        continue
+    
+                    best_sp = min(
+                        still_needed,
+                        key=lambda s: (
+                            done[s]["count"] - target["count"],
+                            done[s]["clients"] - target["clients"],
+                            done[s]["amount"] - target["amount"],
+                        ),
+                    )
+    
+                    part = unit["rows"].copy()
+                    part[sp_col] = best_sp
+                    assigned_rows.append(part)
+    
+                    done[best_sp]["count"] += unit["count"]
+                    done[best_sp]["clients"] += 1
+                    done[best_sp]["amount"] += unit["amount"]
+    
+                for sp in mover_names:
+                    d = done[sp]
+                    row = {"المحصل": sp, **gkey_dict}
+                    row["عدد الحسابات (بعد التوزيع)"] = d["count"]
+                    row["عدد العملاء (بعد التوزيع)"] = d["clients"]
+                    row["مبلغ المديونية (بعد التوزيع)"] = round(d["amount"], 2)
+                    row["المتوسط المستهدف - حسابات"] = round(target["count"], 1)
+                    row["المتوسط المستهدف - عملاء"] = round(target["clients"], 1)
+                    row["المتوسط المستهدف - مديونية"] = round(target["amount"], 2)
+                    summary_rows.append(row)
+    
+            assigned = pd.concat(assigned_rows, ignore_index=True) if assigned_rows else pool_df.iloc[0:0].copy()
+            summary = pd.DataFrame(summary_rows)
+            return assigned, summary
 
 
         def _optimize_assignment(units, base, targets, scale, eligible,
