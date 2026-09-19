@@ -189,6 +189,8 @@ def equalize_new_with_old(
     classification_col: str | None = None,
     new_sp_filters: dict | None = None,
     time_limit: float = 8.0,
+    amount_weight: float = 3.0,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pool = pool_df.copy()
     new_sp_filters = new_sp_filters or {}
@@ -299,7 +301,9 @@ def equalize_new_with_old(
 
         # ===== التحسين العنيف =====
         holder, _ = _optimize_assignment(
-            units, base, targets, scale, eligible_sps, time_limit=time_limit
+            units, base, targets, scale, eligible_sps,
+            time_limit=time_limit,
+            weights=(1.0, 1.0, amount_weight),
         )
 
         taken = {sp: [0, 0, 0.0] for sp in old_names}
@@ -340,6 +344,9 @@ def equalize_new_with_old(
                 "بعد السحب - حسابات": s["count"] - t[0],
                 "بعد السحب - عملاء": s["clients"] - t[1],
                 "بعد السحب - مديونية": round(s["amount"] - t[2], 2),
+                "انحراف المديونية بعد السحب %": round(
+                  (s["amount"] - t[2] - L[2]) / max(L[2], 1) * 100, 1
+                ),
             })
 
         for sp in new_sp_names:
@@ -4431,7 +4438,12 @@ elif page == "التوزيع":
                 "مدة التحسين لكل فئة (ثواني) — كل ما زادت كل ما التوزيع أدق",
                 2, 60, 8, key="opt_time",
             )
-    
+
+            amount_weight = st.slider(
+              "أهمية تقريب المديونية من المتوسط (كل ما زادت كل ما المبالغ أقرب)",
+              1.0, 10.0, 3.0, 0.5, key="opt_amt_w",
+          )
+              
             if new_sp_names and st.button("نفذ توزيع المحصلين الجداد", type="primary", key="new_run"):
                 try:
                     df_port = df_port.dropna(subset=[core["acc_col"]]).copy()
@@ -4452,6 +4464,7 @@ elif page == "التوزيع":
                             product_col=core["product_col"],
                             classification_col=core["classification_col"],
                             new_sp_filters=new_sp_filters,
+                            amount_weight=amount_weight,
                         )
     
                     # ===== نشيل الحسابات اللي اتعينت للجدد من محفظة القدام =====
