@@ -16,8 +16,14 @@ design_system.py  —  النسخة الكرتونية 🎨
 """
 
 from contextlib import contextmanager
+from functools import lru_cache
+from pathlib import Path
+import base64
 import html as _html
 import streamlit as st
+
+_HERE = Path(__file__).resolve().parent
+LOGO_CANDIDATES = ["logo.png", "logo.webp", "logo.jpg", "logo.jpeg", "logo.svg"]
 
 INK = "#1B1B2F"
 
@@ -66,11 +72,10 @@ _CSS = """
 
 /* ===== الخلفية: ورقة كريمي منقطة ===== */
 .stApp{
-  color-scheme:light; color:var(--ink);
-  background-color:#FFF6DC;
-  background-image:radial-gradient(rgba(27,27,47,.13) 1.6px, transparent 1.6px);
-  background-size:24px 24px;
+  color-scheme:light; color:var(--ink); background:transparent !important;
 }
+html, body{ background:#FFF6DC !important; }
+[data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottom"]{ background:transparent !important; }
 header[data-testid="stHeader"]{ background:transparent; }
 .main .block-container{ padding-top:1.4rem; padding-bottom:4rem; max-width:1280px; }
 
@@ -99,10 +104,13 @@ html, body, .stApp, .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2,
     radial-gradient(rgba(27,27,47,.10) 2px, transparent 2px);
   background-size:auto,auto,auto,20px 20px;
 }
-.ds-header::after{ /* نجمة كرتونية */
-  content:"✦"; position:absolute; left:26px; top:8px; font-size:34px; color:#fff;
-  text-shadow:2px 2px 0 var(--ink); transform:rotate(12deg); opacity:.95;
+.ds-header-logo{
+  position:absolute; z-index:1; left:26px; top:50%; margin-top:-46px; width:92px; height:92px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; background:#fff; border:4px solid var(--ink);
+  box-shadow:5px 5px 0 var(--ink); transform:rotate(8deg); overflow:hidden;
 }
+.ds-header-logo img, .ds-header-logo svg{ width:74%; height:74%; object-fit:contain; }
+.ds-header{ padding-left:150px; }
 .ds-header-icon{
   position:relative; z-index:1; flex:0 0 auto; width:76px; height:76px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; font-size:38px;
@@ -288,22 +296,126 @@ section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primar
   border:var(--bw) solid var(--ink); border-radius:22px; box-shadow:5px 5px 0 var(--ink); transform:rotate(-1.4deg);
 }
 .ds-brand-logo{
-  flex:0 0 auto; width:50px; height:50px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-  font-size:22px; background:var(--ds-accent); border:var(--bw) solid var(--ink);
+  flex:0 0 auto; width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:#fff; border:var(--bw) solid var(--ink); overflow:hidden;
 }
+.ds-brand-logo img, .ds-brand-logo svg{ width:82%; height:82%; object-fit:contain; }
 .ds-brand-title{ font-weight:800; font-size:18px; line-height:1.2; color:var(--ink); }
 .ds-brand-sub{ font-weight:600; font-size:12.5px; color:var(--ds-muted); }
 
 @media (max-width:760px){
+  .ds-header-logo{ display:none; }
   .ds-header{ flex-direction:column; align-items:flex-start; padding:22px; }
   .ds-header h1{ font-size:26px; }
 }
+/* ===== الخلفية المتحركة ===== */
+div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
+.ds-bg{ position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
+.ds-dots{
+  position:absolute; inset:-30px;
+  background-image:radial-gradient(rgba(27,27,47,.14) 1.7px, transparent 1.7px); background-size:26px 26px;
+  animation:ds-dots 5s linear infinite;
+}
+@keyframes ds-dots{ to{ transform:translate(26px,26px); } }
+.ds-blob{ position:absolute; border-radius:50%; background:var(--ds-soft); opacity:.75; animation:ds-drift 24s ease-in-out infinite alternate; }
+.ds-blob.b1{ width:520px; height:520px; left:-160px; top:-120px; }
+.ds-blob.b2{ width:420px; height:420px; right:-120px; top:32%; background:color-mix(in srgb, var(--ds-accent) 22%, #FFF6DC); animation-duration:30s; }
+.ds-blob.b3{ width:360px; height:360px; left:34%; bottom:-190px; animation-duration:36s; animation-direction:alternate-reverse; }
+@keyframes ds-drift{ 0%{ transform:translate(0,0) scale(1); } 100%{ transform:translate(70px,50px) scale(1.12); } }
+
+.ds-fall{ position:absolute; top:-70px; left:var(--x); animation:ds-fall var(--d) linear var(--dl) infinite; }
+.ds-coin{
+  width:var(--s); height:var(--s); border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:#FFC93C; border:3px solid var(--ink); box-shadow:2px 2px 0 var(--ink); color:var(--ink);
+  font-weight:800; font-size:calc(var(--s) * .52); animation:ds-spin 1.5s ease-in-out infinite alternate; opacity:.85;
+}
+@keyframes ds-fall{
+  0%{ transform:translate(0,0) rotate(0); }
+  50%{ transform:translate(34px,55vh) rotate(20deg); }
+  100%{ transform:translate(-14px,118vh) rotate(-10deg); }
+}
+@keyframes ds-spin{ from{ transform:scaleX(1); } to{ transform:scaleX(.18); } }
+
+.ds-rise{ position:absolute; bottom:-80px; left:var(--x); font-size:var(--s); opacity:.5; animation:ds-rise var(--d) ease-in-out var(--dl) infinite; filter:drop-shadow(3px 3px 0 rgba(27,27,47,.35)); }
+@keyframes ds-rise{
+  0%{ transform:translate(0,0) rotate(-10deg); }
+  50%{ transform:translate(-40px,-60vh) rotate(12deg); }
+  100%{ transform:translate(20px,-125vh) rotate(-8deg); }
+}
+.ds-bg.custom{ background-size:cover; background-position:center; }
+.ds-bg.custom > *{ display:none; }
+@media (prefers-reduced-motion:reduce){
+  .ds-dots,.ds-blob,.ds-fall,.ds-coin,.ds-rise{ animation:none !important; }
+}
 </style>
+
 """
 
 
-def inject_design_system(theme: str = "promises") -> None:
-    """يتنادى مرة واحدة في كل rerun، بعد set_page_config."""
+# ----------------------------------------------------------------------
+# اللوجو: لو فيه ملف logo.png (أو svg/jpg/webp) جنب design_system.py هيتستخدم،
+# غير كده بيتستخدم لوجو إجادة المرسوم بالكود.
+# ----------------------------------------------------------------------
+_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg",
+         ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".gif": "image/gif"}
+
+_BUILTIN_LOGO = (
+    '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="إجادة">'
+    '<circle cx="32" cy="32" r="28" fill="#FFC93C" stroke="#1B1B2F" stroke-width="4"/>'
+    '<path d="M17 34 L28 45 L48 21" fill="none" stroke="#1B1B2F" stroke-width="7" '
+    'stroke-linecap="round" stroke-linejoin="round"/>'
+    '<circle cx="48" cy="15" r="6" fill="#2DC26B" stroke="#1B1B2F" stroke-width="3"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def _data_uri(path_str: str) -> str:
+    p = Path(path_str)
+    mime = _MIME.get(p.suffix.lower(), "application/octet-stream")
+    return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
+
+
+def _find_logo():
+    for name in LOGO_CANDIDATES:
+        p = _HERE / name
+        if p.exists():
+            return p
+    return None
+
+
+def logo_html(logo=None) -> str:
+    """logo: مسار صورة اختياري. لو None بندور على logo.* جنب الملف، وإلا اللوجو المدمج."""
+    p = Path(logo) if logo else _find_logo()
+    if p and p.exists():
+        return f'<img src="{_data_uri(str(p))}" alt="logo">'
+    return _BUILTIN_LOGO
+
+
+def _background_html(bg_gif=None) -> str:
+    if bg_gif and Path(bg_gif).exists():
+        return f'<div class="ds-bg custom" style="background-image:url({_data_uri(str(Path(bg_gif)))})"></div>'
+    # (left%, مدة, تأخير سالب عشان يبدأ متوزع، حجم)
+    coins = [(6, 15, -2, 38), (17, 19, -9, 30), (29, 13, -5, 44), (41, 21, -13, 32), (53, 16, -7, 40),
+             (64, 18, -1, 34), (76, 14, -11, 42), (88, 20, -6, 30), (95, 17, -14, 36)]
+    icons = [(9, "💰", 26, 3, 44), (22, "📈", 30, -8, 40), (35, "⭐", 24, -15, 34), (48, "✅", 28, -4, 38),
+             (60, "💳", 32, -12, 42), (72, "📞", 27, -19, 36), (84, "🏦", 34, -9, 46), (92, "🧾", 29, -22, 34)]
+    parts = ['<div class="ds-bg"><div class="ds-dots"></div>'
+             '<div class="ds-blob b1"></div><div class="ds-blob b2"></div><div class="ds-blob b3"></div>']
+    for x, d, dl, sz in coins:
+        parts.append(f'<div class="ds-fall" style="--x:{x}%;--d:{d}s;--dl:{dl}s"><div class="ds-coin" style="--s:{sz}px">﷼</div></div>')
+    for x, ic, d, dl, sz in icons:
+        parts.append(f'<div class="ds-rise" style="--x:{x}%;--d:{d}s;--dl:{dl}s;--s:{sz}px">{ic}</div>')
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def inject_design_system(theme: str = "promises", background: str = "anim", bg_gif=None) -> None:
+    """
+    يتنادى مرة واحدة في كل rerun، بعد set_page_config.
+    background: "anim" (عملات وأيقونات متحركة، الافتراضي) | "plain" (من غير حركة)
+    bg_gif: مسار GIF/صورة اختيارية تستخدمها كخلفية بدل الأنيميشن.
+    """
     t = THEMES.get(theme, THEMES["promises"])
     css = (
         _CSS.replace("__INK__", INK)
@@ -313,6 +425,8 @@ def inject_design_system(theme: str = "promises") -> None:
         .replace("__POP__", t["pop"])
     )
     st.markdown(css, unsafe_allow_html=True)
+    if background != "plain" or bg_gif:
+        st.markdown(_background_html(bg_gif), unsafe_allow_html=True)
 
 
 def _e(x) -> str:
@@ -329,6 +443,7 @@ def page_header(icon: str, title: str, subtitle: str = "", chips=None) -> None:
     st.markdown(
         f"""
         <div class="ds-header">
+            <div class="ds-header-logo">{logo_html()}</div>
             <div class="ds-header-icon">{icon}</div>
             <div class="ds-header-body">
                 <h1>{_e(title)}</h1>
@@ -393,11 +508,11 @@ def empty_state(text: str, icon: str = "🎯") -> None:
     )
 
 
-def sidebar_brand(title: str = "لوحة التحكم", subtitle: str = "إدارة المحافظ والتحصيل", logo: str = "❤️🦅") -> None:
+def sidebar_brand(title: str = "إجادة", subtitle: str = "لتحصيل الديون", logo=None) -> None:
     st.markdown(
         f"""
         <div class="ds-brand">
-            <div class="ds-brand-logo">{logo}</div>
+            <div class="ds-brand-logo">{logo_html(logo)}</div>
             <div>
                 <div class="ds-brand-title">{_e(title)}</div>
                 <div class="ds-brand-sub">{_e(subtitle)}</div>
