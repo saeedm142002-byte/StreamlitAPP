@@ -23,6 +23,15 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import streamlit as st
 
 
+from design_system import (
+    inject_design_system, page_header, kpi_row, section_title, card,
+    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
+    GREEN, GOLD, RED, BLUE, VIOLET, TEAL,
+)
+
+inject_design_system(PAGE_THEMES.get(st.session_state.page, "promises"))
+
+
 import io
 import pandas as pd
 import streamlit as st
@@ -1797,7 +1806,7 @@ with st.sidebar:
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("### ❤️🦅 لوحة التحكم")
+    sidebar_brand("لوحة التحكم", "إدارة المحافظ والتحصيل")
 
     for page_name, icon in pages:
         is_active = (st.session_state.page == page_name)
@@ -3710,7 +3719,8 @@ elif page == "التغطية":
 
 elif page == "النشاط":
 
-    st.subheader("⚡ النشاط")
+    page_header("⚡", "النشاط", "تصنيف الإفادات بالذكاء الاصطناعي، وحساب الوقت المهدر وأداء كل محصل",
+            chips=["AraBERT", "تحليل الوقت المهدر", "تحليل العملاء"])
 
     uploaded_file = st.file_uploader(
         "رفع ملف واحد فقط",
@@ -4078,71 +4088,38 @@ elif page == "النشاط":
             avg_wasted = 0 if pd.isna(avg_wasted) else avg_wasted
             
             
-            def render_card(col, title, value, subtitle=""):
-                with col:
-                    st.markdown(
-                        f'<div style="background: linear-gradient(135deg, {SNB_GREEN} 0%, {SNB_GREEN_DARK} 100%); '
-                        f'border-right: 5px solid {SNB_GOLD}; border-radius: 14px; padding: 18px; color: white; '
-                        f'text-align: center; box-shadow: 0 4px 14px rgba(0,0,0,0.15); min-height: 130px;">'
-                        f'<div style="font-size:13px; opacity:0.85; margin-bottom:8px;">{title}</div>'
-                        f'<div style="font-size:24px; font-weight:800; overflow-wrap:anywhere;">{value}</div>'
-                        f'<div style="font-size:11px; opacity:0.75; margin-top:6px;">{subtitle}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
+            kpi_row([
+                dict(icon="📞", label="عدد المكالمات المغطاة", value=f"{total_covered:,}"),
+                dict(icon="✅", label="عدد المكالمات الناجحة", value=f"{total_successful:,}", tone="ok",
+                     sub=f"{(total_successful / total_covered * 100 if total_covered else 0):.1f}% من المغطاة"),
+                dict(icon="⏱️", label="متوسط الوقت المهدر (AVG)", value=f"{avg_wasted:.1f} د", tone="bad"),
+                dict(icon="🏆", label="أكتر محصل فاعلية", value=str(top_performer["Collector"]), tone="warn",
+                     sub=f"سكور {top_performer['سكور الفاعلية']:.0f}/100"),
+            ])
+                        
+                        st.caption(
+                            "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
+                            "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
+                            "مقارنة بباقي المحصلين في نفس الفلتر الحالي."
+                        )
             
+                        st.markdown("")
             
-            c1, c2, c3, c4 = st.columns(4)
+                        with st.expander("📋 آخر نشاط لكل محصل"):
+                            last_per_collector = (
+                                filtered.dropna(subset=["Created on"])
+                                .sort_values(["Collector", "Created on"])
+                                .groupby("Collector", as_index=False)
+                                .last()
+                            )
+                            show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
+                            st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)
             
-            render_card(
-                c1,
-                "عدد المكالمات المغطاة",
-                f"{total_covered:,}"
-            )
-            
-            render_card(
-                c2,
-                "عدد المكالمات الناجحة",
-                f"{total_successful:,}",
-                f"{(total_successful / total_covered * 100 if total_covered else 0):.1f}% من المغطاة"
-            )
-            
-            render_card(
-                c3,
-                "متوسط الوقت المهدر (AVG)",
-                f"{avg_wasted:.1f} د"
-            )
-            
-            render_card(
-                c4,
-                "أكتر محصل فاعلية",
-                f"{top_performer['Collector']}",
-                f"سكور {top_performer['سكور الفاعلية']:.0f}/100"
-            )
-            
-            st.caption(
-                "سكور الفاعلية بيوازن بين: عدد المكالمات المغطاة، عدد المكالمات الناجحة، "
-                "ووقت الهدر (كل ما الوقت المهدر أقل كل ما السكور أعلى) — كل عامل بوزن نسبي "
-                "مقارنة بباقي المحصلين في نفس الفلتر الحالي."
-            )
-
-            st.markdown("")
-
-            with st.expander("📋 آخر نشاط لكل محصل"):
-                last_per_collector = (
-                    filtered.dropna(subset=["Created on"])
-                    .sort_values(["Collector", "Created on"])
-                    .groupby("Collector", as_index=False)
-                    .last()
-                )
-                show_cols = [c for c in ["Collector", "Created on", "التصنيف", "Probability (%)", "Final State", "Notes"] if c in last_per_collector.columns]
-                st.dataframe(last_per_collector[show_cols], use_container_width=True, hide_index=True)
-
-            with st.expander("🏆 ترتيب المحصلين حسب سكور الفاعلية"):
-                st.dataframe(
-                    collector_agg[["Collector", "المكالمات_المغطاة", "المكالمات_الناجحة", "الوقت_المهدر", "سكور الفاعلية"]],
-                    use_container_width=True, hide_index=True
-                )
+                        with st.expander("🏆 ترتيب المحصلين حسب سكور الفاعلية"):
+                            st.dataframe(
+                                collector_agg[["Collector", "المكالمات_المغطاة", "المكالمات_الناجحة", "الوقت_المهدر", "سكور الفاعلية"]],
+                                use_container_width=True, hide_index=True
+                            )
 
             st.markdown("")
 
