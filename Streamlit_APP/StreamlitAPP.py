@@ -5739,7 +5739,6 @@ elif page == "التدوير":
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
 
 
-
 elif page == "تقارب الإفادات":
 
     import io
