@@ -1,14 +1,15 @@
 """
-design_system.py  —  النسخة الكرتونية 🎨
-========================================
-نفس أسماء الدوال بالظبط، فمفيش أي تغيير مطلوب في app.py:
+design_system.py  —  النسخة الكرتونية المتحركة 🎨🎬
+====================================================
+نفس أسماء الدوال بالظبط، فمفيش أي تغيير مطلوب في app.py غير استيراد money_rain:
 
     inject_design_system, page_header, kpi_row, section_title, card,
-    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES
+    empty_state, info_box, style_fig, sidebar_brand, money_rain, PAGE_THEMES
 
 الستايل: حدود سودا تخينة + ظلال صلبة (من غير blur) + ألوان زاهية +
-ستيكرز مايلة شوية + خط Baloo Bhaijaan 2 المدوّر.
-(النسخة الهادية القديمة محفوظة في design_system_classic.py)
+ستيكرز مايلة شوية + خط Baloo Bhaijaan 2 المدوّر + أنيميشن في كل حته.
+
+جديد: money_rain("رسالة") — مطر فلوس + رسالة نجاح، نادِها بعد ما التقرير يتعمل.
 
 مهم: الستايل ده مبني على خلفية فاتحة. حط في .streamlit/config.toml:
     [theme]
@@ -20,6 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 import base64
 import html as _html
+import random
+import time
 import streamlit as st
 
 _HERE = Path(__file__).resolve().parent
@@ -336,6 +339,137 @@ div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg
 }
 .ds-bg.custom{ background-size:cover; background-position:center; }
 .ds-bg.custom > *{ display:none; }
+
+/* =====================================================================
+   🎬 ANIMATIONS
+   ===================================================================== */
+:root{ --ease-pop:cubic-bezier(.34,1.56,.64,1); }
+
+@keyframes ds-drop-in{ from{opacity:0; transform:translateY(-40px) scale(.92);} 60%{transform:translateY(6px) scale(1.02);} to{opacity:1; transform:none;} }
+@keyframes ds-pop-in{
+  0%{opacity:0; transform:translateY(34px) scale(.55) rotate(var(--rot,0deg));}
+  60%{opacity:1; transform:translateY(-6px) scale(1.06) rotate(var(--rot,0deg));}
+  100%{opacity:1; transform:translateY(0) scale(1) rotate(var(--rot,0deg));}
+}
+@keyframes ds-slide-in{ from{opacity:0; transform:translateX(60px) rotate(var(--rot,0deg));} to{opacity:1; transform:translateX(0) rotate(var(--rot,0deg));} }
+@keyframes ds-fade-up{ from{opacity:0; transform:translateY(24px);} to{opacity:1; transform:none;} }
+@keyframes ds-line{ from{opacity:0;} to{opacity:.35;} }
+@keyframes ds-bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-6px);} }
+@keyframes ds-float{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-18px);} }
+@keyframes ds-spin{ to{transform:rotate(360deg) scale(1.12);} }
+@keyframes ds-wiggle-l{ 0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(-1deg) scale(1.06);} }
+@keyframes ds-wiggle-r{ 0%,100%{transform:rotate(8deg);} 50%{transform:rotate(15deg) scale(1.05);} }
+@keyframes ds-spark{ 0%,100%{opacity:.55; transform:rotate(-6deg) scale(.9);} 50%{opacity:1; transform:rotate(6deg) scale(1.15);} }
+@keyframes ds-twinkle{ 0%,100%{opacity:.25; transform:scale(.6);} 50%{opacity:1; transform:scale(1.15);} }
+@keyframes ds-drift{ from{transform:translateX(-60px);} to{transform:translateX(100px);} }
+@keyframes ds-pulse{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.08);} }
+@keyframes ds-blink{ 0%,100%{opacity:.9;} 50%{opacity:.2;} }
+@keyframes ds-dots{ to{background-position:16px 16px;} }
+@keyframes ds-shine{ 0%,60%{left:-90px;} 100%{left:130%;} }
+@keyframes ds-stripes{ to{background-position:28px 0;} }
+@keyframes ds-tab-pop{ 0%{transform:scale(.85);} 100%{transform:scale(1);} }
+@keyframes ds-grow-y{ from{transform:scaleY(0);} to{transform:scaleY(1);} }
+@keyframes ds-glow{
+  0%,100%{box-shadow:4px 4px 0 var(--ink), 0 0 0 0 transparent;}
+  50%{box-shadow:4px 4px 0 var(--ink), 0 0 0 8px color-mix(in srgb, var(--ds-accent) 35%, transparent);}
+}
+@keyframes ds-coinflip{ to{transform:rotateY(360deg);} }
+
+/* --- الهيدر --- */
+.ds-header{ animation:ds-drop-in .7s var(--ease-pop) backwards; }
+.ds-header::after{ animation:ds-spark 2.4s ease-in-out infinite; }
+.ds-header-icon{ animation:ds-wiggle-l 3.2s ease-in-out infinite; }
+.ds-header-logo{ animation:ds-wiggle-r 4s ease-in-out infinite; }
+.ds-chip:nth-child(odd){ --rot:-2deg; }
+.ds-chip:nth-child(even){ --rot:1.6deg; }
+.ds-chip{ animation:ds-pop-in .5s var(--ease-pop) backwards; }
+.ds-chip:nth-child(1){animation-delay:.30s} .ds-chip:nth-child(2){animation-delay:.40s}
+.ds-chip:nth-child(3){animation-delay:.50s} .ds-chip:nth-child(4){animation-delay:.60s}
+.ds-chip:nth-child(5){animation-delay:.70s} .ds-chip:nth-child(6){animation-delay:.80s}
+
+/* --- KPI --- */
+.ds-kpi:nth-child(odd){ --rot:-.9deg; }
+.ds-kpi:nth-child(even){ --rot:.9deg; }
+.ds-kpi{ overflow:hidden; animation:ds-pop-in .6s var(--ease-pop) backwards; }
+.ds-kpi:nth-child(1){animation-delay:.05s} .ds-kpi:nth-child(2){animation-delay:.15s}
+.ds-kpi:nth-child(3){animation-delay:.25s} .ds-kpi:nth-child(4){animation-delay:.35s}
+.ds-kpi:nth-child(5){animation-delay:.45s} .ds-kpi:nth-child(6){animation-delay:.55s}
+.ds-kpi-icon{ animation:ds-bob 2.6s ease-in-out infinite; }
+.ds-kpi:hover .ds-kpi-icon{ animation:ds-spin .6s ease; }
+.ds-kpi::after{
+  content:""; position:absolute; top:0; bottom:0; width:60px; left:-90px; pointer-events:none;
+  background:linear-gradient(100deg, transparent, rgba(255,255,255,.75), transparent);
+  transform:skewX(-20deg); animation:ds-shine 4.5s ease-in-out infinite;
+}
+
+/* --- العناوين والكروت والصناديق --- */
+.ds-section > .ds-sec-label{ --rot:-1.2deg; animation:ds-slide-in .55s var(--ease-pop) backwards; }
+.ds-section::after{ animation:ds-line .9s ease-out .2s backwards; }
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.ds-card-title){ animation:ds-fade-up .6s ease-out backwards; }
+.ds-card-title::before{ animation:ds-pulse 2.4s ease-in-out infinite; }
+.ds-box{ animation:ds-slide-in .5s var(--ease-pop) backwards; }
+.ds-empty .ds-empty-icon{ display:inline-block; animation:ds-bob 1.8s ease-in-out infinite; }
+div[data-testid="stMetric"], div[data-testid="stExpander"]{ animation:ds-fade-up .6s ease-out backwards; }
+
+/* --- الرسومات: الأعمدة بتطلع من تحت --- */
+.js-plotly-plot .bars .point path{ transform-box:fill-box; transform-origin:bottom; animation:ds-grow-y .8s var(--ease-pop) backwards; }
+
+/* --- تابات وأزرار وسايد بار --- */
+button[data-baseweb="tab"][aria-selected="true"]{ animation:ds-tab-pop .35s var(--ease-pop); }
+div[data-testid="stButton"] button[kind="primary"], div[data-testid="stButton"] button[data-testid="stBaseButton-primary"]{
+  animation:ds-glow 2.2s ease-in-out infinite;
+}
+div[data-testid="stButton"] button[kind="primary"]:hover, div[data-testid="stButton"] button[data-testid="stBaseButton-primary"]:hover,
+div[data-testid="stButton"] button[kind="primary"]:active, div[data-testid="stButton"] button[data-testid="stBaseButton-primary"]:active{ animation:none; }
+section[data-testid="stSidebar"] div[data-testid="stButton"]{ animation:ds-slide-in .5s var(--ease-pop) backwards; }
+.ds-brand:hover .ds-brand-logo{ animation:ds-spin .8s ease; }
+div[data-testid="stProgress"] > div > div > div > div{
+  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.4) 0 10px, transparent 10px 20px) !important;
+  background-size:28px 28px; animation:ds-stripes .8s linear infinite;
+}
+div[data-testid="stSpinner"]{ display:flex; align-items:center; gap:10px; }
+div[data-testid="stSpinner"]::before{ content:"🪙"; font-size:28px; animation:ds-coinflip 1s linear infinite; }
+
+/* --- الخلفية --- */
+.ds-tone{ animation:ds-dots 6s linear infinite; }
+.ds-tw{ transform-box:fill-box; transform-origin:center; animation:ds-twinkle 2.6s ease-in-out infinite; }
+.ds-cloud{ animation:ds-drift 50s ease-in-out infinite alternate; }
+.ds-float{ animation:ds-float 4.5s ease-in-out infinite; }
+.ds-sun{ transform-box:fill-box; transform-origin:center; animation:ds-pulse 6s ease-in-out infinite; }
+.ds-win{ animation:ds-blink 5s ease-in-out infinite; }
+
+/* --- 💰 مطر الفلوس + رسالة النجاح --- */
+div[data-testid="stElementContainer"]:has(.ds-rain), .element-container:has(.ds-rain){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
+.ds-rain{ position:fixed; inset:0; z-index:99999; pointer-events:none; overflow:hidden; }
+.ds-drop{
+  position:absolute; top:-70px; left:var(--x); font-size:var(--s);
+  filter:drop-shadow(2px 2px 0 var(--ink)); animation:ds-fall var(--d) linear var(--dl) both;
+}
+@keyframes ds-fall{
+  0%{transform:translate(0,0) rotate(0deg); opacity:1;}
+  50%{transform:translate(var(--sw),55vh) rotate(calc(var(--r) / 2));}
+  85%{opacity:1;}
+  100%{transform:translate(0,115vh) rotate(var(--r)); opacity:0;}
+}
+.ds-toast{
+  position:fixed; top:22px; left:50%; z-index:100000; pointer-events:none; white-space:nowrap;
+  background:#FFC93C; color:var(--ink); font-weight:800; font-size:20px; padding:10px 28px;
+  border:4px solid var(--ink); border-radius:999px; box-shadow:6px 6px 0 var(--ink);
+  animation:ds-toast 3.8s ease-out both;
+}
+.ds-toast-ico{ display:inline-block; animation:ds-bob .8s ease-in-out infinite; }
+@keyframes ds-toast{
+  0%{opacity:0; transform:translate(-50%,-90px) scale(.6);}
+  12%{opacity:1; transform:translate(-50%,0) scale(1.08);}
+  18%{transform:translate(-50%,0) scale(1);}
+  85%{opacity:1; transform:translate(-50%,0) scale(1);}
+  100%{opacity:0; transform:translate(-50%,-30px) scale(.9);}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *, *::before, *::after{ animation:none !important; }
+  .ds-rain, .ds-toast{ display:none; }
+}
 </style>
 
 """
@@ -382,28 +516,31 @@ def logo_html(logo=None) -> str:
 
 
 def _sparkle(x, y, r, fill="#fff", op=0.95, rot=0):
-    return (f'<path d="M0 -1Q0 0 1 0Q0 0 0 1Q0 0 -1 0Q0 0 0 -1Z" fill="{fill}" opacity="{op}" '
-            f'transform="translate({x} {y}) rotate({rot}) scale({r})"/>')
+    return (f'<g class="ds-tw" style="animation-delay:-{(x * 7 + y * 3) % 30 / 10:.1f}s">'
+            f'<path d="M0 -1Q0 0 1 0Q0 0 0 1Q0 0 -1 0Q0 0 0 -1Z" fill="{fill}" opacity="{op}" '
+            f'transform="translate({x} {y}) rotate({rot}) scale({r})"/></g>')
 
 
 def _cloud(x, y, k, op=0.92):
-    return (f'<g transform="translate({x} {y}) scale({k})" opacity="{op}">'
+    return (f'<g class="ds-cloud" style="animation-duration:{40 + (x % 5) * 8}s;animation-delay:-{x % 13}s">'
+            f'<g transform="translate({x} {y}) scale({k})" opacity="{op}">'
             '<rect x="0" y="44" width="230" height="52" rx="26" fill="#fff"/>'
             '<circle cx="62" cy="44" r="40" fill="#fff"/><circle cx="118" cy="30" r="50" fill="#fff"/>'
             '<circle cx="176" cy="48" r="34" fill="#fff"/>'
-            '<rect x="14" y="76" width="202" height="20" rx="10" fill="#B9C7F0" opacity=".28"/></g>')
+            '<rect x="14" y="76" width="202" height="20" rx="10" fill="#B9C7F0" opacity=".28"/></g></g>')
 
 
 def _coin(x, y, r, rot):
-    return (f'<g transform="translate({x} {y}) rotate({rot})">'
+    return (f'<g class="ds-float" style="animation-delay:-{(x % 40) / 10:.1f}s">'
+            f'<g transform="translate({x} {y}) rotate({rot})">'
             f'<circle r="{r}" fill="#FFC93C" stroke="{INK}" stroke-width="3.5"/>'
             f'<circle r="{r*0.68:.1f}" fill="none" stroke="#E0A400" stroke-width="2.5"/>'
-            f'<text y="{r*0.36:.1f}" text-anchor="middle" font-size="{r*1.05:.1f}" font-weight="800" fill="{INK}">$</text></g>')
+            f'<text y="{r*0.36:.1f}" text-anchor="middle" font-size="{r*1.05:.1f}" font-weight="800" fill="{INK}">$</text></g></g>')
 
 
 def _city_svg(color: str) -> str:
-    import random
-    rnd = random.Random(11)
+    import random as _random
+    rnd = _random.Random(11)
     layers = [  # (opacity, min_h, max_h, min_w, max_w, windows)
         (0.28, 110, 220, 40, 90, False),
         (0.48, 70, 170, 46, 100, False),
@@ -424,10 +561,10 @@ def _city_svg(color: str) -> str:
                 g.append(f'<rect x="{x + w//4}" y="{y-14}" width="{w//2}" height="15" rx="3"/>')
             elif kind == 3:
                 g.append(f'<path d="M{x} {y} Q{x + w/2} {y-30} {x + w} {y}Z"/>')
-            g.append("</g>" if False else "")
             if wins:
                 g.append("</g>")
-                g.append('<g fill="#FFE9A0" opacity="0.9">')
+                g.append(f'<g class="ds-win" fill="#FFE9A0" opacity="0.9" '
+                         f'style="animation-delay:-{(x % 9) * 0.6:.1f}s">')
                 for cx in range(x + 9, x + w - 10, 15):
                     for cy in range(y + 12, 292, 20):
                         if rnd.random() < 0.26:
@@ -446,9 +583,9 @@ def _city_svg(color: str) -> str:
 def _scene_html(theme: str) -> str:
     t = THEMES.get(theme, THEMES["promises"])
     sky = [
-        f'<circle cx="1240" cy="210" r="200" fill="{t["sun"]}" opacity=".20"/>',
-        f'<circle cx="1240" cy="210" r="140" fill="{t["sun"]}" opacity=".38"/>',
-        f'<circle cx="1240" cy="210" r="88" fill="{t["sun"]}"/>',
+        f'<g class="ds-sun"><circle cx="1240" cy="210" r="200" fill="{t["sun"]}" opacity=".20"/>'
+        f'<circle cx="1240" cy="210" r="140" fill="{t["sun"]}" opacity=".38"/>'
+        f'<circle cx="1240" cy="210" r="88" fill="{t["sun"]}"/></g>',
         _cloud(90, 110, 1.0), _cloud(520, 50, 0.7, .85), _cloud(880, 230, 0.9), _cloud(1330, 70, 1.1),
         _cloud(260, 360, 0.65, .8), _cloud(1120, 430, 0.6, .75),
     ]
@@ -475,7 +612,7 @@ def _background_html(theme="promises", bg_gif=None) -> str:
 def inject_design_system(theme: str = "promises", background: str = "scene", bg_gif=None) -> None:
     """
     يتنادى مرة واحدة في كل rerun، بعد set_page_config.
-    background: "scene" (مشهد أنمي ثابت، الافتراضي) | "plain" (سماء متدرجة بس)
+    background: "scene" (مشهد أنمي متحرك، الافتراضي) | "plain" (سماء متدرجة بس)
     bg_gif: مسار صورة اختيارية تستخدمها كخلفية بدل المشهد.
     """
     t = THEMES.get(theme, THEMES["promises"])
@@ -498,6 +635,21 @@ def inject_design_system(theme: str = "promises", background: str = "scene", bg_
 
 def _e(x) -> str:
     return _html.escape(str(x))
+
+
+def money_rain(message: str = "تم إنشاء التقرير", count: int = 32,
+               emojis=("💰", "🪙", "💵", "💸", "💎")) -> None:
+    """مطر فلوس + رسالة نجاح. نادِها بعد ما التقرير يتعمل (مرة واحدة لكل rerun)."""
+    rnd = random.Random(time.time_ns())
+    drops = "".join(
+        f'<span class="ds-drop" style="--x:{rnd.randint(2, 96)}%;--s:{rnd.randint(26, 50)}px;'
+        f'--d:{rnd.uniform(2.2, 4.2):.2f}s;--dl:{rnd.uniform(0, 1.6):.2f}s;'
+        f'--sw:{rnd.randint(-60, 60)}px;--r:{rnd.randint(-360, 360)}deg">{rnd.choice(emojis)}</span>'
+        for _ in range(count)
+    )
+    toast = (f'<div class="ds-toast"><span class="ds-toast-ico">💰</span> {_e(message)} '
+             f'<span class="ds-toast-ico">✅</span></div>') if message else ""
+    st.markdown(f'<div class="ds-rain">{drops}</div>{toast}', unsafe_allow_html=True)
 
 
 def page_header(icon: str, title: str, subtitle: str = "", chips=None) -> None:
