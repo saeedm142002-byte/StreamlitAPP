@@ -28,6 +28,138 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import streamlit as st
 
 
+
+
+
+
+import io
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+from sentence_transformers import SentenceTransformer
+
+st.set_page_config(page_title="تقارب الإفادات", layout="wide")
+st.markdown("<style>.stApp {direction: rtl; text-align: right;}</style>", unsafe_allow_html=True)
+
+MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+
+
+@st.cache_resource
+def load_model():
+    return SentenceTransformer(MODEL_NAME)
+
+
+def read_file(file):
+    if file.name.lower().endswith(".csv"):
+        return pd.read_csv(file)
+    return pd.read_excel(file)
+
+
+def find_similar_pairs(df, acc_col, txt_col, threshold):
+    d = df[[acc_col, txt_col]].dropna().copy()
+    d[txt_col] = d[txt_col].astype(str).str.strip()
+    d = d[d[txt_col] != ""]
+
+    model = load_model()
+    emb = model.encode(
+        d[txt_col].tolist(),
+        batch_size=64,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+        show_progress_bar=False,
+    )
+
+    orig_idx = d.index.to_numpy()
+    texts = d[txt_col].to_numpy()
+    rows = []
+
+    for acc, idx in d.groupby(acc_col).indices.items():
+        if len(idx) < 2:
+            continue
+        e = emb[idx]
+        sims = e @ e.T * 100
+        mask = np.triu(np.ones_like(sims, dtype=bool), k=1) & (sims >= threshold)
+        for a, b in np.argwhere(mask):
+            rows.append(
+                {
+                    "الحساب": acc,
+                    "الإفادة 1": texts[idx[a]],
+                    "الإفادة 2": texts[idx[b]],
+                    "نسبة التقارب %": round(float(sims[a, b]), 2),
+                    "صف 1": int(orig_idx[idx[a]]) + 2,  # رقم الصف في الإكسل (مع الهيدر)
+                    "صف 2": int(orig_idx[idx[b]]) + 2,
+                }
+            )
+
+    res = pd.DataFrame(rows)
+    if not res.empty:
+        res = res.sort_values(["الحساب", "نسبة التقارب %"], ascending=[True, False]).reset_index(drop=True)
+    return res
+
+
+st.title("نسبة التقارب بين إفادات الحساب")
+
+file = st.file_uploader("ارفع الملف (Excel أو CSV)", type=["xlsx", "xls", "csv"])
+
+if file:
+    df = read_file(file)
+    st.caption(f"{len(df):,} صف")
+    st.dataframe(df.head(), use_container_width=True)
+
+    cols = df.columns.tolist()
+    c1, c2, c3 = st.columns(3)
+    acc_col = c1.selectbox("عمود الحساب", cols)
+    txt_col = c2.selectbox("عمود الإفادة", cols, index=min(1, len(cols) - 1))
+    threshold = c3.slider("حد التقارب %", 0, 100, 70)
+
+    if st.button("احسب", type="primary"):
+        with st.spinner("جاري الحساب..."):
+            res = find_similar_pairs(df, acc_col, txt_col, threshold)
+
+        if res.empty:
+            st.info(f"مفيش إفادات تقاربها {threshold}% أو أكتر.")
+        else:
+            m1, m2 = st.columns(2)
+            m1.metric("عدد الأزواج", f"{len(res):,}")
+            m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
+
+            tab1, tab2 = st.tabs(["الأزواج", "ملخص لكل حساب"])
+            with tab1:
+                st.dataframe(res, use_container_width=True)
+            with tab2:
+                summary = (
+                    res.groupby("الحساب")["نسبة التقارب %"]
+                    .agg(عدد_الأزواج="count", أعلى_نسبة="max")
+                    .reset_index()
+                    .sort_values("أعلى_نسبة", ascending=False)
+                )
+                st.dataframe(summary, use_container_width=True)
+
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                res.to_excel(w, index=False, sheet_name="الأزواج")
+                summary.to_excel(w, index=False, sheet_name="ملخص")
+            st.download_button(
+                "تحميل النتيجة Excel",
+                buf.getvalue(),
+                file_name="similar_statements.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 from design_system import (
     inject_design_system, page_header, kpi_row, section_title, card,
     empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
@@ -1780,7 +1912,8 @@ pages = [
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
    ("التقرير اليومي للسدادات", "⚡"),
-    ("التدوير", "🔄") 
+    ("التدوير", "🔄"),
+     ("تقارب الافادات", "🔄")
     
 ]
 
@@ -5604,6 +5737,111 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
+
+
+
+elif page == "تقارب الإفادات":
+
+    import io
+    import numpy as np
+    import pandas as pd
+    from sentence_transformers import SentenceTransformer
+
+    page_header("🔍", "تقارب الإفادات", "رصد الإفادات المتشابهة داخل نفس الحساب", chips=['ارفع الملف ثم حدد الأعمدة واضغط "احسب"'])
+
+    @st.cache_resource
+    def load_sim_model():
+        return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+    file = st.file_uploader("ارفع الملف (Excel أو CSV)", type=["xlsx", "xls", "csv"], key="sim_file")
+
+    if file:
+        df = pd.read_csv(file) if file.name.lower().endswith(".csv") else pd.read_excel(file)
+        st.caption(f"{len(df):,} صف")
+
+        cols = df.columns.tolist()
+        c1, c2, c3 = st.columns(3)
+        acc_col = c1.selectbox("عمود الحساب", cols, key="sim_acc")
+        txt_col = c2.selectbox("عمود الإفادة", cols, index=min(1, len(cols) - 1), key="sim_txt")
+        threshold = c3.slider("حد التقارب %", 0, 100, 70, key="sim_thr")
+
+        if st.button("احسب", type="primary", key="sim_run"):
+            with st.spinner("جاري الحساب..."):
+                d = df[[acc_col, txt_col]].dropna().copy()
+                d[txt_col] = d[txt_col].astype(str).str.strip()
+                d = d[d[txt_col] != ""]
+
+                emb = load_sim_model().encode(
+                    d[txt_col].tolist(),
+                    batch_size=64,
+                    normalize_embeddings=True,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                )
+
+                orig_idx = d.index.to_numpy()
+                texts = d[txt_col].to_numpy()
+                rows = []
+
+                for acc, idx in d.groupby(acc_col).indices.items():
+                    if len(idx) < 2:
+                        continue
+                    e = emb[idx]
+                    sims = e @ e.T * 100
+                    mask = np.triu(np.ones_like(sims, dtype=bool), k=1) & (sims >= threshold)
+                    for a, b in np.argwhere(mask):
+                        rows.append({
+                            "الحساب": acc,
+                            "الإفادة 1": texts[idx[a]],
+                            "الإفادة 2": texts[idx[b]],
+                            "نسبة التقارب %": round(float(sims[a, b]), 2),
+                            "صف 1": int(orig_idx[idx[a]]) + 2,
+                            "صف 2": int(orig_idx[idx[b]]) + 2,
+                        })
+
+                res = pd.DataFrame(rows)
+                if not res.empty:
+                    res = res.sort_values(["الحساب", "نسبة التقارب %"], ascending=[True, False]).reset_index(drop=True)
+
+            st.session_state.sim_result = res
+            st.session_state.sim_result_file = file.name
+            st.session_state.sim_result_thr = threshold
+
+        # النتيجة محفوظة في session_state عشان متختفيش بعد الضغط على التحميل
+        res = st.session_state.get("sim_result")
+        if res is not None and st.session_state.get("sim_result_file") == file.name:
+            thr = st.session_state.sim_result_thr
+            if res.empty:
+                st.info(f"مفيش إفادات تقاربها {thr}% أو أكتر.")
+            else:
+                m1, m2 = st.columns(2)
+                m1.metric("عدد الأزواج", f"{len(res):,}")
+                m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
+
+                summary = (
+                    res.groupby("الحساب")["نسبة التقارب %"]
+                    .agg(عدد_الأزواج="count", أعلى_نسبة="max")
+                    .reset_index()
+                    .sort_values("أعلى_نسبة", ascending=False)
+                )
+
+                tab1, tab2 = st.tabs(["الأزواج", "ملخص لكل حساب"])
+                with tab1:
+                    st.dataframe(res, use_container_width=True)
+                with tab2:
+                    st.dataframe(summary, use_container_width=True)
+
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    res.to_excel(w, index=False, sheet_name="الأزواج")
+                    summary.to_excel(w, index=False, sheet_name="ملخص")
+                st.download_button(
+                    "تحميل النتيجة Excel",
+                    buf.getvalue(),
+                    file_name="similar_statements.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="sim_download",
+                )
 
 
 
