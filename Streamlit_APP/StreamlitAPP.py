@@ -5745,13 +5745,59 @@ elif page == "تقارب الإفادات":
     import io
     import numpy as np
     import pandas as pd
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
     from sentence_transformers import SentenceTransformer
 
-    page_header("🔍", "تقارب الإفادات", "رصد الإفادات المتشابهة داخل نفس الحساب", chips=['ارفع الملف ثم حدد الأعمدة واضغط "احسب"'])
+    page_header("🔍", "تقارب الإفادات", "رصد الإفادات المتشابهة داخل نفس الحساب ومعرفة المحصل اللي بيكررها", chips=['ارفع الملف ثم حدد الأعمدة واضغط "احسب"'])
+
+    SAME = "نفس المحصل"
+    DIFF = "محصل مختلف"
 
     @st.cache_resource
     def load_sim_model():
         return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+    def guess_col(cols, keys, fallback):
+        for i, c in enumerate(cols):
+            if any(k in str(c).lower() for k in keys):
+                return i
+        return min(fallback, len(cols) - 1)
+
+    def style_ws(ws, wrap_headers=(), highlight=None):
+        highlight = highlight or {}
+        thin = Side(style="thin", color="BFBFBF")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        headers = [c.value for c in ws[1]]
+
+        for c in ws[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = PatternFill("solid", fgColor="1F3864")
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = border
+        ws.row_dimensions[1].height = 26
+
+        for i, h in enumerate(headers, start=1):
+            letter = get_column_letter(i)
+            if h in wrap_headers:
+                width = 55
+            else:
+                longest = max((len(str(c.value)) for c in ws[letter] if c.value is not None), default=10)
+                width = min(max(longest + 4, 12), 30)
+            ws.column_dimensions[letter].width = width
+
+        for row in ws.iter_rows(min_row=2):
+            for c in row:
+                h = headers[c.column - 1]
+                c.border = border
+                c.alignment = Alignment(vertical="top", wrap_text=h in wrap_headers)
+                if h in highlight and c.value == highlight[h][0]:
+                    c.fill = PatternFill("solid", fgColor=highlight[h][1])
+                    c.font = Font(bold=True)
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        ws.sheet_view.rightToLeft = True
 
     file = st.file_uploader("ارفع الملف (Excel أو CSV)", type=["xlsx", "xls", "csv"], key="sim_file")
 
@@ -5760,52 +5806,74 @@ elif page == "تقارب الإفادات":
         st.caption(f"{len(df):,} صف")
 
         cols = df.columns.tolist()
-        c1, c2, c3 = st.columns(3)
-        acc_col = c1.selectbox("عمود الحساب", cols, key="sim_acc")
-        txt_col = c2.selectbox("عمود الإفادة", cols, index=min(1, len(cols) - 1), key="sim_txt")
-        threshold = c3.slider("حد التقارب %", 0, 100, 70, key="sim_thr")
+        c1, c2, c3, c4 = st.columns(4)
+        acc_col = c1.selectbox("عمود الحساب", cols, index=guess_col(cols, ["حساب", "account"], 0), key="sim_acc")
+        txt_col = c2.selectbox("عمود الإفادة", cols, index=guess_col(cols, ["افاد", "إفاد", "ملاحظ", "statement", "note", "comment"], 1), key="sim_txt")
+        date_col = c3.selectbox("عمود التاريخ", cols, index=guess_col(cols, ["تاريخ", "date"], 2), key="sim_date")
+        coll_col = c4.selectbox("عمود المحصل", cols, index=guess_col(cols, ["محصل", "collector", "agent"], 3), key="sim_coll")
+        threshold = st.slider("حد التقارب %", 0, 100, 70, key="sim_thr")
 
-        if st.button("احسب", type="primary", key="sim_run"):
+        if len({acc_col, txt_col, date_col, coll_col}) < 4:
+            st.warning("اختار 4 أعمدة مختلفة (الحساب، الإفادة، التاريخ، المحصل).")
+        elif st.button("احسب", type="primary", key="sim_run"):
             with st.spinner("جاري الحساب..."):
-                d = df[[acc_col, txt_col]].dropna().copy()
-                d[txt_col] = d[txt_col].astype(str).str.strip()
-                d = d[d[txt_col] != ""]
+                d = df[[acc_col, txt_col, date_col, coll_col]].copy()
+                d.columns = ["acc", "txt", "date", "coll"]
+                d = d.dropna(subset=["acc", "txt"])
+                d["txt"] = d["txt"].astype(str).str.strip()
+                d = d[d["txt"] != ""]
+                d["coll"] = d["coll"].fillna("غير محدد").astype(str).str.strip()
+                d["dt"] = pd.to_datetime(d["date"], errors="coerce", dayfirst=True)
+
+                # ترتيب زمني جوه كل حساب (عشان نعرف مين ورا مين)
+                d = d.sort_values(["acc", "dt"], kind="stable")
+                file_rows = d.index.to_numpy() + 2  # رقم الصف في الإكسل (مع الهيدر)
+                d = d.reset_index(drop=True)
+
+                has_time = (d["dt"].dropna().dt.normalize() != d["dt"].dropna()).any()
+                fmt = "%Y-%m-%d %H:%M" if has_time else "%Y-%m-%d"
+                dates_str = d["dt"].dt.strftime(fmt).fillna("").to_numpy()
+                dts = d["dt"].tolist()
+                texts = d["txt"].to_numpy()
+                colls = d["coll"].to_numpy()
 
                 emb = load_sim_model().encode(
-                    d[txt_col].tolist(),
+                    d["txt"].tolist(),
                     batch_size=64,
                     normalize_embeddings=True,
                     convert_to_numpy=True,
                     show_progress_bar=False,
                 )
 
-                orig_idx = d.index.to_numpy()
-                texts = d[txt_col].to_numpy()
                 rows = []
-
-                for acc, idx in d.groupby(acc_col).indices.items():
+                for acc, idx in d.groupby("acc").indices.items():
                     if len(idx) < 2:
                         continue
                     e = emb[idx]
                     sims = e @ e.T * 100
                     mask = np.triu(np.ones_like(sims, dtype=bool), k=1) & (sims >= threshold)
                     for a, b in np.argwhere(mask):
+                        i, j = idx[a], idx[b]
+                        gap = (dts[j] - dts[i]).days if pd.notna(dts[i]) and pd.notna(dts[j]) else None
                         rows.append({
                             "الحساب": acc,
-                            "الإفادة 1": texts[idx[a]],
-                            "الإفادة 2": texts[idx[b]],
                             "نسبة التقارب %": round(float(sims[a, b]), 2),
-                            "صف 1": int(orig_idx[idx[a]]) + 2,
-                            "صف 2": int(orig_idx[idx[b]]) + 2,
+                            "نفس المحصل؟": SAME if colls[i] == colls[j] else DIFF,
+                            "ورا بعض؟": "نعم" if b == a + 1 else "لا",
+                            "الفارق بالأيام": gap,
+                            "تاريخ الإفادة 1": dates_str[i],
+                            "المحصل 1": colls[i],
+                            "الإفادة 1": texts[i],
+                            "تاريخ الإفادة 2": dates_str[j],
+                            "المحصل 2": colls[j],
+                            "الإفادة 2": texts[j],
+                            "صف 1": int(file_rows[i]),
+                            "صف 2": int(file_rows[j]),
                         })
 
-                res = pd.DataFrame(rows)
-                if not res.empty:
-                    res = res.sort_values(["الحساب", "نسبة التقارب %"], ascending=[True, False]).reset_index(drop=True)
-
-            st.session_state.sim_result = res
-            st.session_state.sim_result_file = file.name
-            st.session_state.sim_result_thr = threshold
+                st.session_state.sim_result = pd.DataFrame(rows)
+                st.session_state.sim_result_file = file.name
+                st.session_state.sim_result_thr = threshold
 
         # النتيجة محفوظة في session_state عشان متختفيش بعد الضغط على التحميل
         res = st.session_state.get("sim_result")
@@ -5814,38 +5882,71 @@ elif page == "تقارب الإفادات":
             if res.empty:
                 st.info(f"مفيش إفادات تقاربها {thr}% أو أكتر.")
             else:
-                m1, m2 = st.columns(2)
-                m1.metric("عدد الأزواج", f"{len(res):,}")
-                m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
+                back = res[res["ورا بعض؟"] == "نعم"].reset_index(drop=True)
 
-                summary = (
-                    res.groupby("الحساب")["نسبة التقارب %"]
-                    .agg(عدد_الأزواج="count", أعلى_نسبة="max")
-                    .reset_index()
-                    .sort_values("أعلى_نسبة", ascending=False)
+                # تقرير المحصلين: المحصل صاحب الإفادة اللاحقة هو اللي كرر
+                g = res.groupby("المحصل 2")
+                rep = pd.DataFrame({
+                    "الإفادات المكررة": g["صف 2"].nunique(),
+                    "منها تكرار لإفادته هو": res[res["نفس المحصل؟"] == SAME].groupby("المحصل 2")["صف 2"].nunique(),
+                    "منها تكرار لإفادة محصل آخر": res[res["نفس المحصل؟"] == DIFF].groupby("المحصل 2")["صف 2"].nunique(),
+                    "منها ورا بعض": back.groupby("المحصل 2")["صف 2"].nunique(),
+                    "عدد الحسابات": g["الحساب"].nunique(),
+                    "متوسط التقارب %": g["نسبة التقارب %"].mean().round(2),
+                    "أعلى تقارب %": g["نسبة التقارب %"].max(),
+                }).fillna(0)
+                count_cols = ["الإفادات المكررة", "منها تكرار لإفادته هو", "منها تكرار لإفادة محصل آخر", "منها ورا بعض", "عدد الحسابات"]
+                rep[count_cols] = rep[count_cols].astype(int)
+                rep = (
+                    rep.reset_index()
+                    .rename(columns={"المحصل 2": "المحصل"})
+                    .sort_values(["منها ورا بعض", "الإفادات المكررة"], ascending=False)
+                    .reset_index(drop=True)
                 )
 
-                tab1, tab2 = st.tabs(["الأزواج", "ملخص لكل حساب"])
+                summary = (
+                    res.groupby("الحساب")
+                    .agg(**{"عدد الأزواج": ("نسبة التقارب %", "count"), "أعلى نسبة %": ("نسبة التقارب %", "max")})
+                    .reset_index()
+                    .sort_values("أعلى نسبة %", ascending=False)
+                    .reset_index(drop=True)
+                )
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("عدد الأزواج", f"{len(res):,}")
+                m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
+                m3.metric("محصلين مكررين", f"{res['المحصل 2'].nunique():,}")
+                m4.metric("أزواج ورا بعض", f"{len(back):,}")
+
+                tab1, tab2, tab3, tab4 = st.tabs(["الأزواج", "ورا بعض", "تقرير المحصلين", "ملخص الحسابات"])
                 with tab1:
                     st.dataframe(res, use_container_width=True)
                 with tab2:
+                    st.dataframe(back, use_container_width=True)
+                with tab3:
+                    st.caption("المحصل هنا هو صاحب الإفادة اللاحقة (اللي كرر). كل إفادة مكررة بتتعد مرة واحدة.")
+                    st.dataframe(rep, use_container_width=True)
+                with tab4:
                     st.dataframe(summary, use_container_width=True)
 
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine="openpyxl") as w:
                     res.to_excel(w, index=False, sheet_name="الأزواج")
-                    summary.to_excel(w, index=False, sheet_name="ملخص")
+                    back.to_excel(w, index=False, sheet_name="ورا بعض")
+                    rep.to_excel(w, index=False, sheet_name="تقرير المحصلين")
+                    summary.to_excel(w, index=False, sheet_name="ملخص الحسابات")
+
+                    hl = {"نفس المحصل؟": (SAME, "FCE4D6"), "ورا بعض؟": ("نعم", "F8CBAD")}
+                    wrap = ("الإفادة 1", "الإفادة 2")
+                    style_ws(w.sheets["الأزواج"], wrap, hl)
+                    style_ws(w.sheets["ورا بعض"], wrap, hl)
+                    style_ws(w.sheets["تقرير المحصلين"])
+                    style_ws(w.sheets["ملخص الحسابات"])
+
                 st.download_button(
-                    "تحميل النتيجة Excel",
+                    "تحميل التقرير Excel",
                     buf.getvalue(),
-                    file_name="similar_statements.xlsx",
+                    file_name="similar_statements_report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="sim_download",
                 )
-
-
-
-
-
-
-
