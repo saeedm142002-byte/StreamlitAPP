@@ -2051,6 +2051,9 @@ if page == "الوعود القائمة و المكسورة":
             has_results = "promises_current" in st.session_state
             signature_matches = st.session_state.get("promises_signature") == current_signature
 
+            st.session_state["promises_signature"] = current_signature
+            money_rain("تم عمل الوعود")
+
             if not has_results:
                 st.markdown(
                     '<div class="empty-state">🎯 حدد الفلترة اللي عايزها فوق، وبعدين دوس زرار «عمل الوعود» عشان يبدأ التحليل</div>',
@@ -2842,6 +2845,10 @@ elif page == "الاهمال":
                 st.session_state[result_key] = (df_result, supervisor_col_result)
                 st.session_state[result_sig_key] = current_signature
 
+
+            st.session_state[result_sig_key] = current_signature
+            money_rain("تم عمل الاهمال")  
+
             has_result = result_key in st.session_state
             signature_matches = st.session_state.get(result_sig_key) == current_signature
 
@@ -3437,6 +3444,9 @@ elif page == "النشاط":
             status.empty()
             progress_bar.empty()
             st.success("تم الانتهاء")
+
+        st.success("تم الانتهاء")
+        money_rain("تم تصنيف الإفادات")
 
         if "processed_output" in st.session_state:
             st.download_button(
@@ -4108,6 +4118,7 @@ elif page == "التوزيع":
                         st.warning(f"لسه فيه {left} حساب عند المستقيلين (مفيش محصل مؤهل يستلمهم)")
                     else:
                         st.success("تم التوزيع")
+                        money_rain("تم التوزيع")
 
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
@@ -4283,6 +4294,7 @@ elif page == "التوزيع":
                     _warn_split(full_portfolio, core)
     
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
+                    money_rain("تم تجهيز المحفظة")
 
                     st.markdown("### المطلوب سحبه من كل محصل قديم (الحالي − المتوسط)")
                     st.dataframe(take_summary, use_container_width=True, hide_index=True)
@@ -4463,6 +4475,7 @@ elif page == "التوزيع":
                     _warn_split(result_df, core)
 
                     st.success("تم التساوي")
+                    money_rain("تم التساوي")
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
@@ -5332,6 +5345,14 @@ elif page == "التدوير":
                 file_bytes, keep_paid_in_rotation, classification_col_1, classification_col_2
             )
 
+
+
+            _rain_sig = ("rot", rotation_file.name, rotation_file.size, keep_paid_in_rotation,
+            classification_col_1, classification_col_2)
+            if st.session_state.get("_rain_sig") != _rain_sig:
+                st.session_state["_rain_sig"] = _rain_sig
+                money_rain("تم التدوير")
+
             # ------------------------------------------------------
             # تحقق نهائي (Sanity check) من الشرطين الأساسيين
             # (بنستبعد من فحص "احتفظ بنفس المحصل" العملاء المستبعدين عمدًا
@@ -5578,3 +5599,14 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
+
+
+
+
+
+
+from design_system import (
+    inject_design_system, page_header, kpi_row, section_title, card,
+    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
+    GREEN, GOLD, RED, BLUE, VIOLET, TEAL, money_rain,
+)
