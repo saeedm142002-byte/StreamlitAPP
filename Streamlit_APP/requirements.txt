@@ -6,4 +6,7 @@ huggingface_hub
 openpyxl
 numpy
 plotly
-
+sentence-transformers
+openpyxl
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
