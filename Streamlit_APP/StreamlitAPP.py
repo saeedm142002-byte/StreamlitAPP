@@ -7,11 +7,6 @@ import torch
 import torch.nn.functional as F
 from datetime import datetime, date, time, timedelta
 from openpyxl.worksheet.table import Table, TableStyleInfo
-from design_system import (
-    inject_design_system, page_header, kpi_row, section_title, card,
-    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
-    GREEN, GOLD, RED, BLUE, VIOLET, TEAL, money_rain,
-)
 
 import plotly.express as px
 import plotly.express as px
@@ -26,138 +21,6 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import streamlit as st
-
-
-
-
-
-
-import io
-
-import numpy as np
-import pandas as pd
-import streamlit as st
-from sentence_transformers import SentenceTransformer
-
-st.set_page_config(page_title="تقارب الإفادات", layout="wide")
-st.markdown("<style>.stApp {direction: rtl; text-align: right;}</style>", unsafe_allow_html=True)
-
-MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-
-
-@st.cache_resource
-def load_model():
-    return SentenceTransformer(MODEL_NAME)
-
-
-def read_file(file):
-    if file.name.lower().endswith(".csv"):
-        return pd.read_csv(file)
-    return pd.read_excel(file)
-
-
-def find_similar_pairs(df, acc_col, txt_col, threshold):
-    d = df[[acc_col, txt_col]].dropna().copy()
-    d[txt_col] = d[txt_col].astype(str).str.strip()
-    d = d[d[txt_col] != ""]
-
-    model = load_model()
-    emb = model.encode(
-        d[txt_col].tolist(),
-        batch_size=64,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
-
-    orig_idx = d.index.to_numpy()
-    texts = d[txt_col].to_numpy()
-    rows = []
-
-    for acc, idx in d.groupby(acc_col).indices.items():
-        if len(idx) < 2:
-            continue
-        e = emb[idx]
-        sims = e @ e.T * 100
-        mask = np.triu(np.ones_like(sims, dtype=bool), k=1) & (sims >= threshold)
-        for a, b in np.argwhere(mask):
-            rows.append(
-                {
-                    "الحساب": acc,
-                    "الإفادة 1": texts[idx[a]],
-                    "الإفادة 2": texts[idx[b]],
-                    "نسبة التقارب %": round(float(sims[a, b]), 2),
-                    "صف 1": int(orig_idx[idx[a]]) + 2,  # رقم الصف في الإكسل (مع الهيدر)
-                    "صف 2": int(orig_idx[idx[b]]) + 2,
-                }
-            )
-
-    res = pd.DataFrame(rows)
-    if not res.empty:
-        res = res.sort_values(["الحساب", "نسبة التقارب %"], ascending=[True, False]).reset_index(drop=True)
-    return res
-
-
-st.title("نسبة التقارب بين إفادات الحساب")
-
-file = st.file_uploader("ارفع الملف (Excel أو CSV)", type=["xlsx", "xls", "csv"])
-
-if file:
-    df = read_file(file)
-    st.caption(f"{len(df):,} صف")
-    st.dataframe(df.head(), use_container_width=True)
-
-    cols = df.columns.tolist()
-    c1, c2, c3 = st.columns(3)
-    acc_col = c1.selectbox("عمود الحساب", cols)
-    txt_col = c2.selectbox("عمود الإفادة", cols, index=min(1, len(cols) - 1))
-    threshold = c3.slider("حد التقارب %", 0, 100, 70)
-
-    if st.button("احسب", type="primary"):
-        with st.spinner("جاري الحساب..."):
-            res = find_similar_pairs(df, acc_col, txt_col, threshold)
-
-        if res.empty:
-            st.info(f"مفيش إفادات تقاربها {threshold}% أو أكتر.")
-        else:
-            m1, m2 = st.columns(2)
-            m1.metric("عدد الأزواج", f"{len(res):,}")
-            m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
-
-            tab1, tab2 = st.tabs(["الأزواج", "ملخص لكل حساب"])
-            with tab1:
-                st.dataframe(res, use_container_width=True)
-            with tab2:
-                summary = (
-                    res.groupby("الحساب")["نسبة التقارب %"]
-                    .agg(عدد_الأزواج="count", أعلى_نسبة="max")
-                    .reset_index()
-                    .sort_values("أعلى_نسبة", ascending=False)
-                )
-                st.dataframe(summary, use_container_width=True)
-
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                res.to_excel(w, index=False, sheet_name="الأزواج")
-                summary.to_excel(w, index=False, sheet_name="ملخص")
-            st.download_button(
-                "تحميل النتيجة Excel",
-                buf.getvalue(),
-                file_name="similar_statements.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 from design_system import (
@@ -1912,8 +1775,7 @@ pages = [
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
    ("التقرير اليومي للسدادات", "⚡"),
-    ("التدوير", "🔄"),
-     ("تقارب الافادات", "🔄")
+    ("التدوير", "🔄") 
     
 ]
 
@@ -2188,9 +2050,6 @@ if page == "الوعود القائمة و المكسورة":
 
             has_results = "promises_current" in st.session_state
             signature_matches = st.session_state.get("promises_signature") == current_signature
-
-            st.session_state["promises_signature"] = current_signature
-            money_rain("تم عمل الوعود")
 
             if not has_results:
                 st.markdown(
@@ -2983,10 +2842,6 @@ elif page == "الاهمال":
                 st.session_state[result_key] = (df_result, supervisor_col_result)
                 st.session_state[result_sig_key] = current_signature
 
-
-            st.session_state[result_sig_key] = current_signature
-            money_rain("تم عمل الاهمال")  
-
             has_result = result_key in st.session_state
             signature_matches = st.session_state.get(result_sig_key) == current_signature
 
@@ -3582,9 +3437,6 @@ elif page == "النشاط":
             status.empty()
             progress_bar.empty()
             st.success("تم الانتهاء")
-
-        st.success("تم الانتهاء")
-        money_rain("تم تصنيف الإفادات")
 
         if "processed_output" in st.session_state:
             st.download_button(
@@ -4256,7 +4108,6 @@ elif page == "التوزيع":
                         st.warning(f"لسه فيه {left} حساب عند المستقيلين (مفيش محصل مؤهل يستلمهم)")
                     else:
                         st.success("تم التوزيع")
-                        money_rain("تم التوزيع")
 
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
@@ -4432,7 +4283,6 @@ elif page == "التوزيع":
                     _warn_split(full_portfolio, core)
     
                     st.success(f"تم تجهيز محفظة: {', '.join(new_sp_names)}")
-                    money_rain("تم تجهيز المحفظة")
 
                     st.markdown("### المطلوب سحبه من كل محصل قديم (الحالي − المتوسط)")
                     st.dataframe(take_summary, use_container_width=True, hide_index=True)
@@ -4613,7 +4463,6 @@ elif page == "التوزيع":
                     _warn_split(result_df, core)
 
                     st.success("تم التساوي")
-                    money_rain("تم التساوي")
                     st.markdown("### ملخص التنفيذ مقابل المتوسط")
                     st.dataframe(summary, use_container_width=True, hide_index=True)
 
@@ -5483,14 +5332,6 @@ elif page == "التدوير":
                 file_bytes, keep_paid_in_rotation, classification_col_1, classification_col_2
             )
 
-
-
-            _rain_sig = ("rot", rotation_file.name, rotation_file.size, keep_paid_in_rotation,
-            classification_col_1, classification_col_2)
-            if st.session_state.get("_rain_sig") != _rain_sig:
-                st.session_state["_rain_sig"] = _rain_sig
-                money_rain("تم التدوير")
-
             # ------------------------------------------------------
             # تحقق نهائي (Sanity check) من الشرطين الأساسيين
             # (بنستبعد من فحص "احتفظ بنفس المحصل" العملاء المستبعدين عمدًا
@@ -5737,215 +5578,3 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
-
-
-elif page == "تقارب الإفادات":
-
-    import io
-    import numpy as np
-    import pandas as pd
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-    from sentence_transformers import SentenceTransformer
-
-    page_header("🔍", "تقارب الإفادات", "رصد الإفادات المتشابهة داخل نفس الحساب ومعرفة المحصل اللي بيكررها", chips=['ارفع الملف ثم حدد الأعمدة واضغط "احسب"'])
-
-    SAME = "نفس المحصل"
-    DIFF = "محصل مختلف"
-
-    @st.cache_resource
-    def load_sim_model():
-        return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-
-    def guess_col(cols, keys, fallback):
-        for i, c in enumerate(cols):
-            if any(k in str(c).lower() for k in keys):
-                return i
-        return min(fallback, len(cols) - 1)
-
-    def style_ws(ws, wrap_headers=(), highlight=None):
-        highlight = highlight or {}
-        thin = Side(style="thin", color="BFBFBF")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        headers = [c.value for c in ws[1]]
-
-        for c in ws[1]:
-            c.font = Font(bold=True, color="FFFFFF")
-            c.fill = PatternFill("solid", fgColor="1F3864")
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = border
-        ws.row_dimensions[1].height = 26
-
-        for i, h in enumerate(headers, start=1):
-            letter = get_column_letter(i)
-            if h in wrap_headers:
-                width = 55
-            else:
-                longest = max((len(str(c.value)) for c in ws[letter] if c.value is not None), default=10)
-                width = min(max(longest + 4, 12), 30)
-            ws.column_dimensions[letter].width = width
-
-        for row in ws.iter_rows(min_row=2):
-            for c in row:
-                h = headers[c.column - 1]
-                c.border = border
-                c.alignment = Alignment(vertical="top", wrap_text=h in wrap_headers)
-                if h in highlight and c.value == highlight[h][0]:
-                    c.fill = PatternFill("solid", fgColor=highlight[h][1])
-                    c.font = Font(bold=True)
-
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-        ws.sheet_view.rightToLeft = True
-
-    file = st.file_uploader("ارفع الملف (Excel أو CSV)", type=["xlsx", "xls", "csv"], key="sim_file")
-
-    if file:
-        df = pd.read_csv(file) if file.name.lower().endswith(".csv") else pd.read_excel(file)
-        st.caption(f"{len(df):,} صف")
-
-        cols = df.columns.tolist()
-        c1, c2, c3, c4 = st.columns(4)
-        acc_col = c1.selectbox("عمود الحساب", cols, index=guess_col(cols, ["حساب", "account"], 0), key="sim_acc")
-        txt_col = c2.selectbox("عمود الإفادة", cols, index=guess_col(cols, ["افاد", "إفاد", "ملاحظ", "statement", "note", "comment"], 1), key="sim_txt")
-        date_col = c3.selectbox("عمود التاريخ", cols, index=guess_col(cols, ["تاريخ", "date"], 2), key="sim_date")
-        coll_col = c4.selectbox("عمود المحصل", cols, index=guess_col(cols, ["محصل", "collector", "agent"], 3), key="sim_coll")
-        threshold = st.slider("حد التقارب %", 0, 100, 70, key="sim_thr")
-
-        if len({acc_col, txt_col, date_col, coll_col}) < 4:
-            st.warning("اختار 4 أعمدة مختلفة (الحساب، الإفادة، التاريخ، المحصل).")
-        elif st.button("احسب", type="primary", key="sim_run"):
-            with st.spinner("جاري الحساب..."):
-                d = df[[acc_col, txt_col, date_col, coll_col]].copy()
-                d.columns = ["acc", "txt", "date", "coll"]
-                d = d.dropna(subset=["acc", "txt"])
-                d["txt"] = d["txt"].astype(str).str.strip()
-                d = d[d["txt"] != ""]
-                d["coll"] = d["coll"].fillna("غير محدد").astype(str).str.strip()
-                d["dt"] = pd.to_datetime(d["date"], errors="coerce", dayfirst=True)
-
-                # ترتيب زمني جوه كل حساب (عشان نعرف مين ورا مين)
-                d = d.sort_values(["acc", "dt"], kind="stable")
-                file_rows = d.index.to_numpy() + 2  # رقم الصف في الإكسل (مع الهيدر)
-                d = d.reset_index(drop=True)
-
-                has_time = (d["dt"].dropna().dt.normalize() != d["dt"].dropna()).any()
-                fmt = "%Y-%m-%d %H:%M" if has_time else "%Y-%m-%d"
-                dates_str = d["dt"].dt.strftime(fmt).fillna("").to_numpy()
-                dts = d["dt"].tolist()
-                texts = d["txt"].to_numpy()
-                colls = d["coll"].to_numpy()
-
-                emb = load_sim_model().encode(
-                    d["txt"].tolist(),
-                    batch_size=64,
-                    normalize_embeddings=True,
-                    convert_to_numpy=True,
-                    show_progress_bar=False,
-                )
-
-                rows = []
-                for acc, idx in d.groupby("acc").indices.items():
-                    if len(idx) < 2:
-                        continue
-                    e = emb[idx]
-                    sims = e @ e.T * 100
-                    mask = np.triu(np.ones_like(sims, dtype=bool), k=1) & (sims >= threshold)
-                    for a, b in np.argwhere(mask):
-                        i, j = idx[a], idx[b]
-                        gap = (dts[j] - dts[i]).days if pd.notna(dts[i]) and pd.notna(dts[j]) else None
-                        rows.append({
-                            "الحساب": acc,
-                            "نسبة التقارب %": round(float(sims[a, b]), 2),
-                            "نفس المحصل؟": SAME if colls[i] == colls[j] else DIFF,
-                            "ورا بعض؟": "نعم" if b == a + 1 else "لا",
-                            "الفارق بالأيام": gap,
-                            "تاريخ الإفادة 1": dates_str[i],
-                            "المحصل 1": colls[i],
-                            "الإفادة 1": texts[i],
-                            "تاريخ الإفادة 2": dates_str[j],
-                            "المحصل 2": colls[j],
-                            "الإفادة 2": texts[j],
-                            "صف 1": int(file_rows[i]),
-                            "صف 2": int(file_rows[j]),
-                        })
-
-                st.session_state.sim_result = pd.DataFrame(rows)
-                st.session_state.sim_result_file = file.name
-                st.session_state.sim_result_thr = threshold
-
-        # النتيجة محفوظة في session_state عشان متختفيش بعد الضغط على التحميل
-        res = st.session_state.get("sim_result")
-        if res is not None and st.session_state.get("sim_result_file") == file.name:
-            thr = st.session_state.sim_result_thr
-            if res.empty:
-                st.info(f"مفيش إفادات تقاربها {thr}% أو أكتر.")
-            else:
-                back = res[res["ورا بعض؟"] == "نعم"].reset_index(drop=True)
-
-                # تقرير المحصلين: المحصل صاحب الإفادة اللاحقة هو اللي كرر
-                g = res.groupby("المحصل 2")
-                rep = pd.DataFrame({
-                    "الإفادات المكررة": g["صف 2"].nunique(),
-                    "منها تكرار لإفادته هو": res[res["نفس المحصل؟"] == SAME].groupby("المحصل 2")["صف 2"].nunique(),
-                    "منها تكرار لإفادة محصل آخر": res[res["نفس المحصل؟"] == DIFF].groupby("المحصل 2")["صف 2"].nunique(),
-                    "منها ورا بعض": back.groupby("المحصل 2")["صف 2"].nunique(),
-                    "عدد الحسابات": g["الحساب"].nunique(),
-                    "متوسط التقارب %": g["نسبة التقارب %"].mean().round(2),
-                    "أعلى تقارب %": g["نسبة التقارب %"].max(),
-                }).fillna(0)
-                count_cols = ["الإفادات المكررة", "منها تكرار لإفادته هو", "منها تكرار لإفادة محصل آخر", "منها ورا بعض", "عدد الحسابات"]
-                rep[count_cols] = rep[count_cols].astype(int)
-                rep = (
-                    rep.reset_index()
-                    .rename(columns={"المحصل 2": "المحصل"})
-                    .sort_values(["منها ورا بعض", "الإفادات المكررة"], ascending=False)
-                    .reset_index(drop=True)
-                )
-
-                summary = (
-                    res.groupby("الحساب")
-                    .agg(**{"عدد الأزواج": ("نسبة التقارب %", "count"), "أعلى نسبة %": ("نسبة التقارب %", "max")})
-                    .reset_index()
-                    .sort_values("أعلى نسبة %", ascending=False)
-                    .reset_index(drop=True)
-                )
-
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("عدد الأزواج", f"{len(res):,}")
-                m2.metric("عدد الحسابات", f"{res['الحساب'].nunique():,}")
-                m3.metric("محصلين مكررين", f"{res['المحصل 2'].nunique():,}")
-                m4.metric("أزواج ورا بعض", f"{len(back):,}")
-
-                tab1, tab2, tab3, tab4 = st.tabs(["الأزواج", "ورا بعض", "تقرير المحصلين", "ملخص الحسابات"])
-                with tab1:
-                    st.dataframe(res, use_container_width=True)
-                with tab2:
-                    st.dataframe(back, use_container_width=True)
-                with tab3:
-                    st.caption("المحصل هنا هو صاحب الإفادة اللاحقة (اللي كرر). كل إفادة مكررة بتتعد مرة واحدة.")
-                    st.dataframe(rep, use_container_width=True)
-                with tab4:
-                    st.dataframe(summary, use_container_width=True)
-
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                    res.to_excel(w, index=False, sheet_name="الأزواج")
-                    back.to_excel(w, index=False, sheet_name="ورا بعض")
-                    rep.to_excel(w, index=False, sheet_name="تقرير المحصلين")
-                    summary.to_excel(w, index=False, sheet_name="ملخص الحسابات")
-
-                    hl = {"نفس المحصل؟": (SAME, "FCE4D6"), "ورا بعض؟": ("نعم", "F8CBAD")}
-                    wrap = ("الإفادة 1", "الإفادة 2")
-                    style_ws(w.sheets["الأزواج"], wrap, hl)
-                    style_ws(w.sheets["ورا بعض"], wrap, hl)
-                    style_ws(w.sheets["تقرير المحصلين"])
-                    style_ws(w.sheets["ملخص الحسابات"])
-
-                st.download_button(
-                    "تحميل التقرير Excel",
-                    buf.getvalue(),
-                    file_name="similar_statements_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="sim_download",
-                )
