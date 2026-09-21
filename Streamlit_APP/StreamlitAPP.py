@@ -7,6 +7,11 @@ import torch
 import torch.nn.functional as F
 from datetime import datetime, date, time, timedelta
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from design_system import (
+    inject_design_system, page_header, kpi_row, section_title, card,
+    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
+    GREEN, GOLD, RED, BLUE, VIOLET, TEAL, money_rain,
+)
 
 import plotly.express as px
 import plotly.express as px
@@ -5605,8 +5610,4 @@ elif page == "التدوير":
 
 
 
-from design_system import (
-    inject_design_system, page_header, kpi_row, section_title, card,
-    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
-    GREEN, GOLD, RED, BLUE, VIOLET, TEAL, money_rain,
-)
+
