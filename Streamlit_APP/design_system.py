@@ -72,7 +72,13 @@ _CSS = """
 html, body{ background:var(--bg) !important; }
 [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottom"]{ background:transparent !important; }
 header[data-testid="stHeader"]{ background:transparent; }
-.main .block-container{ padding-top:1.6rem; padding-bottom:3rem; max-width:1280px; }
+.main .block-container{ padding-top:1.6rem; padding-bottom:3rem; max-width:1280px; position:relative; z-index:1; }
+
+/* ===== خلفية ثابتة: رسمة موظف بيرد على مكالمة (خفيفة جدًا، من غير أي تشتيت) ===== */
+div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
+.ds-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:var(--bg); }
+.ds-agent{ position:absolute; bottom:-30px; left:-30px; width:360px; opacity:.07; }
+@media (max-width:900px){ .ds-agent{ display:none; } }
 
 html, body, .stApp, .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2,
 .stApp h3, .stApp h4, .stApp button, .stApp input, .stApp textarea,
@@ -312,11 +318,37 @@ def logo_html(logo=None) -> str:
     return _BUILTIN_LOGO
 
 
+@lru_cache(maxsize=8)
+def _agent_svg(accent: str) -> str:
+    """
+    رسمة فلات مسطحة (illustration) لموظف تحصيل بيرد على مكالمة بابتسامة —
+    مرسومة بالكود (مش صورة فوتوغرافية) عشان تفضل خفيفة الوزن ومن غير أي
+    مشاكل حقوق ملكية، وتتلون تلقائيًا بلون الصفحة الحالية.
+    """
+    skin = "#D9A066"
+    return f'''
+    <svg viewBox="0 0 400 420" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="200" cy="220" r="190" fill="{accent}" opacity=".06"/>
+      <path d="M110 420 C110 300 145 240 200 240 C255 240 290 300 290 420 Z" fill="#FFFFFF" stroke="{accent}" stroke-width="5"/>
+      <rect x="182" y="150" width="36" height="36" rx="10" fill="{skin}"/>
+      <circle cx="200" cy="115" r="58" fill="{skin}"/>
+      <path d="M138 96 Q200 34 262 96 L272 158 Q200 190 128 158 Z" fill="#FFFFFF" stroke="#D9DEE6" stroke-width="2"/>
+      <ellipse cx="200" cy="90" rx="68" ry="13" fill="none" stroke="{INK}" stroke-width="6"/>
+      <circle cx="180" cy="116" r="4.5" fill="{INK}"/>
+      <circle cx="220" cy="116" r="4.5" fill="{INK}"/>
+      <path d="M174 134 Q200 154 226 134" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M258 195 Q296 150 252 100" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>
+      <path d="M258 195 Q296 150 252 100" fill="none" stroke="{accent}" stroke-width="4" stroke-linecap="round"/>
+      <rect x="232" y="82" width="28" height="48" rx="9" fill="{accent}"/>
+    </svg>
+    '''
+
+
 def inject_design_system(theme: str = "promises", background: str = "plain", bg_gif=None) -> None:
     """
     يتنادى مرة واحدة في كل rerun، بعد set_page_config.
     background و bg_gif اتسابوا في التوقيع بس مش بيتستخدموا هنا —
-    التصميم الاحترافي بيستخدم خلفية solid ثابتة دايمًا، من غير رسومات.
+    التصميم الاحترافي بيستخدم خلفية solid ثابتة + رسمة موظف خفيفة في الركن.
     """
     t = THEMES.get(theme, THEMES["promises"])
     css = (
@@ -329,6 +361,10 @@ def inject_design_system(theme: str = "promises", background: str = "plain", bg_
         .replace("__SOFT__", t["soft"])
     )
     st.markdown(css, unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="ds-bg"><div class="ds-agent">{_agent_svg(t["accent"])}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _e(x) -> str:
