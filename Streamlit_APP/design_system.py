@@ -50,7 +50,7 @@ def theme_switcher(show_label: bool = True) -> None:
     """
     st.session_state.setdefault("ds_theme", DEFAULT_THEME)
 
-    labels = {"pro": "💼 بروفيشنال", "cartoon": "🎨 كرتوني"}
+    labels = {"pro": "💼 بروفيشنال", "cartoon": "🎨 تصميم مختلف"}
     keys = list(labels.keys())
     current_key = st.session_state["ds_theme"]
 
