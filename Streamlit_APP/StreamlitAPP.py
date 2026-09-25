@@ -5643,8 +5643,10 @@ elif page == "مطابقة الفواتير":
         return None
 
     st.markdown("""
-    ارفع **شيت إجادة** (فيه رقم المطالبة، ومعرف كل سداد، ومبلغ كل سداد — المطالبة ممكن تتكرر
-    لو عليها أكتر من سداد)، وشيت **البنك/الشركة الأم** (فيه رقم المطالبة، وإجمالي مبلغ السداد لكل مطالبة).
+    ارفع **شيت إجادة** (فيه رقم المطالبة، ومعرف كل سداد، ومبلغ كل سداد — معرف السداد ده داخلي
+    في إجادة بس)، وشيت **البنك/الشركة الأم** (فيه رقم المطالبة ومبلغ السداد — من غير معرف سداد،
+    والمطالبة ممكن تتكرر فيه كذا مرة برضه لو عليها أكتر من سداد، وهنجمعها تلقائيًا).
+    الرابط المشترك بين الملفين هو **رقم المطالبة**.
     """)
 
     col_up1, col_up2 = st.columns(2)
@@ -5682,7 +5684,7 @@ elif page == "مطابقة الفواتير":
         with c4:
             bank_claim_col = st.selectbox("عمود رقم المطالبة (البنك)", _bk_cols, key="match_bank_claim_col")
         with c5:
-            bank_amount_col = st.selectbox("عمود إجمالي مبلغ السداد (البنك)", _bk_cols, key="match_bank_amount_col")
+            bank_amount_col = st.selectbox("عمود مبلغ السداد (البنك)", _bk_cols, key="match_bank_amount_col")
 
     tolerance = st.number_input(
         "⚖️ هامش تسامح في المقارنة (لتجاهل فروق التقريب البسيطة)",
@@ -5720,14 +5722,15 @@ elif page == "مطابقة الفواتير":
             errors="coerce"
         ).fillna(0.0)
 
-        # إجمالي كل مطالبة في إجادة + تفاصيل كل سداد فردي (لفحص التطابق لاحقًا)
+        # إجمالي كل مطالبة في إجادة + تفاصيل كل سداد فردي (بمعرفاته — لفحص التطابق لاحقًا)
         ejada_totals = ejada_df.groupby(ejada_claim_col)[ejada_amount_col].sum()
         ejada_details = {
             claim: list(zip(g[ejada_id_col], g[ejada_amount_col]))
             for claim, g in ejada_df.groupby(ejada_claim_col)
         }
 
-        # إجمالي كل مطالبة عند البنك (بنجمعها احتياطيًا لو اتكررت لأي سبب)
+        # إجمالي كل مطالبة عند البنك — بيتجمع تلقائيًا حتى لو المطالبة اتكررت
+        # فيه كذا سطر (مفيش معرف سداد عند البنك أصلاً، فالربط بس برقم المطالبة)
         bank_totals = bank_df.groupby(bank_claim_col)[bank_amount_col].sum()
 
         all_claims = sorted(set(ejada_totals.index) | set(bank_totals.index))
