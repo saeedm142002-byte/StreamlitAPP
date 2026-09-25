@@ -5625,6 +5625,19 @@ elif page == "مطابقة الفواتير":
             with st.expander("🔍 تفاصيل تقنية (Traceback)"):
                 st.code(traceback.format_exc())
 
+    def clean_id_col(series):
+        """
+        تحويل عمود (رقم مطالبة / ID) لنص نظيف دايمًا، حتى لو إكسيل قراه
+        كرقم (int/float) — عشان متتحولش القيمة لصيغة زي '123.0' أو Notation علمي.
+        """
+        def _clean(v):
+            if pd.isna(v):
+                return ""
+            if isinstance(v, float) and v.is_integer():
+                return str(int(v))
+            return str(v).strip()
+        return series.apply(_clean)
+
     def find_matching_subset(payments, target, tol=0.01, max_items=15):
         """
         بيدور على مجموعة (subset) من سدادات إجادة الفردية لنفس المطالبة بحيث
@@ -5709,14 +5722,14 @@ elif page == "مطابقة الفواتير":
         ejada_df = ejada_df.copy()
         bank_df = bank_df.copy()
 
-        ejada_df[ejada_claim_col] = ejada_df[ejada_claim_col].astype(str).str.strip()
-        ejada_df[ejada_id_col] = ejada_df[ejada_id_col].astype(str).str.strip()
+        ejada_df[ejada_claim_col] = clean_id_col(ejada_df[ejada_claim_col])
+        ejada_df[ejada_id_col] = clean_id_col(ejada_df[ejada_id_col])
         ejada_df[ejada_amount_col] = pd.to_numeric(
             ejada_df[ejada_amount_col].astype(str).str.replace(",", "", regex=False).str.strip(),
             errors="coerce"
         ).fillna(0.0)
 
-        bank_df[bank_claim_col] = bank_df[bank_claim_col].astype(str).str.strip()
+        bank_df[bank_claim_col] = clean_id_col(bank_df[bank_claim_col])
         bank_df[bank_amount_col] = pd.to_numeric(
             bank_df[bank_amount_col].astype(str).str.replace(",", "", regex=False).str.strip(),
             errors="coerce"
