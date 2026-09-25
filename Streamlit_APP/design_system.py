@@ -20,6 +20,7 @@ import streamlit as st
 
 _HERE = Path(__file__).resolve().parent
 LOGO_CANDIDATES = ["logo.png", "logo.webp", "logo.jpg", "logo.jpeg", "logo.svg"]
+BG_CANDIDATES = ["bg.jpg", "bg.jpeg", "bg.png", "bg.webp"]
 
 INK = "#1E2A38"          # نص أساسي (كحلي غامق قريب من الأسود، مش أسود خالص)
 MUTED = "#5B6B7C"        # نص ثانوي
@@ -74,11 +75,13 @@ html, body{ background:var(--bg) !important; }
 header[data-testid="stHeader"]{ background:transparent; }
 .main .block-container{ padding-top:1.6rem; padding-bottom:3rem; max-width:1280px; position:relative; z-index:1; }
 
-/* ===== خلفية ثابتة: رسمة موظف بيرد على مكالمة (خفيفة جدًا، من غير أي تشتيت) ===== */
+/* ===== خلفية ثابتة: صورة حقيقية (bg.jpg) + طبقة تعتيم فاتحة تحافظ على وضوح القراءة ===== */
 div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
 .ds-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:var(--bg); }
+.ds-bg-photo{ position:absolute; inset:0; background-size:cover; background-position:center 30%; }
+.ds-bg-overlay{ position:absolute; inset:0; background:linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, var(--bg) 92%); }
 .ds-agent{ position:absolute; bottom:-30px; left:-30px; width:360px; opacity:.07; }
-@media (max-width:900px){ .ds-agent{ display:none; } }
+@media (max-width:900px){ .ds-agent{ display:none; } .ds-bg-photo{ background-position:center 20%; } }
 
 html, body, .stApp, .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2,
 .stApp h3, .stApp h4, .stApp button, .stApp input, .stApp textarea,
@@ -311,6 +314,14 @@ def _find_logo():
     return None
 
 
+def _find_bg():
+    for name in BG_CANDIDATES:
+        p = _HERE / name
+        if p.exists():
+            return p
+    return None
+
+
 def logo_html(logo=None) -> str:
     p = Path(logo) if logo else _find_logo()
     if p and p.exists():
@@ -361,10 +372,23 @@ def inject_design_system(theme: str = "promises", background: str = "plain", bg_
         .replace("__SOFT__", t["soft"])
     )
     st.markdown(css, unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="ds-bg"><div class="ds-agent">{_agent_svg(t["accent"])}</div></div>',
-        unsafe_allow_html=True,
-    )
+
+    bg_path = _find_bg()
+    if bg_path:
+        # صورة حقيقية توضع بجانب design_system.py باسم bg.jpg/bg.png/bg.webp —
+        # بتتغطى بطبقة تعتيم فاتحة عشان تفضل خلفية بس ومتأثرش على وضوح المحتوى.
+        photo_css = f'background-image:url({_data_uri(str(bg_path))})'
+        st.markdown(
+            f'<div class="ds-bg"><div class="ds-bg-photo" style="{photo_css}"></div>'
+            f'<div class="ds-bg-overlay"></div></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        # مفيش صورة خلفية متاحة — رجوع تلقائي للرسمة المرسومة بالكود
+        st.markdown(
+            f'<div class="ds-bg"><div class="ds-agent">{_agent_svg(t["accent"])}</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _e(x) -> str:
