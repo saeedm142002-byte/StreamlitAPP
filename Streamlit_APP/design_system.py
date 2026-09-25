@@ -79,7 +79,7 @@ header[data-testid="stHeader"]{ background:transparent; }
 div[data-testid="stElementContainer"]:has(.ds-bg), .element-container:has(.ds-bg){ height:0 !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
 .ds-bg{ position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; background:var(--bg); }
 .ds-bg-photo{ position:absolute; inset:0; background-size:cover; background-position:center 30%; }
-.ds-bg-overlay{ position:absolute; inset:0; background:linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, var(--bg) 92%); }
+.ds-bg-overlay{ position:absolute; inset:0; background:linear-gradient(180deg, color-mix(in srgb, var(--bg) 45%, transparent) 0%, color-mix(in srgb, var(--bg) 62%, transparent) 100%); }
 .ds-agent{ position:absolute; bottom:-30px; left:-30px; width:360px; opacity:.07; }
 @media (max-width:900px){ .ds-agent{ display:none; } .ds-bg-photo{ background-position:center 20%; } }
 
