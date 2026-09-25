@@ -1775,7 +1775,8 @@ pages = [
     ("التوزيع", "📈"),
     ("النشاط", "⚡"),
    ("التقرير اليومي للسدادات", "⚡"),
-    ("التدوير", "🔄") 
+    ("التدوير", "🔄") ,
+     ("مطابقة الفواتير", "🔄")
     
 ]
 
@@ -5578,3 +5579,315 @@ elif page == "التدوير":
             show_error(e)
     else:
         st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التدوير</div>', unsafe_allow_html=True)
+
+
+
+
+elif page == "مطابقة الفواتير":
+
+    import pandas as pd
+    import numpy as np
+    import traceback
+    from io import BytesIO
+    from itertools import combinations
+
+    page_header("🧾", "مطابقة الفواتير", "مقارنة سدادات إجادة بسدادات البنك/الشركة الأم لكل مطالبة", chips=["مطابقة تلقائية", "كشف الفروقات"])
+
+    def require_columns(df, required_cols, step_name):
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            raise KeyError("STEP::" + step_name + "::MISSING::" + "|".join(missing))
+
+    def show_error(exc):
+        msg = str(exc)
+        if msg.startswith("STEP::"):
+            try:
+                _, step_name, _, cols_part = msg.split("::", 3)
+                cols_list = cols_part.split("|")
+                cols_html = "".join([f"<li><code>{c}</code></li>" for c in cols_list])
+                st.markdown(f"""
+                <div class="error-box">
+                    <div class="error-title">❌ حصل خطأ أثناء تنفيذ خطوة: <code>{step_name}</code></div>
+                    التفاصيل:
+                    <ul>{cols_html}</ul>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.error(f"❌ خطأ غير متوقع: {msg}")
+        else:
+            st.markdown(f"""
+            <div class="error-box">
+                <div class="error-title">❌ حصل خطأ غير متوقع</div>
+                <b>نوع الخطأ:</b> <code>{type(exc).__name__}</code><br>
+                <b>تفاصيل:</b> {msg}
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("🔍 تفاصيل تقنية (Traceback)"):
+                st.code(traceback.format_exc())
+
+    def find_matching_subset(payments, target, tol=0.01, max_items=15):
+        """
+        بيدور على مجموعة (subset) من سدادات إجادة الفردية لنفس المطالبة بحيث
+        مجموعها يساوي قيمة الفرق (target) — عشان نقدر نقول في الملاحظة إن
+        السداد/السدادات دي بالتحديد هي اللي متضافاش عند البنك (سداد محذوف/ناقص).
+        لو عدد السدادات كبير جدًا (> max_items) بنتجاهل الفحص التفصيلي لأسباب أداء.
+        """
+        n = len(payments)
+        if n == 0 or n > max_items:
+            return None
+        for r in range(1, n + 1):
+            for combo in combinations(payments, r):
+                s = sum(p[1] for p in combo)
+                if abs(s - target) <= tol:
+                    return combo
+        return None
+
+    st.markdown("""
+    ارفع **شيت إجادة** (فيه رقم المطالبة، ومعرف كل سداد، ومبلغ كل سداد — المطالبة ممكن تتكرر
+    لو عليها أكتر من سداد)، وشيت **البنك/الشركة الأم** (فيه رقم المطالبة، وإجمالي مبلغ السداد لكل مطالبة).
+    """)
+
+    col_up1, col_up2 = st.columns(2)
+    with col_up1:
+        ejada_file = st.file_uploader("📂 رفع شيت إجادة", type=["xlsx", "xls"], key="match_ejada_uploader")
+    with col_up2:
+        bank_file = st.file_uploader("📂 رفع شيت البنك / الشركة الأم", type=["xlsx", "xls"], key="match_bank_uploader")
+
+    ejada_claim_col = ejada_id_col = ejada_amount_col = None
+    bank_claim_col = bank_amount_col = None
+
+    if ejada_file:
+        try:
+            _ej_preview = pd.read_excel(BytesIO(ejada_file.getvalue()), nrows=0)
+            _ej_cols = list(_ej_preview.columns)
+        except Exception:
+            _ej_cols = []
+        st.markdown("**🏷️ حدد أعمدة شيت إجادة**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ejada_claim_col = st.selectbox("عمود رقم المطالبة (إجادة)", _ej_cols, key="match_ejada_claim_col")
+        with c2:
+            ejada_id_col = st.selectbox("عمود ID السداد (إجادة)", _ej_cols, key="match_ejada_id_col")
+        with c3:
+            ejada_amount_col = st.selectbox("عمود مبلغ السداد (إجادة)", _ej_cols, key="match_ejada_amount_col")
+
+    if bank_file:
+        try:
+            _bk_preview = pd.read_excel(BytesIO(bank_file.getvalue()), nrows=0)
+            _bk_cols = list(_bk_preview.columns)
+        except Exception:
+            _bk_cols = []
+        st.markdown("**🏷️ حدد أعمدة شيت البنك/الشركة الأم**")
+        c4, c5 = st.columns(2)
+        with c4:
+            bank_claim_col = st.selectbox("عمود رقم المطالبة (البنك)", _bk_cols, key="match_bank_claim_col")
+        with c5:
+            bank_amount_col = st.selectbox("عمود إجمالي مبلغ السداد (البنك)", _bk_cols, key="match_bank_amount_col")
+
+    tolerance = st.number_input(
+        "⚖️ هامش تسامح في المقارنة (لتجاهل فروق التقريب البسيطة)",
+        min_value=0.0, value=0.01, step=0.01, key="match_tolerance"
+    )
+
+    @st.cache_data(show_spinner="جاري مطابقة الفواتير...")
+    def reconcile_claims(ejada_bytes, bank_bytes, ejada_claim_col, ejada_id_col, ejada_amount_col,
+                          bank_claim_col, bank_amount_col, tol):
+        try:
+            ejada_df = pd.read_excel(BytesIO(ejada_bytes))
+        except Exception as e:
+            raise KeyError(f"STEP::قراءة شيت إجادة::MISSING::{e}")
+        try:
+            bank_df = pd.read_excel(BytesIO(bank_bytes))
+        except Exception as e:
+            raise KeyError(f"STEP::قراءة شيت البنك::MISSING::{e}")
+
+        require_columns(ejada_df, [ejada_claim_col, ejada_id_col, ejada_amount_col], "التحقق من أعمدة إجادة")
+        require_columns(bank_df, [bank_claim_col, bank_amount_col], "التحقق من أعمدة البنك")
+
+        ejada_df = ejada_df.copy()
+        bank_df = bank_df.copy()
+
+        ejada_df[ejada_claim_col] = ejada_df[ejada_claim_col].astype(str).str.strip()
+        ejada_df[ejada_id_col] = ejada_df[ejada_id_col].astype(str).str.strip()
+        ejada_df[ejada_amount_col] = pd.to_numeric(
+            ejada_df[ejada_amount_col].astype(str).str.replace(",", "", regex=False).str.strip(),
+            errors="coerce"
+        ).fillna(0.0)
+
+        bank_df[bank_claim_col] = bank_df[bank_claim_col].astype(str).str.strip()
+        bank_df[bank_amount_col] = pd.to_numeric(
+            bank_df[bank_amount_col].astype(str).str.replace(",", "", regex=False).str.strip(),
+            errors="coerce"
+        ).fillna(0.0)
+
+        # إجمالي كل مطالبة في إجادة + تفاصيل كل سداد فردي (لفحص التطابق لاحقًا)
+        ejada_totals = ejada_df.groupby(ejada_claim_col)[ejada_amount_col].sum()
+        ejada_details = {
+            claim: list(zip(g[ejada_id_col], g[ejada_amount_col]))
+            for claim, g in ejada_df.groupby(ejada_claim_col)
+        }
+
+        # إجمالي كل مطالبة عند البنك (بنجمعها احتياطيًا لو اتكررت لأي سبب)
+        bank_totals = bank_df.groupby(bank_claim_col)[bank_amount_col].sum()
+
+        all_claims = sorted(set(ejada_totals.index) | set(bank_totals.index))
+
+        missing_rows = []       # إجادة عندها زيادة عن البنك
+        add_existing_rows = []  # البنك عنده زيادة عن إجادة، والمطالبة موجودة في إجادة
+        add_new_rows = []       # البنك فيه مطالبة مش موجودة في إجادة خالص
+
+        for claim in all_claims:
+            in_bank = claim in bank_totals.index
+            in_ejada = claim in ejada_totals.index
+            ej_amount = float(ejada_totals.get(claim, 0.0))
+            bk_amount = float(bank_totals.get(claim, 0.0))
+            diff = ej_amount - bk_amount
+
+            if diff > tol:
+                payments = ejada_details.get(claim, [])
+                match = find_matching_subset(payments, diff, tol=tol)
+                if not in_bank:
+                    note = "المطالبة غير موجودة في ملف البنك/الشركة الأم إطلاقًا"
+                elif match is not None:
+                    ids = "، ".join(str(p[0]) for p in match)
+                    note = f"يبدو أن سداد/سدادات بمعرف: {ids} لم تُضاف ضمن سداد البنك (سداد محذوف/ناقص عند البنك)"
+                else:
+                    note = "فرق مبلغ فقط — لا يطابق أي سداد فردي أو مجموعة سدادات بعينها"
+                missing_rows.append({
+                    "رقم المطالبة": claim,
+                    "إجمالي المبلغ في إجادة": ej_amount,
+                    "المبلغ في البنك/الشركة الأم": bk_amount,
+                    "المبلغ الزائد (الفرق)": diff,
+                    "ملاحظات": note,
+                })
+            elif diff < -tol:
+                if in_ejada:
+                    add_existing_rows.append({
+                        "رقم المطالبة": claim,
+                        "المبلغ في إجادة (قبل)": ej_amount,
+                        "المبلغ في البنك/الشركة الأم": bk_amount,
+                        "المبلغ المطلوب إضافته": -diff,
+                        "المبلغ في إجادة (بعد الإضافة)": bk_amount,
+                    })
+                else:
+                    add_new_rows.append({
+                        "رقم المطالبة": claim,
+                        "المبلغ المطلوب إضافته (كامل)": bk_amount,
+                        "ملاحظات": "المطالبة غير موجودة في إجادة إطلاقًا — تحتاج إضافة كاملة",
+                    })
+
+        missing_df = pd.DataFrame(missing_rows)
+        add_existing_df = pd.DataFrame(add_existing_rows)
+        add_new_df = pd.DataFrame(add_new_rows)
+
+        meta = {
+            "total_claims": len(all_claims),
+            "matched_claims": len(all_claims) - len(missing_rows) - len(add_existing_rows) - len(add_new_rows),
+            "missing_count": len(missing_rows),
+            "add_existing_count": len(add_existing_rows),
+            "add_new_count": len(add_new_rows),
+            "missing_total": missing_df["المبلغ الزائد (الفرق)"].sum() if not missing_df.empty else 0.0,
+            "add_existing_total": add_existing_df["المبلغ المطلوب إضافته"].sum() if not add_existing_df.empty else 0.0,
+            "add_new_total": add_new_df["المبلغ المطلوب إضافته (كامل)"].sum() if not add_new_df.empty else 0.0,
+        }
+
+        return missing_df, add_existing_df, add_new_df, meta
+
+    if ejada_file and bank_file and ejada_claim_col and ejada_id_col and ejada_amount_col and bank_claim_col and bank_amount_col:
+        try:
+            missing_df, add_existing_df, add_new_df, meta = reconcile_claims(
+                ejada_file.getvalue(), bank_file.getvalue(),
+                ejada_claim_col, ejada_id_col, ejada_amount_col,
+                bank_claim_col, bank_amount_col, tolerance
+            )
+
+            st.markdown(f"""
+            <div class="kpi-grid-3">
+                <div class="kpi-card">
+                    <div class="kpi-icon">🧾</div>
+                    <div class="kpi-label">إجمالي المطالبات</div>
+                    <div class="kpi-value">{meta['total_claims']:,}</div>
+                    <div class="kpi-sub">في إجادة أو البنك أو الاتنين</div>
+                </div>
+                <div class="kpi-card ok">
+                    <div class="kpi-icon">✅</div>
+                    <div class="kpi-label">مطالبات متطابقة</div>
+                    <div class="kpi-value">{meta['matched_claims']:,}</div>
+                    <div class="kpi-sub">داخل هامش التسامح المحدد</div>
+                </div>
+                <div class="kpi-card info">
+                    <div class="kpi-icon">⚠️</div>
+                    <div class="kpi-label">إجمالي مطالبات فيها فرق</div>
+                    <div class="kpi-value">{meta['missing_count'] + meta['add_existing_count'] + meta['add_new_count']:,}</div>
+                    <div class="kpi-sub">محتاجة مراجعة أو تعديل</div>
+                </div>
+            </div>
+            <br>
+            <div class="kpi-grid-3">
+                <div class="kpi-card">
+                    <div class="kpi-icon">🔻</div>
+                    <div class="kpi-label">زيادة عند إجادة (Missing)</div>
+                    <div class="kpi-value">{meta['missing_count']:,}</div>
+                    <div class="kpi-sub">بمبلغ إجمالي {meta['missing_total']:,.0f}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon">➕</div>
+                    <div class="kpi-label">مطالبات محتاجة تعديل مبلغ في إجادة</div>
+                    <div class="kpi-value">{meta['add_existing_count']:,}</div>
+                    <div class="kpi-sub">بمبلغ إضافة إجمالي {meta['add_existing_total']:,.0f}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon">🆕</div>
+                    <div class="kpi-label">مطالبات غير موجودة في إجادة خالص</div>
+                    <div class="kpi-value">{meta['add_new_count']:,}</div>
+                    <div class="kpi-sub">بمبلغ إجمالي {meta['add_new_total']:,.0f}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                (missing_df if not missing_df.empty else pd.DataFrame(
+                    columns=["رقم المطالبة", "إجمالي المبلغ في إجادة", "المبلغ في البنك/الشركة الأم", "المبلغ الزائد (الفرق)", "ملاحظات"]
+                )).to_excel(writer, index=False, sheet_name="missing")
+                (add_existing_df if not add_existing_df.empty else pd.DataFrame(
+                    columns=["رقم المطالبة", "المبلغ في إجادة (قبل)", "المبلغ في البنك/الشركة الأم", "المبلغ المطلوب إضافته", "المبلغ في إجادة (بعد الإضافة)"]
+                )).to_excel(writer, index=False, sheet_name="زيادات لاجادة")
+                (add_new_df if not add_new_df.empty else pd.DataFrame(
+                    columns=["رقم المطالبة", "المبلغ المطلوب إضافته (كامل)", "ملاحظات"]
+                )).to_excel(writer, index=False, sheet_name="مطالبات غير موجودة في إجادة")
+            output.seek(0)
+
+            st.download_button(
+                "📥 تحميل ملف المطابقة (3 شيتات)",
+                data=output,
+                file_name="مطابقة_الفواتير.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            tab1, tab2, tab3 = st.tabs(["🔻 Missing (زيادة عند إجادة)", "➕ زيادات لاجادة", "🆕 غير موجودة في إجادة خالص"])
+            with tab1:
+                if not missing_df.empty:
+                    st.dataframe(missing_df, use_container_width=True, hide_index=True)
+                else:
+                    st.markdown('<div class="empty-state">لا يوجد فروقات من النوع ده 🎉</div>', unsafe_allow_html=True)
+            with tab2:
+                if not add_existing_df.empty:
+                    st.dataframe(add_existing_df, use_container_width=True, hide_index=True)
+                else:
+                    st.markdown('<div class="empty-state">لا يوجد فروقات من النوع ده 🎉</div>', unsafe_allow_html=True)
+            with tab3:
+                if not add_new_df.empty:
+                    st.dataframe(add_new_df, use_container_width=True, hide_index=True)
+                else:
+                    st.markdown('<div class="empty-state">لا يوجد مطالبات من النوع ده 🎉</div>', unsafe_allow_html=True)
+
+        except KeyError as e:
+            show_error(e)
+        except Exception as e:
+            show_error(e)
+    else:
+        st.markdown('<div class="empty-state">⬆️ ارفع الملفين وحدد الأعمدة عشان تبدأ المطابقة</div>', unsafe_allow_html=True)
