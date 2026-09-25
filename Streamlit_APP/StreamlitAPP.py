@@ -1790,7 +1790,7 @@ pages = [
 
 with st.sidebar:
 
-     theme_switcher()          # ← الزرار الجديد، فوق كل حاجة
+    theme_switcher()          # ← الزرار الجديد، فوق كل حاجة
 
     sidebar_brand("لوحة التحكم", "إدارة المحافظ والتحصيل")
 
