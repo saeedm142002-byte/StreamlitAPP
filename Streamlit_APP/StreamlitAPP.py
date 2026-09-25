@@ -23,11 +23,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import streamlit as st
 
 
-from design_system import (
-    inject_design_system, page_header, kpi_row, section_title, card,
-    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
-    GREEN, GOLD, RED, BLUE, VIOLET, TEAL,
-)
+
 
 
 from design_system import (
