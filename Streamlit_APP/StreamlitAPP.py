@@ -30,6 +30,14 @@ from design_system import (
 )
 
 
+from design_system import (
+    inject_design_system, page_header, kpi_row, section_title, card,
+    empty_state, info_box, style_fig, sidebar_brand, PAGE_THEMES,
+    GREEN, GOLD, RED, BLUE, VIOLET, TEAL,
+    theme_switcher,   # ← جديد
+)
+
+
 
 
 import io
@@ -1782,7 +1790,7 @@ pages = [
 
 with st.sidebar:
 
-
+     theme_switcher()          # ← الزرار الجديد، فوق كل حاجة
 
     sidebar_brand("لوحة التحكم", "إدارة المحافظ والتحصيل")
 
