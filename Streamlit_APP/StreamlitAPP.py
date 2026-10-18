@@ -1828,14 +1828,13 @@ page = st.session_state.page
 # PAGE 1 - الوعود القائمة
 # ======================
 if page == "الوعود القائمة و المكسورة":
+    import re
     import pandas as pd
     import plotly.express as px
     from io import BytesIO
     import traceback
 
     page_header("🟢", "الوعود القائمة / الوعود المكسورة", "تتبع الوعود بالسداد ...", chips=['حدد الفلترة ثم اضغط "عمل الوعود"'])
-
-  
 
     # ============================================================
     # 🛠️ أدوات مساعدة للتحقق من الأعمدة وعرض الأخطاء بدقة
@@ -1887,8 +1886,15 @@ if page == "الوعود القائمة و المكسورة":
         type=["xlsx", "xls"]
     )
 
+    promises_file = None
+    if portfolio_type == "SNB":
+        promises_file = st.file_uploader(
+            "رفع ملف الوعود",
+            type=["csv", "xlsx", "xls"]
+        )
+
     # ============================================================
-    # 1) قراءة وتنظيف الملف فقط (بدون فلترة الوعود) - Cached
+    # 1) NPL&Dpd60 — قراءة وتنظيف الملف فقط (بدون فلترة الوعود) - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري قراءة الملف...")
     def load_raw(file_bytes, portfolio_type_):
@@ -1927,7 +1933,7 @@ if page == "الوعود القائمة و المكسورة":
         return df
 
     # ============================================================
-    # 2) تطبيق فلاتر الوعود (بعد ما المستخدم يحدد اختياراته) - Cached
+    # 2) NPL&Dpd60 — تطبيق فلاتر الوعود - Cached
     # ============================================================
     @st.cache_data(show_spinner="جاري عمل الوعود...")
     def process_portfolio(df, portfolio_type_, excluded_teams, excluded_salespersons, excluded_status):
@@ -1982,19 +1988,168 @@ if page == "الوعود القائمة و المكسورة":
 
         return current.reset_index(drop=True), broken.reset_index(drop=True)
 
-    if portfolio_file:
+    # --- SNB_FUNCS_START ---
+    # ============================================================
+    # 3) SNB — أدوات + قراءة ملف المحفظة وملف الوعود + معالجة الوعود
+    # ============================================================
+    SNB_ALLOWED_SUB_STATES = [
+        "تم ابلاغ العميل - اتصال",
+        "جاري اقناع العميل",
+        "جدولة",
+        "خارج المملكة نهائياُ",
+        "رافض السداد",
+        "سداد جزئي",
+        "سداد كامل",
+        "سداد محكمة",
+        "سدد كامل المديونية",
+        "سدد كامل المديونية بخصم",
+        "سدلد بعرض",
+        "طلب مهله لسداد",
+        "قيد التفاوض مع الورثة",
+        "لا يوجد رد",
+        "لا يوجد رد مع التكرار",
+        "متوفي",
+        "مسدد قبل الاسناد",
+        "معترض على المديونية",
+        "مغلق",
+        "مفصول من الخدمة",
+        "مماطل",
+        "واعد بالسداد",
+        "وعد سداد بعرض",
+        "وعد سداد جزئي",
+        "وعد سداد كامل",
+    ]
+
+    def norm_ar(x):
+        # توحيد النص العربي للمقارنة فقط (تشكيل / همزات / ى ي) عشان الاختلافات الإملائية الصغيرة متضيعش صفوف
+        if pd.isna(x):
+            return pd.NA
+        s = str(x)
+        s = re.sub(r"[\u064B-\u0652\u0670\u0640]", "", s)
+        s = re.sub("[أإآ]", "ا", s)
+        s = s.replace("ى", "ي")
+        return re.sub(r"\s+", " ", s).strip()
+
+    def clean_key(series):
+        # بيشيل ="..." و المسافات و .0 من الهوية / رقم الحساب
+        s = series.astype(str).str.replace(r'[=\"\s]', "", regex=True)
+        s = s.str.replace(r"\.0$", "", regex=True)
+        return s.replace(["nan", "None", "NaT", ""], pd.NA)
+
+    @st.cache_data(show_spinner="جاري قراءة ملف المحفظة...")
+    def load_snb_portfolio(file_bytes):
         try:
-            file_bytes = portfolio_file.getvalue()
-            df_raw = load_raw(file_bytes, portfolio_type)
+            df = pd.read_excel(BytesIO(file_bytes), dtype=str)
+        except Exception as e:
+            raise KeyError(f"STEP::قراءة ملف المحفظة::MISSING::{e}")
+        require_columns(df, ["رقم الهوية", "رقم الحساب", "الموظف"], "التحقق من أعمدة المحفظة (SNB)")
+        df["رقم الهوية"] = clean_key(df["رقم الهوية"])
+        df["رقم الحساب"] = clean_key(df["رقم الحساب"])
+        df["الموظف"] = df["الموظف"].astype(str).str.strip().replace(["nan", "None", ""], pd.NA)
+        return df
 
-            # ==========================================
-            # 🎛️ لوحة الفلاتر اليدوية (قبل عمل الوعود)
-            # ==========================================
-            all_sales_teams = sorted(df_raw["Sales Team"].dropna().unique().tolist())
-            all_salespersons = sorted(df_raw["Salesperson"].dropna().unique().tolist())
+    @st.cache_data(show_spinner="جاري قراءة ملف الوعود...")
+    def load_snb_promises(file_bytes, file_name):
+        try:
+            if file_name.lower().endswith(".csv"):
+                df = None
+                for enc in ("utf-8-sig", "utf-8", "cp1256"):
+                    try:
+                        df = pd.read_csv(BytesIO(file_bytes), dtype=str, encoding=enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                if df is None:
+                    raise ValueError("تعذر قراءة ترميز ملف الـ CSV")
+            else:
+                df = pd.read_excel(BytesIO(file_bytes), dtype=str)
+        except Exception as e:
+            raise KeyError(f"STEP::قراءة ملف الوعود::MISSING::{e}")
 
-            status_options = []
+        require_columns(
+            df,
+            ["تاريخ وعد السداد", "آخر متابعة على العميل", "الهوية",
+             "الحالة الفرعية", "رقم الحساب", "الموظف"],
+            "التحقق من أعمدة ملف الوعود (SNB)"
+        )
+
+        df["الهوية"] = clean_key(df["الهوية"])
+        df["رقم الحساب"] = clean_key(df["رقم الحساب"])
+        df["الحالة الفرعية"] = df["الحالة الفرعية"].astype(str).str.strip().replace(["nan", "None", ""], pd.NA)
+        df["الموظف"] = df["الموظف"].astype(str).str.strip().replace(["nan", "None", ""], pd.NA)
+
+        if "مبلغ المديونية" in df.columns:
+            df["مبلغ المديونية"] = pd.to_numeric(
+                df["مبلغ المديونية"].astype(str).str.replace(r"[,\s=\"]", "", regex=True),
+                errors="coerce"
+            )
+
+        df["تاريخ وعد السداد"] = pd.to_datetime(df["تاريخ وعد السداد"], errors="coerce").dt.normalize()
+        df["آخر متابعة على العميل"] = pd.to_datetime(df["آخر متابعة على العميل"], errors="coerce").dt.normalize()
+        return df
+
+    @st.cache_data(show_spinner="جاري عمل الوعود...")
+    def process_snb(portfolio, promises):
+        today = pd.Timestamp.today().normalize()
+
+        portfolio_ids = set(portfolio["رقم الهوية"].dropna().unique())
+        allowed_norm = {norm_ar(s) for s in SNB_ALLOWED_SUB_STATES}
+
+        # الموظف لكل حساب من المحفظة (أول ظهور للحساب)
+        emp_map = (
+            portfolio.dropna(subset=["رقم الحساب"])
+            .drop_duplicates(subset="رقم الحساب")
+            .set_index("رقم الحساب")["الموظف"]
+        )
+
+        def common_steps(d):
+            d = d.copy()
+            # 3) الهوية لازم تكون موجودة في المحفظة (رقم الهوية) - غير الموجود يتمسح
+            d = d[d["الهوية"].isin(portfolio_ids)]
+            # 4) الحالات الفرعية المسموحة بس
+            d = d[d["الحالة الفرعية"].map(norm_ar).isin(allowed_norm)]
+            # 5) تعديل قيم عمود الموظف من المحفظة بالمطابقة على رقم الحساب (بدون عمود جديد)
+            new_emp = d["رقم الحساب"].map(emp_map)
+            d["الموظف"] = new_emp.where(new_emp.notna(), d["الموظف"])
+            # 6) إزالة التكرار على الهوية
+            d = d.drop_duplicates(subset="الهوية", keep="first")
+            return d
+
+        # ---------------- الوعود القائمة ----------------
+        current = promises[promises["تاريخ وعد السداد"] == today]               # 1) تاريخ النهاردة بس
+        current = current[current["آخر متابعة على العميل"] != today]            # 2) شيل اللي آخر متابعة له النهاردة
+        current = common_steps(current)
+
+        # ---------------- الوعود المكسورة ----------------
+        broken = promises[promises["تاريخ وعد السداد"] < today]
+        broken = broken[broken["آخر متابعة على العميل"].notna()]
+        broken = broken[broken["آخر متابعة على العميل"] < broken["تاريخ وعد السداد"]]
+        broken = common_steps(broken)
+
+        # عمود عدد ايام ترحيل الوعد (النهاردة - تاريخ وعد السداد) جنب تاريخ وعد السداد
+        pos = broken.columns.get_loc("تاريخ وعد السداد") + 1
+        broken.insert(pos, "عدد ايام ترحيل الوعد", (today - broken["تاريخ وعد السداد"]).dt.days)
+        broken = broken[broken["عدد ايام ترحيل الوعد"] > 0]
+
+        return current.reset_index(drop=True), broken.reset_index(drop=True)
+    # --- SNB_FUNCS_END ---
+
+    files_ready = bool(portfolio_file) and (portfolio_type != "SNB" or bool(promises_file))
+
+    if files_ready:
+        try:
+            excluded_teams, excluded_salespersons, excluded_status = [], [], []
+
             if portfolio_type == "NPL&Dpd60":
+                file_bytes = portfolio_file.getvalue()
+                df_raw = load_raw(file_bytes, portfolio_type)
+
+                # ==========================================
+                # 🎛️ لوحة الفلاتر اليدوية (قبل عمل الوعود)
+                # ==========================================
+                all_sales_teams = sorted(df_raw["Sales Team"].dropna().unique().tolist())
+                all_salespersons = sorted(df_raw["Salesperson"].dropna().unique().tolist())
+
                 require_columns(df_raw, ["حالة المعالجة - التمويل"], "فلتر حالة المعالجة - التمويل")
                 has_empty_status = df_raw["حالة المعالجة - التمويل"].isna().any()
                 status_options = sorted([
@@ -2004,29 +2159,24 @@ if page == "الوعود القائمة و المكسورة":
                 if has_empty_status:
                     status_options = ["(فارغ / غير محدد)"] + status_options
 
-            st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ حدد الفلترة قبل عمل الوعود</div>', unsafe_allow_html=True)
+                st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ حدد الفلترة قبل عمل الوعود</div>', unsafe_allow_html=True)
 
-            if portfolio_type == "NPL&Dpd60":
                 f_col1, f_col2, f_col3 = st.columns(3)
-            else:
-                f_col1, f_col2 = st.columns(2)
 
-            with f_col1:
-                excluded_teams = st.multiselect(
-                    "استبعاد Sales Team",
-                    options=all_sales_teams, default=[],
-                    help="اختار الـ Sales Team اللي عايز تشيلها من النتيجة - سيبها فاضية عشان محدش يتشال",
-                    key="promises_team_filter"
-                )
-            with f_col2:
-                excluded_salespersons = st.multiselect(
-                    "استبعاد Salesperson",
-                    options=all_salespersons, default=[],
-                    help="اختار الموظفين اللي عايز تشيلهم من النتيجة - سيبها فاضية عشان محدش يتشال",
-                    key="promises_salesperson_filter"
-                )
-            excluded_status = []
-            if portfolio_type == "NPL&Dpd60":
+                with f_col1:
+                    excluded_teams = st.multiselect(
+                        "استبعاد Sales Team",
+                        options=all_sales_teams, default=[],
+                        help="اختار الـ Sales Team اللي عايز تشيلها من النتيجة - سيبها فاضية عشان محدش يتشال",
+                        key="promises_team_filter"
+                    )
+                with f_col2:
+                    excluded_salespersons = st.multiselect(
+                        "استبعاد Salesperson",
+                        options=all_salespersons, default=[],
+                        help="اختار الموظفين اللي عايز تشيلهم من النتيجة - سيبها فاضية عشان محدش يتشال",
+                        key="promises_salesperson_filter"
+                    )
                 with f_col3:
                     excluded_status = st.multiselect(
                         "استبعاد حالة المعالجة - التمويل",
@@ -2035,20 +2185,32 @@ if page == "الوعود القائمة و المكسورة":
                         key="promises_status_filter"
                     )
 
-            st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                current_signature = (
+                    portfolio_file.name, portfolio_file.size, portfolio_type,
+                    tuple(sorted(excluded_teams)), tuple(sorted(excluded_salespersons)),
+                    tuple(sorted(excluded_status))
+                )
+            else:
+                # ---------------- مسار SNB ----------------
+                snb_portfolio = load_snb_portfolio(portfolio_file.getvalue())
+                snb_promises = load_snb_promises(promises_file.getvalue(), promises_file.name)
+
+                current_signature = (
+                    portfolio_file.name, portfolio_file.size,
+                    promises_file.name, promises_file.size, portfolio_type
+                )
 
             generate_clicked = st.button("🚀 عمل الوعود", use_container_width=True, type="primary")
 
-            current_signature = (
-                portfolio_file.name, portfolio_file.size, portfolio_type,
-                tuple(sorted(excluded_teams)), tuple(sorted(excluded_salespersons)),
-                tuple(sorted(excluded_status))
-            )
-
             if generate_clicked:
-                current, broken = process_portfolio(
-                    df_raw, portfolio_type, excluded_teams, excluded_salespersons, excluded_status
-                )
+                if portfolio_type == "NPL&Dpd60":
+                    current, broken = process_portfolio(
+                        df_raw, portfolio_type, excluded_teams, excluded_salespersons, excluded_status
+                    )
+                else:
+                    current, broken = process_snb(snb_portfolio, snb_promises)
                 st.session_state["promises_current"] = current
                 st.session_state["promises_broken"] = broken
                 st.session_state["promises_signature"] = current_signature
@@ -2069,8 +2231,6 @@ if page == "الوعود القائمة و المكسورة":
             else:
                 current = st.session_state["promises_current"]
                 broken = st.session_state["promises_broken"]
-
-
 
                 # ==========================================
                 # ملفات التحميل (Excel)
@@ -2106,15 +2266,22 @@ if page == "الوعود القائمة و المكسورة":
                 # ============================================================
                 st.markdown('<div class="section-title">📊 داشبورد الوعود</div>', unsafe_allow_html=True)
 
-                supervisor_col = "ملاحظات-التمويل" if portfolio_type == "NPL&Dpd60" else "Sales Team"
-                required_report_cols = [supervisor_col, "Salesperson", "Net Amount", "Account Number"]
+                # أسماء الأعمدة حسب المسار
+                if portfolio_type == "NPL&Dpd60":
+                    supervisor_col = "ملاحظات-التمويل"
+                    SP_COL, AMT_COL, ACC_COL = "Salesperson", "Net Amount", "Account Number"
+                else:
+                    supervisor_col = "المشرف"
+                    SP_COL, AMT_COL, ACC_COL = "الموظف", "مبلغ المديونية", "رقم الحساب"
+
+                required_report_cols = [supervisor_col, SP_COL, AMT_COL, ACC_COL]
                 require_columns(current, required_report_cols, "بناء قسم الداشبورد")
 
                 all_supervisors = sorted(
                     pd.concat([current[supervisor_col], broken[supervisor_col]]).dropna().unique().tolist()
                 )
                 all_dashboard_salespersons = sorted(
-                    pd.concat([current["Salesperson"], broken["Salesperson"]]).dropna().unique().tolist()
+                    pd.concat([current[SP_COL], broken[SP_COL]]).dropna().unique().tolist()
                 )
 
                 st.markdown('<div class="filter-panel"><div class="filter-panel-title">🎛️ فلاتر الداشبورد</div>', unsafe_allow_html=True)
@@ -2136,7 +2303,7 @@ if page == "الوعود القائمة و المكسورة":
                     if selected_supervisors:
                         out = out[out[supervisor_col].isin(selected_supervisors)]
                     if selected_dashboard_salespersons:
-                        out = out[out["Salesperson"].isin(selected_dashboard_salespersons)]
+                        out = out[out[SP_COL].isin(selected_dashboard_salespersons)]
                     return out
 
                 current_f = apply_dashboard_filters(current)
@@ -2161,13 +2328,13 @@ if page == "الوعود القائمة و المكسورة":
                         sup_count = 0
                         sup_extra = 0.0
 
-                        emp_amount = sup_group.groupby("Salesperson", dropna=False)["Net Amount"].sum()
-                        emp_count = sup_group.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                        emp_amount = sup_group.groupby(SP_COL, dropna=False)[AMT_COL].sum()
+                        emp_count = sup_group.groupby(SP_COL, dropna=False)[ACC_COL].nunique()
                         if extra_col:
                             if extra_agg == "sum":
-                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].sum()
+                                emp_extra = sup_group.groupby(SP_COL, dropna=False)[extra_col].sum()
                             else:
-                                emp_extra = sup_group.groupby("Salesperson", dropna=False)[extra_col].mean()
+                                emp_extra = sup_group.groupby(SP_COL, dropna=False)[extra_col].mean()
 
                         for salesperson in emp_amount.sort_values(ascending=False).index:
                             amount_val = float(emp_amount.get(salesperson, 0))
@@ -2298,13 +2465,13 @@ if page == "الوعود القائمة و المكسورة":
                 with chart_col1:
                     st.markdown('<div class="chart-card"><div class="chart-card-title">مبلغ المديونية لكل مشرف (قائمة مقابل مكسورة)</div>', unsafe_allow_html=True)
                     sup_amount_current = (
-                        current_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
-                        .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
+                        current_f.groupby(supervisor_col, dropna=False)[AMT_COL].sum()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", AMT_COL: "مبلغ المديونية"})
                     )
                     sup_amount_current["النوع"] = "قائمة"
                     sup_amount_broken = (
-                        broken_f.groupby(supervisor_col, dropna=False)["Net Amount"].sum()
-                        .reset_index().rename(columns={supervisor_col: "المشرف", "Net Amount": "مبلغ المديونية"})
+                        broken_f.groupby(supervisor_col, dropna=False)[AMT_COL].sum()
+                        .reset_index().rename(columns={supervisor_col: "المشرف", AMT_COL: "مبلغ المديونية"})
                     )
                     sup_amount_broken["النوع"] = "مكسورة"
                     sup_amount_combined = pd.concat([sup_amount_current, sup_amount_broken], ignore_index=True)
@@ -2341,13 +2508,13 @@ if page == "الوعود القائمة و المكسورة":
 
                 st.markdown('<div class="chart-card"><div class="chart-card-title">أعلى 15 موظف بعدد الحسابات (الوعود المكسورة)</div>', unsafe_allow_html=True)
                 emp_count_broken = (
-                    broken_f.groupby("Salesperson", dropna=False)["Account Number"].nunique()
+                    broken_f.groupby(SP_COL, dropna=False)[ACC_COL].nunique()
                     .reset_index(name="عدد الحسابات")
                     .sort_values("عدد الحسابات", ascending=False).head(15)
                 )
                 if not emp_count_broken.empty:
                     fig2 = px.bar(
-                        emp_count_broken, x="Salesperson", y="عدد الحسابات", text="عدد الحسابات",
+                        emp_count_broken, x=SP_COL, y="عدد الحسابات", text="عدد الحسابات",
                         color_discrete_sequence=[SNB_RED], template="plotly_white"
                     )
                     fig2.update_traces(texttemplate="<b>%{text}</b>", textposition="outside", textfont=LABEL_FONT)
@@ -2361,7 +2528,10 @@ if page == "الوعود القائمة و المكسورة":
         except Exception as e:
             show_error(e)
     else:
-        st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التحليل</div>', unsafe_allow_html=True)
+        if portfolio_type == "SNB":
+            st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة وملف الوعود عشان يبدأ التحليل</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-state">⬆️ ارفع ملف المحفظة عشان يبدأ التحليل</div>', unsafe_allow_html=True)
 # ======================
 # PAGE 2 - الوعود المكسورة
 # ======================
