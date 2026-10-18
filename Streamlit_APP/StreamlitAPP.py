@@ -2020,6 +2020,9 @@ if page == "الوعود القائمة و المكسورة":
         "وعد سداد كامل",
     ]
 
+    # الحالات الرئيسية اللي لو ظهرت عند العميل في المحفظة كلها يتشال من تقرير «بدون تاريخ وعد»
+    NODATE_EXCLUDE_MAIN_STATES = ["تم السداد"]
+
     def norm_ar(x):
         # توحيد النص العربي للمقارنة فقط (تشكيل / همزات / ى ي) عشان الاختلافات الإملائية الصغيرة متضيعش صفوف
         if pd.isna(x):
@@ -2042,10 +2045,18 @@ if page == "الوعود القائمة و المكسورة":
             df = pd.read_excel(BytesIO(file_bytes), dtype=str)
         except Exception as e:
             raise KeyError(f"STEP::قراءة ملف المحفظة::MISSING::{e}")
-        require_columns(df, ["رقم الهوية", "رقم الحساب", "الموظف"], "التحقق من أعمدة المحفظة (SNB)")
+        require_columns(df, ["رقم الهوية", "رقم الحساب", "الموظف", "الحالة الرئيسية"], "التحقق من أعمدة المحفظة (SNB)")
         df["رقم الهوية"] = clean_key(df["رقم الهوية"])
         df["رقم الحساب"] = clean_key(df["رقم الحساب"])
         df["الموظف"] = df["الموظف"].astype(str).str.strip().replace(["nan", "None", ""], pd.NA)
+        for col in ["الحالة الرئيسية", "الحالة الفرعية"]:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip().replace(["nan", "None", ""], pd.NA)
+        if "مبلغ المديونية" in df.columns:
+            df["مبلغ المديونية"] = pd.to_numeric(
+                df["مبلغ المديونية"].astype(str).str.replace(r"[,\s=\"]", "", regex=True),
+                errors="coerce"
+            )
         return df
 
     @st.cache_data(show_spinner="جاري قراءة ملف الوعود...")
@@ -2141,7 +2152,21 @@ if page == "الوعود القائمة و المكسورة":
         broken.insert(pos, "عدد ايام ترحيل الوعد", (today - broken["تاريخ وعد السداد"]).dt.days)
         broken = broken[broken["عدد ايام ترحيل الوعد"] > 0]
 
-        return current.reset_index(drop=True), broken.reset_index(drop=True)
+        # ---------------- تقرير وعود ليس لديها تاريخ وعد ----------------
+        # 1) المحفظة: الحالة الرئيسية = واعد بالسداد
+        nodate = portfolio[portfolio["الحالة الرئيسية"].map(norm_ar) == norm_ar("واعد بالسداد")]
+        # 2) شيل الهويات الموجودة في شيت الوعود و سيب اللي مش موجود بس
+        promises_ids = set(promises["الهوية"].dropna().unique())
+        nodate = nodate[nodate["رقم الهوية"].notna() & ~nodate["رقم الهوية"].isin(promises_ids)]
+        # 3) إزالة التكرار على رقم الهوية
+        nodate = nodate.drop_duplicates(subset="رقم الهوية", keep="first")
+        # 4) شيل أي عميل ليه في المحفظة كلها (الحالة الرئيسية) حالة «تم السداد»
+        excl_norm = {norm_ar(x) for x in NODATE_EXCLUDE_MAIN_STATES}
+        paid_mask = portfolio["الحالة الرئيسية"].map(norm_ar).isin(excl_norm)
+        paid_ids = set(portfolio.loc[paid_mask, "رقم الهوية"].dropna().unique())
+        nodate = nodate[~nodate["رقم الهوية"].isin(paid_ids)]
+
+        return current.reset_index(drop=True), broken.reset_index(drop=True), nodate.reset_index(drop=True)
     # --- SNB_FUNCS_END ---
 
     files_ready = bool(portfolio_file) and (portfolio_type != "SNB" or bool(promises_file))
@@ -2219,10 +2244,12 @@ if page == "الوعود القائمة و المكسورة":
                     current, broken = process_portfolio(
                         df_raw, portfolio_type, excluded_teams, excluded_salespersons, excluded_status
                     )
+                    nodate = None
                 else:
-                    current, broken = process_snb(snb_portfolio, snb_promises)
+                    current, broken, nodate = process_snb(snb_portfolio, snb_promises)
                 st.session_state["promises_current"] = current
                 st.session_state["promises_broken"] = broken
+                st.session_state["promises_nodate"] = nodate
                 st.session_state["promises_signature"] = current_signature
 
             has_results = "promises_current" in st.session_state
@@ -2241,6 +2268,7 @@ if page == "الوعود القائمة و المكسورة":
             else:
                 current = st.session_state["promises_current"]
                 broken = st.session_state["promises_broken"]
+                nodate = st.session_state.get("promises_nodate")
 
                 # ==========================================
                 # ملفات التحميل (Excel)
@@ -2255,7 +2283,15 @@ if page == "الوعود القائمة و المكسورة":
                     broken.to_excel(writer, index=False)
                 output_broken.seek(0)
 
-                dl_col1, dl_col2 = st.columns(2)
+                is_snb = portfolio_type == "SNB" and nodate is not None
+                if is_snb:
+                    output_nodate = BytesIO()
+                    with pd.ExcelWriter(output_nodate, engine="openpyxl") as writer:
+                        nodate.to_excel(writer, index=False)
+                    output_nodate.seek(0)
+                    dl_col1, dl_col2, dl_col3 = st.columns(3)
+                else:
+                    dl_col1, dl_col2 = st.columns(2)
                 with dl_col1:
                     st.download_button(
                         "📥 تحميل الوعود القائمة", data=output_current,
@@ -2270,6 +2306,14 @@ if page == "الوعود القائمة و المكسورة":
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
+                if is_snb:
+                    with dl_col3:
+                        st.download_button(
+                            "📥 تحميل وعود ليس لديها تاريخ وعد", data=output_nodate,
+                            file_name="وعود_ليس_لديها_تاريخ_وعد.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
 
                 # ============================================================
                 # داشبورد الوعود
@@ -2318,6 +2362,7 @@ if page == "الوعود القائمة و المكسورة":
 
                 current_f = apply_dashboard_filters(current)
                 broken_f = apply_dashboard_filters(broken)
+                nodate_f = apply_dashboard_filters(nodate) if is_snb else None
 
                 def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
                     base_cols = ["مبلغ المديونية", "عدد الحسابات"]
@@ -2400,9 +2445,11 @@ if page == "الوعود القائمة و المكسورة":
 
                     return d.style.apply(highlight_rows, axis=1).format(fmt)
 
-                tab_current, tab_broken, tab_days, tab_raw = st.tabs([
-                    "📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"
-                ])
+                tab_names = ["📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"]
+                if is_snb:
+                    tab_names.append("📄 بدون تاريخ وعد")
+                tabs = st.tabs(tab_names)
+                tab_current, tab_broken, tab_days, tab_raw = tabs[:4]
 
                 with tab_current:
                     current_summary = build_pivot_style(current_f)
@@ -2437,6 +2484,16 @@ if page == "الوعود القائمة و المكسورة":
                     st.dataframe(current_f, use_container_width=True, hide_index=True)
                     st.markdown("#### 🗂️ الوعود المكسورة")
                     st.dataframe(broken_f, use_container_width=True, hide_index=True)
+
+                if is_snb:
+                    with tabs[4]:
+                        nodate_summary = build_pivot_style(nodate_f)
+                        if nodate_summary.empty:
+                            st.markdown('<div class="empty-state">لا توجد بيانات مطابقة لهذا الفلتر</div>', unsafe_allow_html=True)
+                        else:
+                            st.dataframe(style_summary(nodate_summary), use_container_width=True, hide_index=True)
+                            st.markdown("#### 🗂️ أصل البيانات")
+                            st.dataframe(nodate_f, use_container_width=True, hide_index=True)
 
                 # ---------------------------
                 # الشارتات
