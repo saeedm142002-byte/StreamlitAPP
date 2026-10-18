@@ -2166,7 +2166,16 @@ if page == "الوعود القائمة و المكسورة":
         paid_ids = set(portfolio.loc[paid_mask, "رقم الهوية"].dropna().unique())
         nodate = nodate[~nodate["رقم الهوية"].isin(paid_ids)]
 
-        return current.reset_index(drop=True), broken.reset_index(drop=True), nodate.reset_index(drop=True)
+        # ---------------- تقرير مطالبات لم يتم متابعتها منذ النقل ----------------
+        # عمود جنب الحالة الرئيسية: لو الحالة مش فاضية → تم المتابعة، لو فاضية → لم يتم المتابعة
+        followup = portfolio.copy()
+        followup_flag = followup["الحالة الرئيسية"].notna().map({True: "تم المتابعة", False: "لم يتم المتابعة"})
+        followup.insert(followup.columns.get_loc("الحالة الرئيسية") + 1, "حالة المتابعة", followup_flag)
+
+        return (
+            current.reset_index(drop=True), broken.reset_index(drop=True),
+            nodate.reset_index(drop=True), followup.reset_index(drop=True)
+        )
     # --- SNB_FUNCS_END ---
 
     files_ready = bool(portfolio_file) and (portfolio_type != "SNB" or bool(promises_file))
@@ -2244,12 +2253,13 @@ if page == "الوعود القائمة و المكسورة":
                     current, broken = process_portfolio(
                         df_raw, portfolio_type, excluded_teams, excluded_salespersons, excluded_status
                     )
-                    nodate = None
+                    nodate, followup = None, None
                 else:
-                    current, broken, nodate = process_snb(snb_portfolio, snb_promises)
+                    current, broken, nodate, followup = process_snb(snb_portfolio, snb_promises)
                 st.session_state["promises_current"] = current
                 st.session_state["promises_broken"] = broken
                 st.session_state["promises_nodate"] = nodate
+                st.session_state["promises_followup"] = followup
                 st.session_state["promises_signature"] = current_signature
 
             has_results = "promises_current" in st.session_state
@@ -2269,6 +2279,7 @@ if page == "الوعود القائمة و المكسورة":
                 current = st.session_state["promises_current"]
                 broken = st.session_state["promises_broken"]
                 nodate = st.session_state.get("promises_nodate")
+                followup = st.session_state.get("promises_followup")
 
                 # ==========================================
                 # ملفات التحميل (Excel)
@@ -2289,7 +2300,12 @@ if page == "الوعود القائمة و المكسورة":
                     with pd.ExcelWriter(output_nodate, engine="openpyxl") as writer:
                         nodate.to_excel(writer, index=False)
                     output_nodate.seek(0)
-                    dl_col1, dl_col2, dl_col3 = st.columns(3)
+
+                    output_followup = BytesIO()
+                    with pd.ExcelWriter(output_followup, engine="openpyxl") as writer:
+                        followup.to_excel(writer, index=False)
+                    output_followup.seek(0)
+                    dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
                 else:
                     dl_col1, dl_col2 = st.columns(2)
                 with dl_col1:
@@ -2311,6 +2327,13 @@ if page == "الوعود القائمة و المكسورة":
                         st.download_button(
                             "📥 تحميل وعود ليس لديها تاريخ وعد", data=output_nodate,
                             file_name="وعود_ليس_لديها_تاريخ_وعد.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    with dl_col4:
+                        st.download_button(
+                            "📥 تحميل مطالبات لم يتم متابعتها منذ النقل", data=output_followup,
+                            file_name="مطالبات_لم_يتم_متابعتها_منذ_النقل.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
@@ -2363,6 +2386,7 @@ if page == "الوعود القائمة و المكسورة":
                 current_f = apply_dashboard_filters(current)
                 broken_f = apply_dashboard_filters(broken)
                 nodate_f = apply_dashboard_filters(nodate) if is_snb else None
+                followup_f = apply_dashboard_filters(followup) if is_snb else None
 
                 def build_pivot_style(d, extra_col=None, extra_label=None, extra_agg="sum"):
                     base_cols = ["مبلغ المديونية", "عدد الحسابات"]
@@ -2447,7 +2471,7 @@ if page == "الوعود القائمة و المكسورة":
 
                 tab_names = ["📄 الوعود القائمة", "📄 الوعود المكسورة", "📄 أيام الترحيل", "🗂️ أصل البيانات"]
                 if is_snb:
-                    tab_names.append("📄 بدون تاريخ وعد")
+                    tab_names += ["📄 بدون تاريخ وعد", "📄 لم يتم متابعتها منذ النقل"]
                 tabs = st.tabs(tab_names)
                 tab_current, tab_broken, tab_days, tab_raw = tabs[:4]
 
@@ -2494,6 +2518,15 @@ if page == "الوعود القائمة و المكسورة":
                             st.dataframe(style_summary(nodate_summary), use_container_width=True, hide_index=True)
                             st.markdown("#### 🗂️ أصل البيانات")
                             st.dataframe(nodate_f, use_container_width=True, hide_index=True)
+
+                    with tabs[5]:
+                        n_done = int((followup_f["حالة المتابعة"] == "تم المتابعة").sum())
+                        n_not = int((followup_f["حالة المتابعة"] == "لم يتم المتابعة").sum())
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("إجمالي المطالبات", f"{len(followup_f):,}")
+                        m2.metric("تم المتابعة", f"{n_done:,}")
+                        m3.metric("لم يتم المتابعة", f"{n_not:,}")
+                        st.dataframe(followup_f, use_container_width=True, hide_index=True)
 
                 # ---------------------------
                 # الشارتات
